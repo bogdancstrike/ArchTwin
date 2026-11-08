@@ -1,38 +1,60 @@
-# Design: Discovery and connected data
+# Design: Discovery and connected evidence
 
 ## Context
-ArchTwin requires an architect-first, secure, evidence-driven workflow. This increment implements the requirements in its `specs/` folder. The target platform architecture is in `docs/architecture/SOLUTION_ARCHITECTURE.md`, source-of-truth data semantics in `docs/architecture/DATA_MODEL.md`, and security constraints in `docs/security/THREAT_MODEL.md`.
+Implements `specs/` of this change on top of phase 01. Contracts: `docs/connectors/CONNECTOR_CONTRACT.md`, provider plan: `docs/connectors/CONNECTOR_MATRIX.md`, data model: `docs/architecture/DATA_MODEL.md`.
+
+## Goals / Non-goals
+- **Goals:** a small, well-tested connector SDK; P1 adapters (GitHub, GitLab, Kubernetes, PostgreSQL, Kafka, OpenAPI URL, file upload); read-only Jira/Taiga basics; immutable observations with provenance and freshness.
+- **Non-goals:** write-back, cloud provider inventories, perfect call-graph analysis, a generic ETL framework.
+
+## Pipeline
+```
+trigger (webhook | K8s watch | Temporal Schedule poll | manual)
+  → Temporal workflow (per connector, per project; activity re-checks flag + entitlement)
+  → adapter.fetch()   bounded, paginated, rate-limited, via egress guard
+  → raw artifact → object store (sha256 key) + source_artifacts row
+  → adapter.normalize(raw, mapping_version) → Observation[]   (pure function, unit-testable)
+  → observations INSERT (append-only, idempotent on natural key) + outbox `inventory.changed`
+  → cursor/checkpoint committed AFTER durable storage
+```
 
 ## Decisions
-- Build with Python 3.12+/FastAPI asyncio modules, PostgreSQL canonical state and scoped background workers; UI is React/Vite/shadcn/ui.
-- All modules execute under identity/project scopes, gated by typed feature flags; protected operations always require Cerbos authorization.
-- Source observations are immutable and independently distinguish desired, planned, code-derived, runtime and inferred evidence.
-- All AI calls use LiteLLM → OpenAI in iteration one, with Langfuse tracing; no direct OpenAI SDK outside gateway. Support future on-prem endpoints by model alias, not by provider-specific business logic.
 
-## Implementation design
+| # | Decision | Adopted OSS | Notes / rejected alternatives |
+|---|---|---|---|
+| D1 | Connector SDK = small Python `Protocol` (`test`, `discover`, `normalize`, `verify_event`, `health`) + manifest (capabilities, scopes, egress hosts, data classes, versions) | — | Airbyte/Meltano/Singer evaluated: they move *rows* into warehouses, not architecture metadata with provenance; too heavy for this purpose |
+| D2 | Every sync is a Temporal workflow; schedules use Temporal Schedules | Temporal | Gives retries, timeouts, heartbeats, cancellation and visibility; no custom scheduler |
+| D3 | GitHub via GitHub App installation (fine-grained, read-only) | githubkit (async, typed) | PATs allowed only for dev |
+| D4 | GitLab via OAuth app / project access token | python-gitlab | — |
+| D5 | Code extraction runs on a **shallow clone in an ephemeral sandbox** (no network, CPU/time limits) | git CLI, tree-sitter, Syft | Syft produces a CycloneDX SBOM → library dependencies for free. Framework detectors (Spring, FastAPI, Express, Kafka clients, JDBC/SQLAlchemy URLs) are tree-sitter queries versioned as `parser_version`. Existing OpenAPI/AsyncAPI files, `catalog-info.yaml` (Backstage), Dockerfiles, Helm charts and CODEOWNERS are parsed directly — they are the highest-confidence static evidence |
+| D6 | Kubernetes: list + watch with `resourceVersion`; relist on 410 Gone | kubernetes_asyncio | Read-only ClusterRole template shipped in `deploy/kubernetes/archtwin-reader.yaml` |
+| D7 | Runtime call edges come from **OpenTelemetry service-graph metrics** (`traces_service_graph_request_total{client,server}`) via the Prometheus HTTP API, or Jaeger/Tempo dependency APIs | OTel Collector `servicegraph` connector, Prometheus | Reuses what platform teams already run; no eBPF/agent of our own |
+| D8 | Databases: catalog-only reflection in a read-only transaction | SQLAlchemy `inspect()` per dialect | Never `SELECT` from user tables; excess privilege is reported |
+| D9 | Kafka: metadata only (topics, partitions, consumer groups, offsets lag) + Schema Registry subjects | confluent-kafka AdminClient, schema registry client | Never consume payloads |
+| D10 | Documents: upload → magic-byte type check → size/decompression limits → optional ClamAV → Docling in an isolated container → passages with page provenance | Docling, python-magic, ClamAV | Same isolation pattern as Horizon's `deploy/docling` |
+| D11 | Webhook ingress: provider signature verification (HMAC/JWT), replay window, `(connector_id, delivery_id)` dedupe, then enqueue | — | Raw body stored only after verification |
+| D12 | Egress guard for all connector HTTP: allowlisted hosts from manifest + org policy, DNS resolution pinned per request, redirect re-validation, deny RFC1918/link-local/loopback unless explicitly allowed for on-prem targets | httpx transport hook | Same approach as Horizon's SSRF-guarded fetcher |
+| D13 | Identity reconciliation static ↔ runtime: deterministic keys first (image name ↔ repo, `app.kubernetes.io/name` ↔ service name, Backstage annotations), then a **reviewable** suggestion queue; never auto-merge ambiguous matches | — | Spike S3 measures match rate on the fixture |
+| D14 | Freshness: each connector declares a freshness SLA; observations older than it are `stale`; partial/failed scans mark coverage `incomplete` | — | Basis for UNKNOWN semantics in drift and AI |
 
-## Architecture
-Provider adapter -> bounded fetch -> immutable raw object -> normalization -> source observation -> canonical identity reconciliation -> outbox `inventory.changed`. Implement webhook ingress with signature verification and provider-scoped deduplication. Polling and full reconcile handle missed events.
+## Observation contract
+See `docs/connectors/CONNECTOR_CONTRACT.md`. Natural idempotency key: `(connector_id, resource_kind, provider_resource_id, provider_revision)`. Older revisions never overwrite newer canonical state.
 
-## Supported P1
-GitHub, GitLab, Kubernetes, PostgreSQL and Kafka metadata, HTTP OpenAPI, Docling file uploads. Taiga/Jira read-only work sync is important for phase 05; implement basic adapters here behind independent flags. Docker Swarm optional P2, then cloud/other DB families. Never use personal admin credentials for discovery.
+## Threat controls
+Least-privilege scope display before activation; secrets via phase-01 envelope encryption; egress guard; sandboxed parsers; untrusted text labelled `untrusted_source_text` for later AI; canary-secret scan; webhook signature tests.
 
-## Extraction strategies
-Source language analyzers use Tree-sitter and framework-specific parsers (Spring annotations, FastAPI routes, configs) as confidence-ranked plugins; avoid claiming complete program analysis. Match static to runtime through declared mappings, labels, names and repository metadata; ambiguous matches are reviewable. For Kafka producers inference, preserve uncertainty.
+## Risks / trade-offs
+| Risk | Mitigation |
+|---|---|
+| Static extraction accuracy too low to be useful | Prioritize declared artifacts (OpenAPI, AsyncAPI, Helm, catalog-info) over inference; measure precision/recall on fixture repos (spike S2); show confidence |
+| Connector breadth explodes scope | Only P1 adapters in this phase; others need a measured request |
+| Provider API rate limits | Per-provider token buckets in Valkey; conditional requests (ETag); incremental sync |
+| Large repos make scans slow | Shallow clone, path filters, incremental by changed files, time budget per scan |
+| Docling resource spikes | Separate container with limits and queue concurrency 1–2 |
 
-## Data contracts
-Stable source key, provider revision, content hash, mapping version, captured timestamp, parsed evidence path/line, validity and confidence. Do not discard conflicting observations. Per-source freshness budget determines whether absence is meaningful.
+## Rollback
+Disable the provider flag; workflows stop at the next activity; observations stay (stale). Mapping versions allow re-normalizing raw artifacts after a fix without re-fetching.
 
-## Hard failures
-Provider 429 / cursor invalid / lost hook / token revoked / DNS SSRF / malicious doc / partial pagination / language parser crash / reconciliation while webhook arrives. All retries bounded and idempotent.
-
-
-## Interfaces and persistence
-- Changes flow through authoritative FastAPI service methods and PostgreSQL transactional outbox; async workers are idempotent.
-- Public API contracts live in `docs/api/`; provider contracts in `docs/connectors/`; feature flags in `docs/feature-flags/`.
-- No cross-tenant/project read, cache, vector result or AI context is permitted without current authorization and explicit federation grant where required.
-
-## Testing and rollout
-- Implement every Given/When/Then scenario in this phase and deliberate denial/failure tests.
-- Keep write-back disabled until separately reviewed; use pilot-specific flags and observe metrics.
-- Reconcile or revert via flags and explicit rollback after an error; retain immutable history and audit logs.
+## Open questions
+- Which languages beyond Java/Python/TypeScript for the first pilot? Decide from design-partner repos (M0).
+- Is Docker Swarm needed for the first pilot? Default: P2, implement only on demand.

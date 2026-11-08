@@ -1,31 +1,41 @@
-# Implementation tasks
+# Implementation tasks — phase-03-architecture
 
-Change: **phase-03-architecture**. All items start unchecked. Trace them to code and test evidence.
+Legend: **[MVP]** required for M1 · **[Later]** may slip. Check a task only with merged code and green tests.
 
-## Domain implementation
-- [ ] 1.1 Define data contracts, permissions, idempotency and API surface for **architecture-graph**.
-- [ ] 1.2 Implement the vertical slice for **architecture-graph** behind flag `architecture_graph` or its catalog-defined equivalent.
-- [ ] 1.3 Add positive/negative scenarios, tenant isolation and failure-injection tests for **architecture-graph**.
-- [ ] 1.4 Add feature/operator documentation, metrics, and a rollback exercise for **architecture-graph**.
-- [ ] 2.1 Define data contracts, permissions, idempotency and API surface for **diagram-studio**.
-- [ ] 2.2 Implement the vertical slice for **diagram-studio** behind flag `diagram_studio` or its catalog-defined equivalent.
-- [ ] 2.3 Add positive/negative scenarios, tenant isolation and failure-injection tests for **diagram-studio**.
-- [ ] 2.4 Add feature/operator documentation, metrics, and a rollback exercise for **diagram-studio**.
-- [ ] 3.1 Define data contracts, permissions, idempotency and API surface for **documentation-engine**.
-- [ ] 3.2 Implement the vertical slice for **documentation-engine** behind flag `documentation_engine` or its catalog-defined equivalent.
-- [ ] 3.3 Add positive/negative scenarios, tenant isolation and failure-injection tests for **documentation-engine**.
-- [ ] 3.4 Add feature/operator documentation, metrics, and a rollback exercise for **documentation-engine**.
-- [ ] 4.1 Define data contracts, permissions, idempotency and API surface for **adr-workflow**.
-- [ ] 4.2 Implement the vertical slice for **adr-workflow** behind flag `adr_workflow` or its catalog-defined equivalent.
-- [ ] 4.3 Add positive/negative scenarios, tenant isolation and failure-injection tests for **adr-workflow**.
-- [ ] 4.4 Add feature/operator documentation, metrics, and a rollback exercise for **adr-workflow**.
-- [ ] 5.1 Define data contracts, permissions, idempotency and API surface for **architecture-reviews**.
-- [ ] 5.2 Implement the vertical slice for **architecture-reviews** behind flag `architecture_reviews` or its catalog-defined equivalent.
-- [ ] 5.3 Add positive/negative scenarios, tenant isolation and failure-injection tests for **architecture-reviews**.
-- [ ] 5.4 Add feature/operator documentation, metrics, and a rollback exercise for **architecture-reviews**.
+## 1. Architecture graph — AT-ARCHITECTURE_GRAPH-001..003
+- [ ] 1.1 [MVP] Node/edge tables with temporal validity, origin, confidence, evidence links, composite FKs; RLS.
+- [ ] 1.2 [MVP] Deterministic graph builder (pure function + Temporal workflow, debounced on `inventory.changed`); golden tests on fixture observations.
+- [ ] 1.3 [MVP] Identity reconciliation on authoritative keys + suggestion queue + merge/split commands (audited).
+- [ ] 1.4 [MVP] Snapshots with manifest hash; `GET architecture?at=` time travel; snapshot diff API.
+- [ ] 1.5 [MVP] Curated overlay + baseline approval (Cerbos: author ≠ approver); scans cannot mutate baselines (test).
 
-## Phase exit gates
-- [ ] X.1 Review security and threats; verify default-deny policies and data minimization.
-- [ ] X.2 Measure latency, budgets, and freshness against the phase-specific SLOs.
-- [ ] X.3 Demonstrate project A/B isolation, auditability and reproducible evidence.
-- [ ] X.4 Enable for a pilot project only; confirm rollback works.
+## 2. Diagram studio — AT-DIAGRAM_STUDIO-001..004
+- [ ] 2.1 [MVP] C4 context + container views from view definitions; React Flow canvas; elkjs layout in a Web Worker.
+- [ ] 2.2 [MVP] Layout persistence with overrides; regenerate keeps overrides; explicit reset.
+- [ ] 2.3 [MVP] Evidence side panel on every node/edge (source, revision, observed_at, confidence, freshness).
+- [ ] 2.4 [MVP] Snapshot comparison view (added/removed/changed highlighting).
+- [ ] 2.5 [MVP] Mermaid + Structurizr DSL export with escaping tests (XSS corpus).
+- [ ] 2.6 [Later] Structurizr DSL import via sandboxed Structurizr CLI + mapping review.
+- [ ] 2.7 [Later] Deployment, data-flow, event-flow, sequence views; component level.
+- [ ] 2.8 [MVP] Accessible table view; keyboard navigation; 2k-element performance check (spike S4 numbers).
+
+## 3. ADR workflow — AT-ADR_WORKFLOW-001..003
+- [ ] 3.1 [MVP] MADR-based ADR model, states proposed/accepted/rejected/superseded, immutable accepted versions.
+- [ ] 3.2 [MVP] Links to nodes/edges/requirements; independent approval policy in Cerbos.
+- [ ] 3.3 [Later] ADR conformance hints (decision vs observed edges) — full version arrives with drift (phase 04).
+
+## 4. Documentation engine — AT-DOCUMENTATION_ENGINE-001..003
+- [ ] 4.1 [MVP] Jinja2 templates: system overview, container catalog, interface catalog; every generated sentence carries evidence IDs; coverage report.
+- [ ] 4.2 [MVP] Regeneration produces a reviewable diff; hand-edited sections protected.
+- [ ] 4.3 [MVP] Markdown export with permission filtering.
+- [ ] 4.4 [Later] PDF (WeasyPrint) and DOCX (Pandoc) in isolated containers; Git PR publish behind `docs.git_pr_publish`.
+
+## 5. Architecture reviews — AT-ARCHITECTURE_REVIEWS-001..003
+- [ ] 5.1 [Later] YAML checklist packs (reliability, security first) with Python predicates; automated vs manual results; "not evaluated" when inputs are missing.
+- [ ] 5.2 [Later] Risk register with owner, evidence, expiry of acceptance.
+
+## X. Phase exit gates
+- [ ] X.1 Fixture demo: generated C4 container diagram, evidence on every element, manual layout survives regeneration, diff between two commits.
+- [ ] X.2 XSS/export-leak suites green; baseline immutability tests green.
+- [ ] X.3 Graph query p95 and diagram render time recorded against `docs/acceptance/NFR_SLOS.md`.
+- [ ] X.4 Design-partner usability session held; findings recorded (go/no-go input for M1).
