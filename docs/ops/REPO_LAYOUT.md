@@ -26,11 +26,17 @@ archtwin/
   packages/
     connector_sdk/                # adapter protocol, conformance test fixtures
     model_contracts/              # JSON Schema/OpenAPI generated contracts
+    diagram-design-system/        # vendored diagram-design references (MIT) + tokens, type router,
+                                  # node treatments, orthogonal router post-processor, linter
+  fixtures/                       # OpenTelemetry Demo on kind, mirrored repos, ground-truth.yaml
   deploy/
     compose/
     kubernetes/
     keycloak/
     cerbos/
+    temporal/
+    docling/
+    helm/
     litellm/
     observability/
   tests/

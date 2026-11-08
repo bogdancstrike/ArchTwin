@@ -1,5 +1,7 @@
 # Delivery roadmap — build the vertical value, not all 38 modules at once
 
+> Sequencing, spikes, risk register and rollback playbook: see [`docs/IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md). This page keeps phase effort ranges and the economic validation milestones.
+
 All durations below are **planning ranges for one strong engineer assisted by AI**, not delivery commitments. Security and stabilization can increase effort substantially. Start with a 5–10 service project and a controlled Kubernetes/Swarm environment.
 
 | Phase | Increment / target | Indicative effort | Exit demonstration |
@@ -22,7 +24,7 @@ All durations below are **planning ranges for one strong engineer assisted by AI
 
 ### M1 — Compelling local proof of value (subset of phases 01–03)
 - Create project, connect GitHub/GitLab and one K8s or Swarm environment, discover 5–10 services and database/topic edges.
-- Render C4 container diagram + evidence inspector, compare two commits, export Markdown/Structurizr.
+- Render C4 container diagram (diagram-design system) + evidence inspector, zoom from system context into containers, compare two commits, export Markdown/Structurizr.
 - Prove a stable system model for one pilot before building AI.
 
 ### M2 — Repeatable drift value (phases 04–05)

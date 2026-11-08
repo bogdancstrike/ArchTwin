@@ -1,7 +1,25 @@
 # Solution Architecture — ArchTwin
 
 ## 1. Logical architecture
-A **modular monolith** owns all authoritative business transactions in a single FastAPI API process; specialized asyncio worker processes and Temporal workflows run expensive/asynchronous work. PostgreSQL is the system of record. The architecture graph is initially canonical relational data + edge tables + JSONB snapshots; Neo4j and Qdrant are **optional projections** powered by the outbox, never competing authorities.
+A **modular monolith** ([ADR-0001](adr/0001-modular-monolith-first.md)) owns all authoritative business transactions in a single FastAPI API process; **Temporal** workers built from the same image run every durable/asynchronous job ([ADR-0007](adr/0007-temporal-for-all-durable-work.md)). Isolated containers exist only where isolation is the point: Docling, export renderers, sandboxed code analysis and (phase 07) plugins. PostgreSQL is the system of record. The architecture graph is initially canonical relational data + edge tables + JSONB snapshots; Neo4j and Qdrant are **optional projections** powered by the outbox, never competing authorities ([ADR-0002](adr/0002-postgresql-canonical-store-and-outbox.md)). Technology choices and rejected alternatives: [`docs/TECHNOLOGIES.md`](../TECHNOLOGIES.md).
+
+### Container view
+```mermaid
+flowchart LR
+  user([Architect / engineer]) --> web[Web UI<br/>React + React Flow]
+  web --> api[API<br/>FastAPI modular monolith]
+  api --> kc[Keycloak<br/>OIDC]
+  api --> cerbos[Cerbos<br/>PDP]
+  api --> pg[(PostgreSQL<br/>graph · evidence · audit · outbox)]
+  api --> temporal[Temporal]
+  temporal --> worker[Workers<br/>connectors · graph · drift · AI]
+  worker --> pg
+  worker --> s3[(S3-compatible<br/>raw artifacts)]
+  worker --> docling[Docling<br/>isolated]
+  worker --> litellm[LiteLLM] --> openai[(OpenAI)]
+  litellm --> langfuse[Langfuse]
+  worker -->|read-only| sources[(GitHub · GitLab · K8s · Postgres · Kafka · OTel · Jira/Taiga)]
+```
 
 ### Logical components
 | Domain | Ownership | Inbound/outbound contract |
@@ -24,12 +42,12 @@ A **modular monolith** owns all authoritative business transactions in a single 
 - **UI**: static React/Vite bundle served by Nginx/Ingress with OIDC PKCE, short-lived tokens, CSP.
 - **API**: multiple FastAPI/Uvicorn replicas behind ingress; no session state in process.
 - **Workers**: asyncio connector scanners, parser workers, indexers, temporal activity workers. Queue concurrency bounded by org/project/provider.
-- **Temporal**: durable scan/reconciliation and approval workflows. In early MVP, a PostgreSQL outbox worker may be sufficient for small workloads; Temporal is adopted for retries, long-running workflows and human waits.
+- **Temporal**: the single runtime for durable work — scans, reconciliation, schedules (Temporal Schedules), digests, approvals and deletions. Runs on the same PostgreSQL in development. The PostgreSQL outbox relay hands domain events to Temporal workflows or in-process handlers.
 - **PostgreSQL HA**: schemas for identity metadata, projects, source observations, architecture graph, plans, docs, drift, audit and outbox.
-- **Redis**: transient dedupe, rate limiting, cached flag revisions and bounded queues. Redis is NOT authoritative for evidence or permissions.
-- **S3/MinIO**: immutable source files and normalized parses; store per-org/project object references and checksums.
+- **Valkey** (Redis-compatible, BSD): transient dedupe, rate limiting and cached flag revisions. Valkey is NOT authoritative for evidence or permissions.
+- **S3-compatible object store** (SeaweedFS in Compose; any S3 in production): immutable source files and normalized parses; per-org/project prefixes, references and checksums.
 - **Keycloak + Cerbos**: OIDC IDP and independent policy decision point; denial on PDP unavailable for sensitive operations.
-- **LiteLLM**: the only upstream model egress; initial OpenAI aliases and optional later vLLM deployments; **Langfuse** receives trace/cost metadata with redaction settings.
+- **LiteLLM**: the only upstream model egress; user-selectable `gpt-6-luna` (default), `gpt-6-terra`, `gpt-6-sol`, fallback `gpt-5.6-luna`, embeddings `text-embedding-3-large`, optional later vLLM deployments ([ADR-0005](adr/0005-litellm-langfuse-selectable-models.md)); **Langfuse** receives trace/cost metadata with redaction settings.
 - **Optional projections**: Neo4j for deep graph traversal and Qdrant for semantic retrieval, both fully rebuildable from PostgreSQL evidence.
 
 ## 2. Architectural states — never merge these accidentally
@@ -66,15 +84,27 @@ See `docs/architecture/DATA_MODEL.md`. Use canonical typed nodes/edges with iden
 ## 6. Security boundaries
 Browser -> API has OIDC/JWT checks. API -> Cerbos is internal mTLS in production. API -> source adapter carries a signed *task context*, not browser raw credentials. Worker -> LiteLLM scoped internal key. External connector responses are untrusted. Langfuse telemetry must not leak raw private documents by default. See `docs/security/THREAT_MODEL.md`.
 
-## 7. Major architectural decisions
-- ADR-0001: modular monolith first.
-- ADR-0002: PostgreSQL canonical architecture graph with rebuildable projections.
-- ADR-0003: three-way drift and evidence model.
-- ADR-0004: Keycloak + Cerbos and explicit project federation.
-- ADR-0005: LiteLLM + Langfuse, OpenAI first, local inference later.
-- ADR-0006: provider connectors default read-only, write-back only with approval.
+## 7. Diagrams and visualization
+- One canonical graph feeds every view (C4 context/container/component, landscape, deployment, data/event flow, sequence).
+- All platform-generated diagrams use the editorial **diagram-design** system (MIT): org-skinnable tokens, visual-type routing, ≤2 focal accents, ≤9 primary nodes per view (overview + detail beyond that), orthogonal connectors — enforced by a linter before publish/export ([ADR-0009](adr/0009-diagram-design-system-and-c4-zoom.md)).
+- The interactive studio (React Flow + elkjs) uses the same tokens, so what you edit is what you export.
+- **C4 zoom navigation:** users zoom from the system context (L1) into a system's containers (L2) and a container's components (L3) with an animated shared-element transition, breadcrumbs and URL state; reduced-motion users get an instant cross-fade.
+- Mermaid and Structurizr DSL are interchange formats (import/export), not the platform renderer.
 
-## 8. Failure cases
+## 8. Major architectural decisions
+See [`adr/`](adr/README.md):
+- [ADR-0001](adr/0001-modular-monolith-first.md) modular monolith first.
+- [ADR-0002](adr/0002-postgresql-canonical-store-and-outbox.md) PostgreSQL canonical store and outbox; projections rebuildable.
+- [ADR-0003](adr/0003-three-way-evidence-model.md) three-way evidence model with UNKNOWN semantics.
+- [ADR-0004](adr/0004-keycloak-cerbos-and-federation.md) Keycloak + Cerbos and explicit federation.
+- [ADR-0005](adr/0005-litellm-langfuse-selectable-models.md) LiteLLM + Langfuse, user-selectable models.
+- [ADR-0006](adr/0006-read-only-connectors.md) read-only connectors, approved write-back.
+- [ADR-0007](adr/0007-temporal-for-all-durable-work.md) Temporal for durable work.
+- [ADR-0008](adr/0008-openfeature-flags.md) OpenFeature flags; core not flaggable.
+- [ADR-0009](adr/0009-diagram-design-system-and-c4-zoom.md) diagram-design system and C4 zoom.
+- [ADR-0010](adr/0010-adopt-open-source-before-building.md) adopt open source before building.
+
+## 9. Failure cases
 | Failure | Expected behavior |
 |---|---|
 | GitLab/Jira/cluster unavailable | preserve last verified observation; mark stale; continue other projects |
