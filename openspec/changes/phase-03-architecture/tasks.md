@@ -9,7 +9,7 @@ Legend: **[MVP]** required for M1 · **[Later]** may slip. Check a task only wit
 - [ ] 1.4 [MVP] Snapshots with manifest hash; `GET architecture?at=` time travel; snapshot diff API.
 - [ ] 1.5 [MVP] Curated overlay + baseline approval (Cerbos: author ≠ approver); scans cannot mutate baselines (test).
 
-## 2. Diagram studio — AT-DIAGRAM_STUDIO-001..004
+## 2. Diagram studio — AT-DIAGRAM_STUDIO-001..006
 - [ ] 2.1 [MVP] C4 context + container views from view definitions; React Flow canvas; elkjs layout in a Web Worker.
 - [ ] 2.2 [MVP] Layout persistence with overrides; regenerate keeps overrides; explicit reset.
 - [ ] 2.3 [MVP] Evidence side panel on every node/edge (source, revision, observed_at, confidence, freshness).
@@ -17,6 +17,10 @@ Legend: **[MVP]** required for M1 · **[Later]** may slip. Check a task only wit
 - [ ] 2.5 [MVP] Mermaid + Structurizr DSL export with escaping tests (XSS corpus).
 - [ ] 2.6 [Later] Structurizr DSL import via sandboxed Structurizr CLI + mapping review.
 - [ ] 2.7 [Later] Deployment, data-flow, event-flow, sequence views; component level.
+- [ ] 2.9 [MVP] `packages/diagram-design-system`: vendor diagram-design references (MIT, attribution in THIRD_PARTY_NOTICES), token schema + default skin, node treatments, type router for Architecture/Deployment/Dependency views — AT-DIAGRAM_STUDIO-005.
+- [ ] 2.10 [MVP] Orthogonal routing (elkjs ORTHOGONAL + port fanning) + post-processor (rounded bends, label masks with 6–10 px gap, hop bridges); focal selector; >9-node overview/detail split.
+- [ ] 2.11 [MVP] Diagram linter (six connector rules + anti-pattern checks; AT-DIAGRAM_STUDIO-006) at render/export time and in CI over golden fixture diagrams; standalone SVG/HTML export, PNG via headless Chromium.
+- [ ] 2.12 [Later] Org brand onboarding page (tokens from URL/manual, per the skill's onboarding flow); Sequence, ER/DB schema, Timeline, Gantt, Quadrant types.
 - [ ] 2.8 [MVP] Accessible table view; keyboard navigation; 2k-element performance check (spike S4 numbers).
 
 ## 3. ADR workflow — AT-ADR_WORKFLOW-001..003

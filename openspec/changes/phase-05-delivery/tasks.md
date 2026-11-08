@@ -1,27 +1,29 @@
-# Implementation tasks
+# Implementation tasks — phase-05-delivery
 
-Change: **phase-05-delivery**. All items start unchecked. Trace them to code and test evidence.
+Legend: **[MVP]** required for M2 · **[Later]** may slip. Check a task only with merged code and green tests.
 
-## Domain implementation
-- [ ] 1.1 Define data contracts, permissions, idempotency and API surface for **architecture-planning**.
-- [ ] 1.2 Implement the vertical slice for **architecture-planning** behind flag `architecture_planning` or its catalog-defined equivalent.
-- [ ] 1.3 Add positive/negative scenarios, tenant isolation and failure-injection tests for **architecture-planning**.
-- [ ] 1.4 Add feature/operator documentation, metrics, and a rollback exercise for **architecture-planning**.
-- [ ] 2.1 Define data contracts, permissions, idempotency and API surface for **issue-synchronization**.
-- [ ] 2.2 Implement the vertical slice for **issue-synchronization** behind flag `issue_synchronization` or its catalog-defined equivalent.
-- [ ] 2.3 Add positive/negative scenarios, tenant isolation and failure-injection tests for **issue-synchronization**.
-- [ ] 2.4 Add feature/operator documentation, metrics, and a rollback exercise for **issue-synchronization**.
-- [ ] 3.1 Define data contracts, permissions, idempotency and API surface for **implementation-traceability**.
-- [ ] 3.2 Implement the vertical slice for **implementation-traceability** behind flag `implementation_traceability` or its catalog-defined equivalent.
-- [ ] 3.3 Add positive/negative scenarios, tenant isolation and failure-injection tests for **implementation-traceability**.
-- [ ] 3.4 Add feature/operator documentation, metrics, and a rollback exercise for **implementation-traceability**.
-- [ ] 4.1 Define data contracts, permissions, idempotency and API surface for **release-gates**.
-- [ ] 4.2 Implement the vertical slice for **release-gates** behind flag `release_gates` or its catalog-defined equivalent.
-- [ ] 4.3 Add positive/negative scenarios, tenant isolation and failure-injection tests for **release-gates**.
-- [ ] 4.4 Add feature/operator documentation, metrics, and a rollback exercise for **release-gates**.
+## 1. Planning — AT-ARCHITECTURE_PLANNING-001..003
+- [ ] 1.1 [MVP] Initiative → milestone → change → work item hierarchy with owners/dates; planned elements shown distinctly in diagrams.
+- [ ] 1.2 [MVP] Change approval status linked to ADR versions; no implied approval.
+- [ ] 1.3 [Later] Strategic goals/capabilities layer; cost estimates.
 
-## Phase exit gates
-- [ ] X.1 Review security and threats; verify default-deny policies and data minimization.
-- [ ] X.2 Measure latency, budgets, and freshness against the phase-specific SLOs.
-- [ ] X.3 Demonstrate project A/B isolation, auditability and reproducible evidence.
-- [ ] X.4 Enable for a pilot project only; confirm rollback works.
+## 2. Issue synchronization — AT-ISSUE_SYNCHRONIZATION-001..003
+- [ ] 2.1 [MVP] Canonical work items from GitHub/GitLab issues; status mapping tables; unmapped status flag.
+- [ ] 2.2 [Later] Jira and Taiga sync (webhooks + polling) reusing phase-02 adapters.
+- [ ] 2.3 [MVP] Explicit link UI + deterministic issue-key detection in branches/PRs/commits.
+- [ ] 2.4 [Later] Write-back workflow: preview, approval signal, idempotency key, audit; per-provider flag.
+
+## 3. Implementation traceability — AT-IMPLEMENTATION_TRACEABILITY-001..003
+- [ ] 3.1 [MVP] Evidence chain builder (issue → PR/MR → commit → build → digest → workload → observed edge).
+- [ ] 3.2 [MVP] Stage computation incl. rolled-back detection; "unverified deployment" state.
+- [ ] 3.3 [Later] Plan-change impact: orphaned tasks, stale ADRs.
+
+## 4. Release gates — AT-RELEASE_GATES-001..003
+- [ ] 4.1 [MVP] `/gates/check` API + GitHub Action and GitLab CI template producing SARIF (report-only).
+- [ ] 4.2 [Later] cosign-signed results + verification step in CI templates.
+- [ ] 4.3 [Later] Opt-in blocking per project/environment with deterministic rules and explicit unknown policy.
+
+## X. Phase exit gates
+- [ ] X.1 Fixture demo: initiative → issue → PR → deploy → verified; Done-but-not-deployed shows unverified.
+- [ ] X.2 No remote write possible without flag + approval (security test).
+- [ ] X.3 SARIF visible in a GitHub PR on the fixture repo.

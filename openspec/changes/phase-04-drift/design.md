@@ -1,39 +1,52 @@
 # Design: Continuous drift and early-warning intelligence
 
 ## Context
-ArchTwin requires an architect-first, secure, evidence-driven workflow. This increment implements the requirements in its `specs/` folder. The target platform architecture is in `docs/architecture/SOLUTION_ARCHITECTURE.md`, source-of-truth data semantics in `docs/architecture/DATA_MODEL.md`, and security constraints in `docs/security/THREAT_MODEL.md`.
+Implements `specs/` of this change. ADR-0003 (three-way evidence model) applies. Sequence diagram: `docs/architecture/drift-and-ai-sequences.mmd`.
+
+## Goals / Non-goals
+- **Goals:** deterministic, reproducible drift; UNKNOWN/INCOMPLETE semantics; triage lifecycle; deduplicated notifications; measurable latency and false-positive rate.
+- **Non-goals:** AI-detected drift, auto-remediation, CI blocking (phase 05).
+
+## Evaluation model
+Input: `{baseline_snapshot?, static_snapshot, runtime_snapshot, environment, coverage(per connector), rule_set_version}`.
+Output: findings with stable identity `hash(rule_id, entity_keys, environment)` so re-evaluation of the same inputs is idempotent.
+
+**Truth table per element/edge** (simplified):
+
+| Desired | Static (code) | Runtime | Coverage | Result |
+|---|---|---|---|---|
+| present | present | present | complete | in sync |
+| present | absent | absent | complete | `missing` drift |
+| absent | present | present | complete | `unplanned` drift |
+| present | present | — | runtime stale | `unknown` (no alert) |
+| present | present | absent | runtime incomplete | `incomplete` (no alert) |
+| protocol A | protocol B | protocol B | complete | `protocol-changed` drift |
 
 ## Decisions
-- Build with Python 3.12+/FastAPI asyncio modules, PostgreSQL canonical state and scoped background workers; UI is React/Vite/shadcn/ui.
-- All modules execute under identity/project scopes, gated by typed feature flags; protected operations always require Cerbos authorization.
-- Source observations are immutable and independently distinguish desired, planned, code-derived, runtime and inferred evidence.
-- All AI calls use LiteLLM → OpenAI in iteration one, with Langfuse tracing; no direct OpenAI SDK outside gateway. Support future on-prem endpoints by model alias, not by provider-specific business logic.
 
-## Implementation design
+| # | Decision | Adopted OSS | Notes |
+|---|---|---|---|
+| D1 | Rules are versioned Python predicates registered in a rule catalog (id, version, severity defaults, required coverage) | — | A generic rules engine (Drools-style, OPA) adds indirection without benefit for graph comparisons; OPA stays an option for org policy packs later |
+| D2 | Evaluation runs in a Temporal workflow, debounced (e.g., 30–60 s) per project/environment, plus scheduled full reconcile | Temporal | Coalesces event bursts (10k webhooks → few evaluations) |
+| D3 | First scan after connecting is **observe-only**; no findings until a baseline exists or a second snapshot confirms state | — | Avoids day-one noise |
+| D4 | Grace windows for rollouts (configurable; default 10 min) and K8s UID recreation handling | — | — |
+| D5 | Priority score = explicit weighted factors (environment, criticality, exposure, magnitude, confidence); inferred-only evidence capped | — | Score explanation stored with finding |
+| D6 | Notifications via outbox → `DeliveryWorkflow` → **Apprise**; payloads contain a link + non-sensitive summary only | Apprise | No custom Slack/Teams/email integrations |
+| D7 | In-app live updates via SSE | sse-starlette | Same as Horizon |
+| D8 | KPIs as Prometheus metrics: event→finding latency (histogram), scan lag, connector freshness ratio, FP rate per rule; Grafana dashboard JSON committed | Prometheus, Grafana | — |
 
-## Three-way rule engine
-Input `{desired_snapshot, code_snapshot, runtime_snapshot, environment, authority_tiers, connector_freshness}`. Determine rule candidate only from verifiable facts: element missing/added, edge changed, protocol changed, contract incompatible, ownership/security boundary changed, unknown due to insufficient coverage. Stable rule ID + graph entity refs form drift identity.
+## Threat controls
+Authorization re-check at delivery time; minimal payloads; rate limits and digests; suppressions require reason, reviewer and expiry and are audited.
 
-## Alert pipeline
-Webhook/watch -> incremental snapshot update -> deterministic drift rules -> suppression check -> priority score -> auditable finding -> authorized SSE/email/webhook. Aggregation and debounce prevent floods. A full reconcile regularly guards against missed events.
+## Risks / trade-offs
+| Risk | Mitigation |
+|---|---|
+| False positives destroy trust | observe-only stage, coverage semantics, grace windows, FP tracking per rule, rule rollback by version |
+| Detection latency promises not met | Measure from provider event receipt; publish p50/p95; never promise real time |
+| Too many findings to triage | Grouping by root change (commit/deployment), digests, priority score |
 
-## False-positive controls
-- Source unavailable = UNKNOWN; no deletion alert.
-- Source with partial permissions = INCOMPLETE; do not assert complete topology.
-- First scan = observe only until baseline captured.
-- Dynamic/reflection paths have lower confidence; manual review before high-severity alerts.
-- Temporal grace windows for progressive deployments, recreate UIDs and phased rollouts.
+## Rollback
+Disable notifications (engine keeps evaluating) or the engine (UI banner "monitoring disabled"); revert a rule to a previous version; findings keep their rule version.
 
-## Measurement
-Define detection latency from provider event receipt (not real-world change time if provider doesn't signal). Report mean/p95, false-positive rate on labeled fixtures, alert volume by connector and freshness ratio. Never promise sub-second drift without real-time evidence.
-
-
-## Interfaces and persistence
-- Changes flow through authoritative FastAPI service methods and PostgreSQL transactional outbox; async workers are idempotent.
-- Public API contracts live in `docs/api/`; provider contracts in `docs/connectors/`; feature flags in `docs/feature-flags/`.
-- No cross-tenant/project read, cache, vector result or AI context is permitted without current authorization and explicit federation grant where required.
-
-## Testing and rollout
-- Implement every Given/When/Then scenario in this phase and deliberate denial/failure tests.
-- Keep write-back disabled until separately reviewed; use pilot-specific flags and observe metrics.
-- Reconcile or revert via flags and explicit rollback after an error; retain immutable history and audit logs.
+## Open questions
+- Default grace window and debounce per connector type — calibrate on fixture and first pilot.

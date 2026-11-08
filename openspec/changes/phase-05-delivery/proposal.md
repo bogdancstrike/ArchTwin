@@ -1,7 +1,9 @@
 # Proposal: Plans, task execution and delivery alignment
 
 ## Why
-ArchTwin is a greenfield, architect-first system. This change establishes a bounded, verifiable delivery increment, not a claim that functionality has already been implemented. Its capability deltas are the feature contracts for this increment.
+Architects lose track between "we decided" and "it is running". Issue trackers say *Done*; that is not proof of deployment. This phase links initiatives and ADRs to work items, commits, builds and observed deployments, and keeps the external tracker's status as a separate axis from verified implementation. It also adds report-only architecture checks for CI.
+
+Users affected: tech leads, architects, engineering managers.
 
 ## What Changes
 - Add **Roadmaps, plans and architecture increments** (`architecture-planning`).
@@ -9,16 +11,23 @@ ArchTwin is a greenfield, architect-first system. This change establishes a boun
 - Add **Implementation evidence and delivery tracking** (`implementation-traceability`).
 - Add **Architecture-aware release checks** (`release-gates`).
 
+## Impact
+- **Modules:** `planning`, `traceability`, `gates`.
+- **Tables:** initiatives, milestones, changes, work_items (canonical view of external issues), work_item_links (explicit, user-confirmed), status_mappings (versioned per connector), evidence_chain (issue → PR/MR → commit → build → image digest → workload), gate_results.
+- **APIs:** `/initiatives`, `/work-items/{id}:link`, `/requirements/{id}/trace`, `/gates/check` (CI), `/tasks/{id}:preview-remote-write`.
+- **Adopted OSS:** provider SDKs from phase 02, SARIF output (rendered natively by GitHub/GitLab), Sigstore **cosign** / in-toto attestations for signed results, GitHub Actions / GitLab CI templates.
+- **Flags:** `module.architecture-planning`, `module.issue-synchronization`, `module.implementation-traceability`, `module.release-gates`, `connectors.writeback.*`, `drift.blocking_ci`.
+
 ## Dependencies
-Complete phases 01–03 and work item connectors; drift signals optional.
+Phases 02 (work connectors) and 03 (graph, ADRs); phase 04 for drift-based gates.
+
+## Security risks
+Unauthorized remote writes, AI-created links treated as facts, forged CI results.
 
 ## Rollout and rollback
-- Feature flags for every module default OFF until its contract, permissions and tests pass. Foundation identity/auth/audit never bypassed by flag.
-- Introduce read-only integrations before write-back. Backfill and migration jobs are resumable and idempotent.
-- Rollback disables the affected module or connector, drains queued work, restores previous read paths, and preserves audit and immutable history.
-- No external infrastructure mutation occurs as part of this change without a separate approved action.
+Read-only sync first; links are explicit (user-confirmed). Gates start report-only (SARIF warnings). Write-back and blocking each need their own flag plus owner approval. Rollback = disable flags; no remote state is changed by this phase unless write-back was explicitly applied.
 
 ## Success
-- Each requirement's scenario has executable tests and linked code or integration evidence.
-- Feature flags, authorization, provenance and negative-path tests pass before a module is enabled.
-- A demo project can exercise the phase's end-to-end journey described in `docs/acceptance/end-to-end-journeys.md`.
+- A requirement shows its chain with stages and gaps: planned → in progress → implemented-in-code → built → deployed → observed → verified (or rolled back).
+- "Done in Jira, not observed in prod" is shown as **unverified deployment**.
+- CI receives a signed SARIF report; tampering is detected.

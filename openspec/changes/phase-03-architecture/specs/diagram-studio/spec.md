@@ -61,3 +61,33 @@ Users MUST compare architecture snapshots and visualize added, removed and modif
 - **GIVEN** the user compares a prod snapshot with a dev snapshot
 - **WHEN** the comparison opens
 - **THEN** the UI warns that environments differ before showing the diff
+
+### Requirement: Editorial diagram design system
+**Requirement ID:** `AT-DIAGRAM_STUDIO-005`
+
+Every diagram the platform generates or exports MUST use the editorial diagram-design system (adopted from the MIT-licensed diagram-design skill): org-skinnable tokens, node-type treatments, at most two focal accents, and an overview-plus-detail split above nine primary nodes.
+
+#### Scenario: Focal element and budget
+- **GIVEN** a C4 container view with 14 containers and one drifted edge
+- **WHEN** the platform generates the diagram
+- **THEN** it produces an overview with at most nine primary nodes plus linked detail views, and the drifted edge is one of at most two accent-colored focal elements
+
+#### Scenario: Org skin applied
+- **GIVEN** an organization has customized its diagram tokens
+- **WHEN** a project diagram is exported
+- **THEN** the export uses the organization's tokens and never another organization's skin
+
+### Requirement: Diagram conformance linter
+**Requirement ID:** `AT-DIAGRAM_STUDIO-006`
+
+Before a diagram is published or exported, a linter MUST verify the design system's connector rules: orthogonal rounded connectors, masked labels with a gap, no overlapping connectors, fanned attach points, no transit behind non-endpoint boxes and no label mask under a later node.
+
+#### Scenario: Linter blocks a broken layout
+- **GIVEN** an auto-layout result where two connectors share an attach point and a label overlaps its stroke
+- **WHEN** the diagram is exported
+- **THEN** the linter reports the violated rules, the layout is re-routed or the export is refused, and no non-conforming diagram is published
+
+#### Scenario: Conforming diagram passes
+- **GIVEN** a generated diagram that satisfies every rule
+- **WHEN** the linter runs
+- **THEN** the export proceeds and the lint result is stored with the diagram version

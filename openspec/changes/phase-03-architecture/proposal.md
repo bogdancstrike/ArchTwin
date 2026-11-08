@@ -16,7 +16,7 @@ Users affected: architects (model, diagrams, ADRs), reviewers, engineers reading
 - **Modules:** `architecture` (graph, snapshots, baselines, diff), `diagrams`, `documents` (generation), `decisions`, `reviews`.
 - **Tables:** architecture_nodes, architecture_edges (temporal validity, origin, confidence), node_evidence/edge_evidence links, snapshots (manifest hash), baselines, diagram_views, diagram_layouts, doc_versions, adrs, adr_reviews, review_runs, risks.
 - **APIs:** `/projects/{id}/architecture?at=&environment=`, `/snapshots/{id}/diff`, `/baselines`, `/diagrams`, `/adrs`, `/reviews`, export endpoints.
-- **Adopted OSS:** React Flow (`@xyflow/react`), elkjs (layout), Mermaid (render/export, strict security level), Structurizr CLI (DSL ⇄ workspace JSON, run in a sandboxed container), MADR template for ADRs, Jinja2 (deterministic doc templates), Pandoc (DOCX), WeasyPrint (PDF), networkx (bounded in-memory graph algorithms).
+- **Adopted OSS:** diagram-design editorial design system (MIT; tokens, visual types, connector rules — vendored as `packages/diagram-design-system`), React Flow (`@xyflow/react`), elkjs (layout), Mermaid (render/export, strict security level), Structurizr CLI (DSL ⇄ workspace JSON, run in a sandboxed container), MADR template for ADRs, Jinja2 (deterministic doc templates), Pandoc (DOCX), WeasyPrint (PDF), networkx (bounded in-memory graph algorithms).
 - **Flags:** `module.architecture-graph`, `module.diagram-studio`, `module.documentation-engine`, `module.adr-workflow`, `module.architecture-reviews`, `docs.pdf_export`, `docs.docx_export`, `docs.git_pr_publish`.
 
 ## Dependencies
