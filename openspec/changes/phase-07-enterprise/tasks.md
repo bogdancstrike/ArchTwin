@@ -1,31 +1,34 @@
-# Implementation tasks
+# Implementation tasks — phase-07-enterprise
 
-Change: **phase-07-enterprise**. All items start unchecked. Trace them to code and test evidence.
+Legend: **[Beta]** required for M4 enterprise beta · **[Later]** on demand. Check a task only with merged code and green tests.
 
-## Domain implementation
-- [ ] 1.1 Define data contracts, permissions, idempotency and API surface for **enterprise-operations**.
-- [ ] 1.2 Implement the vertical slice for **enterprise-operations** behind flag `enterprise_operations` or its catalog-defined equivalent.
-- [ ] 1.3 Add positive/negative scenarios, tenant isolation and failure-injection tests for **enterprise-operations**.
-- [ ] 1.4 Add feature/operator documentation, metrics, and a rollback exercise for **enterprise-operations**.
-- [ ] 2.1 Define data contracts, permissions, idempotency and API surface for **collaboration-approvals**.
-- [ ] 2.2 Implement the vertical slice for **collaboration-approvals** behind flag `collaboration_approvals` or its catalog-defined equivalent.
-- [ ] 2.3 Add positive/negative scenarios, tenant isolation and failure-injection tests for **collaboration-approvals**.
-- [ ] 2.4 Add feature/operator documentation, metrics, and a rollback exercise for **collaboration-approvals**.
-- [ ] 3.1 Define data contracts, permissions, idempotency and API surface for **unified-search-export**.
-- [ ] 3.2 Implement the vertical slice for **unified-search-export** behind flag `unified_search_export` or its catalog-defined equivalent.
-- [ ] 3.3 Add positive/negative scenarios, tenant isolation and failure-injection tests for **unified-search-export**.
-- [ ] 3.4 Add feature/operator documentation, metrics, and a rollback exercise for **unified-search-export**.
-- [ ] 4.1 Define data contracts, permissions, idempotency and API surface for **connector-sdk**.
-- [ ] 4.2 Implement the vertical slice for **connector-sdk** behind flag `connector_sdk` or its catalog-defined equivalent.
-- [ ] 4.3 Add positive/negative scenarios, tenant isolation and failure-injection tests for **connector-sdk**.
-- [ ] 4.4 Add feature/operator documentation, metrics, and a rollback exercise for **connector-sdk**.
-- [ ] 5.1 Define data contracts, permissions, idempotency and API surface for **architecture-health**.
-- [ ] 5.2 Implement the vertical slice for **architecture-health** behind flag `architecture_health` or its catalog-defined equivalent.
-- [ ] 5.3 Add positive/negative scenarios, tenant isolation and failure-injection tests for **architecture-health**.
-- [ ] 5.4 Add feature/operator documentation, metrics, and a rollback exercise for **architecture-health**.
+## 1. Enterprise operations — AT-ENTERPRISE_OPERATIONS-001..003
+- [ ] 1.1 [Beta] Helm chart with values profiles; Pod security (non-root, read-only rootfs, seccomp), NetworkPolicies, resource limits.
+- [ ] 1.2 [Beta] CloudNativePG cluster + PITR; restore verification job (counts, checksums, audit verify, policy smoke).
+- [ ] 1.3 [Beta] SLOs as code (recording rules, burn-rate alerts), Grafana dashboards.
+- [ ] 1.4 [Beta] Retention, legal hold, connector deletion with secret revocation, project deletion workflow.
+- [ ] 1.5 [Beta] Load tests (k6 + synthetic ingestion) for profile M; results recorded.
 
-## Phase exit gates
-- [ ] X.1 Review security and threats; verify default-deny policies and data minimization.
-- [ ] X.2 Measure latency, budgets, and freshness against the phase-specific SLOs.
-- [ ] X.3 Demonstrate project A/B isolation, auditability and reproducible evidence.
-- [ ] X.4 Enable for a pilot project only; confirm rollback works.
+## 2. Collaboration — AT-COLLABORATION_APPROVALS-001..003
+- [ ] 2.1 [Beta] Comments, mentions (members only), review assignments; optimistic concurrency with diff.
+- [ ] 2.2 [Beta] Configurable approvers and separation of duties for baselines, ADRs, federation.
+- [ ] 2.3 [Beta] Notification links re-check authorization; minimal push bodies.
+
+## 3. Search and portability — AT-UNIFIED_SEARCH_EXPORT-001..003
+- [ ] 3.1 [Beta] Scoped search (FTS + pgvector) with ACL re-check; no counts leak.
+- [ ] 3.2 [Beta] Export bundle (graph JSON, DSL, Mermaid, Markdown/MADR, manifest) + re-import test.
+- [ ] 3.3 [Later] Public read API + signed outgoing webhooks with idempotency keys.
+
+## 4. Connector SDK — AT-CONNECTOR_SDK-001..003
+- [ ] 4.1 [Later] Out-of-process plugin protocol, conformance kit, compatibility negotiation.
+- [ ] 4.2 [Later] cosign signature verification + org allowlist; sandbox with declared egress.
+- [ ] 4.3 [Later] Quarantine/dead-letter UI for failing plugins.
+
+## 5. Architecture health — AT-ARCHITECTURE_HEALTH-001..003
+- [ ] 5.1 [Beta] Scorecards with versioned metric definitions and coverage display (rendered with the diagram-design chart types).
+- [ ] 5.2 [Later] Trends with definition-change markers; portfolio rollups with minimum group size.
+
+## X. Phase exit gates
+- [ ] X.1 Restore drill meets RPO/RTO.
+- [ ] X.2 External penetration test findings resolved or accepted with owners.
+- [ ] X.3 Load test M profile within NFRs.

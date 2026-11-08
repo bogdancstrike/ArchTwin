@@ -1,35 +1,50 @@
 # Design: Grounded AI and cross-platform design
 
 ## Context
-ArchTwin requires an architect-first, secure, evidence-driven workflow. This increment implements the requirements in its `specs/` folder. The target platform architecture is in `docs/architecture/SOLUTION_ARCHITECTURE.md`, source-of-truth data semantics in `docs/architecture/DATA_MODEL.md`, and security constraints in `docs/security/THREAT_MODEL.md`.
+Implements `specs/` of this change. AI architecture: `docs/ai/AI_ARCHITECTURE.md`; evaluation plan: `docs/ai/EVALUATION_PLAN.md`; model policy: `docs/ai/MODEL_PROFILES.yaml`. ADR-0005 (LiteLLM + Langfuse) applies.
+
+## Goals / Non-goals
+- **Goals:** scoped retrieval → grounded generation → citation validation; user-selectable models; federation grants; deterministic impact analysis; eval-gated rollout.
+- **Non-goals:** autonomous agents with infrastructure access, AI deciding authorization, AI-detected drift, on-prem models in v1.
+
+## Request pipeline
+```
+user question (+ selected model, default gpt-6-luna)
+ → flags + budget check (reject before any model call)
+ → authorize scopes (projects, environments, federation grants)  — Cerbos
+ → deterministic tools collect evidence (graph queries, paths, contracts, passages)  — scoped SQL
+ → evidence pack {evidence_id, source, revision, observed_at, freshness, confidence} + manifest hash
+ → LiteLLM (Responses API, structured output schema per response type) → Langfuse trace
+ → validate: every claim cites an evidence_id from the pack; unknown IDs ⇒ claim marked unsupported/removed
+ → store PromptRun (model alias, manifest hash, policy revision) → stream to UI (SSE)
+ → "Apply" = separate authorized command (never from the model)
+```
 
 ## Decisions
-- Build with Python 3.12+/FastAPI asyncio modules, PostgreSQL canonical state and scoped background workers; UI is React/Vite/shadcn/ui.
-- All modules execute under identity/project scopes, gated by typed feature flags; protected operations always require Cerbos authorization.
-- Source observations are immutable and independently distinguish desired, planned, code-derived, runtime and inferred evidence.
-- All AI calls use LiteLLM → OpenAI in iteration one, with Langfuse tracing; no direct OpenAI SDK outside gateway. Support future on-prem endpoints by model alias, not by provider-specific business logic.
 
-## Implementation design
+| # | Decision | Adopted OSS | Notes |
+|---|---|---|---|
+| D1 | Server-owned deterministic tools only (`get_architecture_snapshot`, `find_dependency_paths`, `get_contract`, `diff_graph`, `get_work_status`, `get_source_passage`); strict JSON-schema validation; allowlist per operation | `openai` SDK via LiteLLM | No SQL/shell tools for the model |
+| D2 | Retrieval: graph first (exact), passages second via PostgreSQL FTS + pgvector, both pre-filtered by scope | pgvector | Qdrant only if measured need (ADR-0002) |
+| D3 | Untrusted text wrapped and labelled as data (spotlighting); system prompts never include secrets | — | Injection corpus in evals |
+| D4 | User model choice per conversation/request from `/ai/models`; server validates against allowlists; alias recorded on PromptRun + trace | LiteLLM | Default `gpt-6-luna`; `gpt-6-terra`, `gpt-6-sol` selectable |
+| D5 | Federation grants are bilateral, scoped by relation types and data classes, expiring; evaluated per query; revocation invalidates caches and saved answers | Cerbos | — |
+| D6 | Impact analysis = bounded traversal (hops, node cap, time budget) with networkx on a scoped subgraph; scenarios are copy-on-write overlays on a snapshot | networkx | LLM only explains results |
+| D7 | Integration designer output schema: options[] (≥2 when viable) × criteria (contracts, authn/z, ownership, latency, consistency, failure modes, idempotency, capacity, reachability, ops burden), unknowns[], diagrams[], adr_draft, task_drafts[] | Pydantic | — |
+| D8 | AI-drafted diagrams are emitted as a structured view spec (nodes, edges, view type) — **not** raw SVG — and rendered by the phase-03 diagram-design renderer; the diagram-design rules (focal ≤2, ≤9 primary nodes, type selection) are part of the instructions and the linter gates the result | diagram-design system | Keeps AI output safe (no injected markup) and visually consistent |
+| D9 | Evals in Langfuse datasets/experiments per selectable model; optional promptfoo red-team in CI; thresholds gate the model picker and `ai.*` flags | Langfuse, promptfoo | — |
+| D10 | Budgets: per-project token/cost caps checked before calls; cancellation aborts upstream; costs priced identically in LiteLLM and ArchTwin (as Horizon) | LiteLLM | — |
 
-## Bounded retrieval then AI, not unconstrained agents
-Call `authorize(federation, projects, environments)` before fetching any graph/document. Generate a signed/hashed context manifest with source IDs, confidence, freshness and gaps. Use deterministic graph tools for paths and contract lookup; LiteLLM only for synthesis and trade-off generation; Langfuse for sanitized traces and evals.
+## Risks / trade-offs
+| Risk | Mitigation |
+|---|---|
+| Hallucinated facts | citation validation, unsupported-claim marking, eval thresholds |
+| Injection via READMEs/issues | spotlighting, tool allowlist, scope fixed before generation, red-team suite |
+| Cost spikes | budgets, concurrency caps, cheaper default model, caching of evidence packs (scope + ACL revision in key) |
+| Different models behave differently | per-model eval runs; model shown next to every answer |
 
-## A/B integration design contract
-For two authorized projects: (1) inventory interfaces/contracts/trust boundaries; (2) request missing constraints when essential or state assumptions; (3) generate at least two options with tradeoff grid, C4/sequence diagrams, API/event sketches, authz/authn and data ownership, failure/consistency/cost; (4) generate ADR + task drafts; (5) user reviews and explicitly applies proposals. Cross-project data is not copied without grant and retention review.
+## Rollback
+Disable `ai.*` / module flags; remove a model from the allowlist; deterministic features unaffected.
 
-## What-if and blast radius
-Structural dependency paths bounded by hops/node count, scenario branch snapshots, deterministic graph effects. LLM MAY explain but cannot invent runtime probabilities or authorize changes. Show unknown nodes and confidence.
-
-## Model release gates
-Reuse Horizon's OpenAI aliases in LiteLLM; enforce profile capability/price validation. Run Langfuse golden evaluations for source grounding, prompt injection, cross-tenant isolation, diagrams and A/B design completeness. vLLM route exists only as future profile; disabled in initial iteration.
-
-
-## Interfaces and persistence
-- Changes flow through authoritative FastAPI service methods and PostgreSQL transactional outbox; async workers are idempotent.
-- Public API contracts live in `docs/api/`; provider contracts in `docs/connectors/`; feature flags in `docs/feature-flags/`.
-- No cross-tenant/project read, cache, vector result or AI context is permitted without current authorization and explicit federation grant where required.
-
-## Testing and rollout
-- Implement every Given/When/Then scenario in this phase and deliberate denial/failure tests.
-- Keep write-back disabled until separately reviewed; use pilot-specific flags and observe metrics.
-- Reconcile or revert via flags and explicit rollback after an error; retain immutable history and audit logs.
+## Open questions
+- Capabilities/prices of `gpt-6-terra` and `gpt-6-sol` must be verified at deployment; until then they stay hidden from the picker.

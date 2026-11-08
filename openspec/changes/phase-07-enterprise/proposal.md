@@ -1,7 +1,9 @@
 # Proposal: Enterprise operations and extensibility
 
 ## Why
-ArchTwin is a greenfield, architect-first system. This change establishes a bounded, verifiable delivery increment, not a claim that functionality has already been implemented. Its capability deltas are the feature contracts for this increment.
+Pilots prove value; enterprises need reliability, recovery, collaboration, search, portability, extensibility and portfolio views before they depend on a tool. This phase hardens ArchTwin for multi-org production use — and only starts after M2/M3 show sustained usage (see decision rule in `docs/strategy/PRODUCT_POSITIONING.md`).
+
+Users affected: org admins, operators/SRE, security, enterprise architects, connector developers.
 
 ## What Changes
 - Add **Reliability, scale, backup and retention** (`enterprise-operations`).
@@ -10,16 +12,22 @@ ArchTwin is a greenfield, architect-first system. This change establishes a boun
 - Add **Extension SDK and connector marketplace model** (`connector-sdk`).
 - Add **Architecture health and portfolio insights** (`architecture-health`).
 
+## Impact
+- **Modules:** `ops` (SLOs, backup verification, retention), `collaboration`, `search`, `plugins`, `health`.
+- **Infrastructure:** Helm chart for Kubernetes; CloudNativePG (PostgreSQL HA, PITR backups) or managed Postgres; Temporal HA; OpenTelemetry Collector, Prometheus, Grafana, Loki/Tempo; optional OpenBao.
+- **Adopted OSS:** Helm, CloudNativePG, pgBackRest/Barman (via CNPG), Velero (optional cluster backup), Sigstore cosign (plugin signing), Kubernetes NetworkPolicy, Grafana SLO dashboards, PostgreSQL FTS/pgvector for search.
+- **Flags:** `module.enterprise-operations`, `module.collaboration-approvals`, `module.unified-search-export`, `module.connector-sdk`, `module.architecture-health`, `ui.portfolio`, `ui.executive_dashboard`, and P3 `connector.*` flags.
+
 ## Dependencies
-Harden phases 01–06 after measured pilot feedback.
+Phases 01–06 (health and portfolio rely on drift, traceability and federation).
+
+## Security risks
+Plugin supply chain, search leakage across projects, portfolio aggregation exposing single-project data, restore with wrong keys/policies.
 
 ## Rollout and rollback
-- Feature flags for every module default OFF until its contract, permissions and tests pass. Foundation identity/auth/audit never bypassed by flag.
-- Introduce read-only integrations before write-back. Backfill and migration jobs are resumable and idempotent.
-- Rollback disables the affected module or connector, drains queued work, restores previous read paths, and preserves audit and immutable history.
-- No external infrastructure mutation occurs as part of this change without a separate approved action.
+Helm chart first used for a staging pilot; restore drills before declaring RPO/RTO; plugins only from an org allowlist and signed. Rollback via Helm revision + flags.
 
 ## Success
-- Each requirement's scenario has executable tests and linked code or integration evidence.
-- Feature flags, authorization, provenance and negative-path tests pass before a module is enabled.
-- A demo project can exercise the phase's end-to-end journey described in `docs/acceptance/end-to-end-journeys.md`.
+- Quarterly restore drill meets RPO 15 min / RTO 2 h targets with policy and checksum verification.
+- 50 projects / 5k-node graphs load test meets NFRs.
+- A third-party connector passes the conformance kit and runs sandboxed with declared egress only.
