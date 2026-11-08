@@ -21,7 +21,18 @@ from archtwin.config import settings
 async def lifespan(_: FastAPI):
     configure(settings().log_level)
     log.info("api_start", llm_mode=settings().llm_mode)
+    import asyncio
+
+    from archtwin.intelligence import gateway
+
+    async def _probe():
+        try:
+            log.info("model_capability_probe", result=await gateway.probe_models())
+        except Exception as e:  # noqa: BLE001
+            log.warning("model_probe_failed", error=str(e)[:200])
+    probe = asyncio.create_task(_probe())
     yield
+    probe.cancel()
     await dispose()
 
 

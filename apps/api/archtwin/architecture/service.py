@@ -1,6 +1,8 @@
 """Snapshots, time travel, diff, baselines and curation (AT-ARCHITECTURE_GRAPH-001..003)."""
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -32,14 +34,18 @@ async def build_snapshot(ctx: RequestContext, trigger: str = "scan") -> dict[str
         g = builder.build(obs + manual, aliases)
         last = row((await conn.execute(select(snapshots).where(snapshots.c.project_id == ctx.project_id)
                                        .order_by(snapshots.c.version.desc()).limit(1))).first())
-        if last and last["manifest_hash"] == g["manifest_hash"]:
+        # coverage is an input to drift (absence vs UNKNOWN): a coverage change is a new snapshot even if the graph is equal
+        cov_sig = hashlib.sha256(json.dumps(sorted(
+            [str(i["connector"]["id"]), sorted((i["scans"][0]["coverage"] or {}).get("prefixes", [])), i["freshness"]["status"]]
+            for i in inputs), default=str).encode()).hexdigest()[:16]
+        if last and last["manifest_hash"] == g["manifest_hash"] and last["inputs"].get("coverage_sig") == cov_sig:
             return {**last, "created": False}
         sid = new_id()
         version = (last["version"] + 1) if last else 1
         inp = {"scans": [{"connector_id": str(i["connector"]["id"]), "connector": i["connector"]["name"], "kind": i["connector"]["kind"],
                           "scan_ids": [str(s["id"]) for s in i["scans"]], "revision": i["scans"][0]["revision"],
                           "coverage": i["scans"][0]["coverage"], "freshness": i["freshness"]} for i in inputs],
-               "manual_observations": len(manual), "dropped_edges": len(g["dropped_edges"])}
+               "manual_observations": len(manual), "dropped_edges": len(g["dropped_edges"]), "coverage_sig": cov_sig}
         await conn.execute(snapshots.insert().values(id=sid, org_id=ctx.org_id, project_id=ctx.project_id, version=version,
                                                      manifest_hash=g["manifest_hash"], node_count=len(g["nodes"]),
                                                      edge_count=len(g["edges"]), inputs=inp, builder_version=builder.BUILDER_VERSION,

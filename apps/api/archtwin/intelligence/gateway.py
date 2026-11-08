@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, InternalServerError, RateLimitError
+from openai import (APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI, InternalServerError, NotFoundError,
+                    PermissionDeniedError, RateLimitError)
 
 from archtwin.common.errors import problem
 from archtwin.config import settings
@@ -35,8 +36,46 @@ def default_model() -> str:
     return profiles()["selectable_models"]["default"]
 
 
+# Capability validation: a model the provider rejects is hidden, not degraded (MODEL_PROFILES.yaml note).
+_unavailable: dict[str, float] = {}
+UNAVAILABLE_TTL_S = 3600
+
+
+def mark_unavailable(alias: str) -> None:
+    _unavailable[alias] = time.monotonic()
+
+
+def is_available(alias: str) -> bool:
+    t = _unavailable.get(alias)
+    return t is None or time.monotonic() - t > UNAVAILABLE_TTL_S
+
+
+def available() -> list[dict[str, Any]]:
+    return [o for o in selectable() if is_available(o["alias"])]
+
+
+async def probe_models() -> dict[str, bool]:
+    """1-token probe per selectable alias through LiteLLM (skipped in fake mode)."""
+    if settings().llm_mode == "fake":
+        return {o["alias"]: True for o in selectable()}
+    out = {}
+    for o in selectable():
+        try:
+            await _llm().chat.completions.create(model=o["alias"], messages=[{"role": "user", "content": "ping"}],
+                                                 max_completion_tokens=16, extra_body={"metadata": {"trace_name": "archtwin.capability_probe"}})
+            out[o["alias"]] = True
+        except (NotFoundError, PermissionDeniedError):
+            mark_unavailable(o["alias"])
+            out[o["alias"]] = False
+        except Exception:  # noqa: BLE001 — transient: do not hide
+            out[o["alias"]] = True
+    return out
+
+
 def resolve_model(requested: str | None, preference: str | None, allowlist: list[str] | None = None) -> str:
-    allowed = [o["alias"] for o in selectable() if not allowlist or o["alias"] in allowlist]
+    allowed = [o["alias"] for o in selectable() if (not allowlist or o["alias"] in allowlist) and is_available(o["alias"])]
+    if not allowed:
+        raise problem(503, "AT-AI-003", "No model available", "None of the selectable models passed capability validation.", retryable=True)
     for cand in (requested, preference):
         if cand:
             if cand not in allowed:
@@ -110,4 +149,10 @@ async def complete(messages: list[dict[str, str]], *, model: str, operation: str
         except (APIConnectionError, APITimeoutError, RateLimitError, InternalServerError) as e:
             last = e
             await asyncio.sleep(1.5 * (attempt + 1))
+        except (NotFoundError, PermissionDeniedError) as e:
+            mark_unavailable(model)
+            raise problem(422, "AT-AI-004", "Model unavailable", f"{model} failed capability validation with the provider and is now hidden; "
+                          "choose another model.") from e
+        except APIStatusError as e:
+            raise problem(502, "AT-AI-005", "AI provider error", f"HTTP {e.status_code}", retryable=e.status_code >= 500) from e
     raise problem(503, "AT-AI-002", "AI gateway unavailable", type(last).__name__ if last else "", retryable=True)

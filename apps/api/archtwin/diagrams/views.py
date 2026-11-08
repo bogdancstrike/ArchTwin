@@ -234,11 +234,17 @@ def container_view(g: dict[str, Any], ckey: str, drift_keys: set[str], group: st
     edges = _aggregate(raw)
     for e in edges:
         n = sum(int(g["edges"][m]["attributes"].get("imports", 1)) for m in e["members"] if m in g["edges"])
-        e["label"] = f"imports ×{n}"
+        e["label"], e["kind"], e["imports"] = f"imports ×{n}", "imports", n
+    hidden = 0
+    if len(edges) > 20:                 # declutter: hide single-import edges, but say so (never silently)
+        strong = [e for e in edges if e["imports"] > 1]
+        hidden = len(edges) - len(strong)
+        edges = strong
     _focal(nodes, edges, drift_keys)
     return {**base, "breadcrumbs": crumbs, "nodes": nodes, "edges": edges,
             "detail_views": [{"key": f"container:{system}/{svc}/group:{more_id}", "title": "Supporting modules", "count": len(rest)}] if rest else [],
-            "budget": {"primary": len(nodes), "max": MAX_PRIMARY, "split": split, "components": len(comps)}}
+            "budget": {"primary": len(nodes), "max": MAX_PRIMARY, "split": split, "components": len(comps)},
+            "hidden_edges": hidden, "hidden_reason": "single-import dependencies hidden for readability" if hidden else ""}
 
 
 def build_view(g: dict[str, Any], view_key: str, drift_keys: set[str] | None = None, full: bool = False, deps: bool = False,

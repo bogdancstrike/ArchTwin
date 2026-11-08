@@ -606,7 +606,8 @@ async def drift_comment(fid: uuid.UUID, body: S.CommentIn, c: RequestContext = D
 async def ai_models(c: RequestContext = Depends(get_ctx)):
     pref = (await iam.get_preferences(c.actor_id)).get("preferred_model")
     return {"default": gateway.default_model(), "preferred": pref,
-            "models": [{"alias": o["alias"], "label": o["label"]} for o in gateway.selectable()]}
+            "models": [{"alias": o["alias"], "label": o["label"]} for o in gateway.available()],
+            "hidden": [o["alias"] for o in gateway.selectable() if not gateway.is_available(o["alias"])]}
 
 
 @r.post("/projects/{project_id}/assistant/ask", tags=["ai"])
