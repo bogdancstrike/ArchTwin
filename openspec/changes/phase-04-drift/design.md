@@ -1,7 +1,7 @@
 # Design: Continuous drift and early-warning intelligence
 
 ## Context
-Implements `specs/` of this change. ADR-0003 (three-way evidence model) applies. Sequence diagram: `docs/architecture/drift-and-ai-sequences.mmd`.
+Implements `specs/` of this change. ADR-0003 (three-way evidence model) applies. Sequence diagram: `docs/diagrams/drift-sequence.png`.
 
 ## Goals / Non-goals
 - **Goals:** deterministic, reproducible drift; UNKNOWN/INCOMPLETE semantics; triage lifecycle; deduplicated notifications; measurable latency and false-positive rate.

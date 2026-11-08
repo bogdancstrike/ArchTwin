@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ArchTwin containers</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Geist', system-ui, sans-serif; background: #f5f5f5; color: #2d3142;
+           min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 3rem 2rem; }
+    .frame { max-width: 1200px; width: 100%; }
+    .eyebrow { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.66rem; font-weight: 500;
+               letter-spacing: 0.18em; text-transform: uppercase; color: #4f5d75; margin-bottom: 0.5rem; }
+    h1 { font-family: 'Instrument Serif', serif; font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+         font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 1.5rem; }
+    svg { width: 100%; min-width: 760px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">C4 · Level 2 containers · ArchTwin</p>
+    <h1>ArchTwin containers</h1>
+    <svg viewBox="0 0 816 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="containers-title containers-desc">
+      <title id="containers-title">ArchTwin containers</title>
+      <desc id="containers-desc">C4 container view: the web UI calls a FastAPI modular monolith that authorizes through Keycloak and Cerbos, stores everything in PostgreSQL and starts Temporal workers, which read sources read-only, keep raw artifacts in object storage and call models through LiteLLM.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+        <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+        <marker id="arrow-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polyline points="0 0, 8 3, 0 6" fill="none" stroke="#4f5d75" stroke-width="1.2"/></marker>
+      </defs>
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+<path d="M 152,116 H 200" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 344,116 H 392" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 552,116 H 600" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<path d="M 432,144 V 240" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 512,144 V 184 Q 512,192 520,192 H 672 Q 680,192 680,200 V 240" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 552,272 H 600" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 392,272 H 344" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 432,296 V 384" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 528,296 V 404 Q 528,412 536,412 H 600" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<rect x="440" y="186" width="60" height="12" rx="2" fill="#f5f5f5"/><text x="470" y="195" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">WORKFLOWS</text>
+<rect x="582" y="172" width="28" height="12" rx="2" fill="#f5f5f5"/><text x="596" y="181" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SQL</text>
+<rect x="536" y="342" width="60" height="12" rx="2" fill="#f5f5f5"/><text x="566" y="351" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">READ-ONLY</text>
+<rect x="32" y="88" width="120" height="56" rx="6" fill="#f5f5f5"/><rect x="32" y="88" width="120" height="56" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/><rect x="40" y="96" width="32" height="12" rx="2" fill="none" stroke="rgba(122,131,153,0.40)" stroke-width="0.8"/><text x="56" y="105" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">USER</text><text x="92" y="120" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Architect</text><text x="92" y="135" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">browser</text>
+<rect x="200" y="88" width="144" height="56" rx="6" fill="#f5f5f5"/><rect x="200" y="88" width="144" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/><rect x="208" y="96" width="24" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/><text x="220" y="105" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">UI</text><text x="272" y="120" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Web UI</text><text x="272" y="135" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">React · React Flow</text>
+<rect x="392" y="88" width="160" height="56" rx="6" fill="#f5f5f5"/><rect x="392" y="88" width="160" height="56" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/><rect x="400" y="96" width="28" height="12" rx="2" fill="none" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/><text x="414" y="105" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">API</text><text x="472" y="120" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">API</text><text x="472" y="135" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">FastAPI monolith</text>
+<rect x="600" y="88" width="176" height="56" rx="6" fill="#f5f5f5"/><rect x="600" y="88" width="176" height="56" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/><rect x="608" y="96" width="32" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.22)" stroke-width="0.8"/><text x="624" y="105" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">AUTH</text><text x="688" y="120" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Keycloak · Cerbos</text><text x="688" y="135" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">OIDC · policy</text>
+<rect x="200" y="240" width="144" height="56" rx="6" fill="#f5f5f5"/><rect x="200" y="240" width="144" height="56" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/><rect x="208" y="248" width="28" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.22)" stroke-width="0.8"/><text x="222" y="257" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">LLM</text><text x="272" y="272" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">LiteLLM</text><text x="272" y="287" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">OpenAI · Langfuse</text>
+<rect x="392" y="240" width="160" height="56" rx="6" fill="#f5f5f5"/><rect x="392" y="240" width="160" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/><rect x="400" y="248" width="32" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/><text x="416" y="257" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">JOBS</text><text x="472" y="272" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Temporal workers</text><text x="472" y="287" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">scan · drift · AI</text>
+<rect x="600" y="240" width="176" height="56" rx="6" fill="#f5f5f5"/><rect x="600" y="240" width="176" height="56" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/><rect x="608" y="248" width="24" height="12" rx="2" fill="none" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/><text x="620" y="257" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DB</text><text x="688" y="272" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">PostgreSQL</text><text x="688" y="287" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">graph · evidence · audit</text>
+<rect x="392" y="384" width="112" height="56" rx="6" fill="#f5f5f5"/><rect x="392" y="384" width="112" height="56" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/><rect x="400" y="392" width="24" height="12" rx="2" fill="none" stroke="rgba(79,93,117,0.40)" stroke-width="0.8"/><text x="412" y="401" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">S3</text><text x="448" y="416" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Object store</text><text x="448" y="431" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">raw artifacts</text>
+<rect x="600" y="384" width="176" height="56" rx="6" fill="#f5f5f5"/><rect x="600" y="384" width="176" height="56" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/><rect x="608" y="392" width="28" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.22)" stroke-width="0.8"/><text x="622" y="401" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SRC</text><text x="688" y="416" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Read-only sources</text><text x="688" y="431" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">git · k8s · otel</text>
+<line x1="32" y1="472" x2="784" y2="472" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/><text x="32" y="496" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+<rect x="112" y="486" width="24" height="12" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/><text x="144" y="496" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.04em">core</text>
+<rect x="192" y="486" width="24" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/><text x="224" y="496" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.04em">container</text>
+<rect x="296" y="486" width="24" height="12" rx="2" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/><text x="328" y="496" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.04em">store</text>
+<rect x="380" y="486" width="24" height="12" rx="2" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/><text x="412" y="496" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.04em">adopted / external</text>
+<line x1="532" y1="492" x2="556" y2="492" stroke="#2e5aa8" stroke-width="1.2"/><text x="564" y="496" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.04em">external call</text>
+    </svg>
+  </div>
+</body>
+</html>

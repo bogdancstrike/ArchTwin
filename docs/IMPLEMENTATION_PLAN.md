@@ -17,18 +17,7 @@ This plan turns the seven OpenSpec phases into an order of work that **retires t
 
 ## 2. Milestones
 
-```mermaid
-gantt
-  title ArchTwin milestones (indicative; one strong engineer + AI assistance)
-  dateFormat YYYY-MM-DD
-  axisFormat %b
-  M0 Design-partner discovery          :m0, 2026-11-16, 21d
-  Walking skeleton + spikes            :sk, 2026-11-16, 21d
-  M1 Proof of value (thin 01-03)       :m1, after sk, 70d
-  M2 Drift + traceability (04-05)      :m2, after m1, 56d
-  M3 Grounded AI (06)                  :m3, after m2, 56d
-  M4 Enterprise beta (07)              :m4, after m3, 84d
-```
+<p align="center"><img src="diagrams/milestones.png" alt="Gantt chart of delivery milestones M0 to M4, November 2026 to August 2027"></p>
 Durations are planning ranges, not commitments. Overlap is expected; each milestone ends with a go/no-go review.
 
 | Milestone | Scope (thin slice) | Demo script | Go/no-go |

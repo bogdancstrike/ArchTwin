@@ -76,44 +76,15 @@ Design → ADR → plan → issues / commits → runtime observation → drift �
 
 ## 🔄 How it works
 
-```mermaid
-flowchart LR
-  subgraph Sources [read-only sources]
-    git[GitHub / GitLab]
-    k8s[Kubernetes]
-    data[Postgres · Kafka]
-    otel[OpenTelemetry]
-    docs[Docs · Jira · Taiga]
-  end
-  Sources --> obs[Immutable observations<br/>origin · revision · freshness · confidence]
-  obs --> graph[Temporal architecture graph]
-  baseline[Approved baseline + ADRs] --> drift
-  graph --> drift[Deterministic drift rules]
-  graph --> diagrams[C4 diagrams · docs · exports]
-  drift --> triage[Triage · alerts · CI reports]
-  graph --> ai[Grounded AI<br/>cited answers & designs]
-  ai -. proposals .-> baseline
-```
+<p align="center"><img src="docs/diagrams/how-it-works.png" alt="How ArchTwin works: read-only sources become immutable observations, which build a temporal architecture graph; a deterministic drift engine compares it with the approved baseline, and diagrams, triage and grounded AI proposals are derived from it"></p>
 
 ## 🏗 Architecture
 
 A **modular monolith** (FastAPI) plus **Temporal** workers from the same image, with **PostgreSQL** as the only system of record. Everything else is adopted open source.
 
-```mermaid
-flowchart LR
-  user([Architect]) --> web[Web UI<br/>React · React Flow]
-  web --> api[API<br/>FastAPI]
-  api --> kc[Keycloak]
-  api --> cerbos[Cerbos]
-  api --> pg[(PostgreSQL)]
-  api --> temporal[Temporal]
-  temporal --> worker[Workers]
-  worker --> pg
-  worker --> s3[(S3 storage)]
-  worker --> docling[Docling]
-  worker --> litellm[LiteLLM] --> openai[(OpenAI)]
-  litellm --> langfuse[Langfuse]
-```
+<p align="center"><img src="docs/diagrams/containers.png" alt="ArchTwin containers: Web UI, FastAPI API, Keycloak and Cerbos, Temporal workers, PostgreSQL, object store, LiteLLM and read-only sources"></p>
+
+<sub>More views: <a href="docs/diagrams/system-context.png">C4 system context</a> · <a href="docs/diagrams/drift-sequence.png">drift detection sequence</a> · <a href="docs/diagrams/ai-design-sequence.png">grounded AI sequence</a>. All diagrams are built with the <a href="https://github.com/cathrynlavery/diagram-design">diagram-design</a> system — sources in <a href="docs/diagrams/"><code>docs/diagrams/</code></a>.</sub>
 
 Key decisions are recorded as ADRs in [`docs/architecture/adr`](docs/architecture/adr/README.md): modular monolith, PostgreSQL + outbox (no Kafka in MVP), three-way evidence model, Keycloak + Cerbos, LiteLLM with selectable models, read-only connectors, Temporal, OpenFeature flags, the diagram-design system with C4 zoom, and *adopt open source before building*.
 

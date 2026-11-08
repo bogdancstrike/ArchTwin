@@ -15,7 +15,8 @@
 ## Architecture
 - [Data model and invariants](architecture/DATA_MODEL.md)
 - [Integration scenarios](architecture/INTEGRATION_SCENARIOS.md)
-- Diagrams: [`context.mmd`](architecture/context.mmd), [`drift-and-ai-sequences.mmd`](architecture/drift-and-ai-sequences.mmd), [`structurizr-example.dsl`](architecture/structurizr-example.dsl)
+- Diagrams ([diagram-design](https://github.com/cathrynlavery/diagram-design) system, sources in [`diagrams/`](diagrams/README.md)): [system context](diagrams/system-context.png) · [containers](diagrams/containers.png) · [how it works](diagrams/how-it-works.png) · [drift sequence](diagrams/drift-sequence.png) · [AI design sequence](diagrams/ai-design-sequence.png) · [milestones](diagrams/milestones.png)
+- Model-as-code example: [`structurizr-example.dsl`](architecture/structurizr-example.dsl)
 
 ## Building blocks
 - Connectors: [contract](connectors/CONNECTOR_CONTRACT.md) · [support matrix](connectors/CONNECTOR_MATRIX.md)

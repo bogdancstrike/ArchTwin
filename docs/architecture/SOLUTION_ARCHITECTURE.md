@@ -3,23 +3,16 @@
 ## 1. Logical architecture
 A **modular monolith** ([ADR-0001](adr/0001-modular-monolith-first.md)) owns all authoritative business transactions in a single FastAPI API process; **Temporal** workers built from the same image run every durable/asynchronous job ([ADR-0007](adr/0007-temporal-for-all-durable-work.md)). Isolated containers exist only where isolation is the point: Docling, export renderers, sandboxed code analysis and (phase 07) plugins. PostgreSQL is the system of record. The architecture graph is initially canonical relational data + edge tables + JSONB snapshots; Neo4j and Qdrant are **optional projections** powered by the outbox, never competing authorities ([ADR-0002](adr/0002-postgresql-canonical-store-and-outbox.md)). Technology choices and rejected alternatives: [`docs/TECHNOLOGIES.md`](../TECHNOLOGIES.md).
 
-### Container view
-```mermaid
-flowchart LR
-  user([Architect / engineer]) --> web[Web UI<br/>React + React Flow]
-  web --> api[API<br/>FastAPI modular monolith]
-  api --> kc[Keycloak<br/>OIDC]
-  api --> cerbos[Cerbos<br/>PDP]
-  api --> pg[(PostgreSQL<br/>graph · evidence · audit · outbox)]
-  api --> temporal[Temporal]
-  temporal --> worker[Workers<br/>connectors · graph · drift · AI]
-  worker --> pg
-  worker --> s3[(S3-compatible<br/>raw artifacts)]
-  worker --> docling[Docling<br/>isolated]
-  worker --> litellm[LiteLLM] --> openai[(OpenAI)]
-  litellm --> langfuse[Langfuse]
-  worker -->|read-only| sources[(GitHub · GitLab · K8s · Postgres · Kafka · OTel · Jira/Taiga)]
-```
+### System context (C4 level 1)
+<p align="center"><img src="../diagrams/system-context.png" alt="C4 system context of ArchTwin"></p>
+
+### Container view (C4 level 2)
+<p align="center"><img src="../diagrams/containers.png" alt="C4 container view of ArchTwin"></p>
+
+### Key flows
+<p align="center"><img src="../diagrams/drift-sequence.png" alt="Sequence: drift detection after a merged change"></p>
+<p align="center"><img src="../diagrams/ai-design-sequence.png" alt="Sequence: grounded cross-platform design"></p>
+
 
 ### Logical components
 | Domain | Ownership | Inbound/outbound contract |

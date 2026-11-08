@@ -2,6 +2,10 @@
 
 ArchTwin is a specification package today. The implementation plans to adopt (not fork) the open-source components listed in [`docs/TECHNOLOGIES.md`](docs/TECHNOLOGIES.md); their licences will be tracked here as dependencies are added.
 
+## Design systems in use
+
+The documentation diagrams in `docs/diagrams/` are drawn with the diagram-design system (default skin, which matches the ArchTwin palette; see `.diagram-design`).
+
 ## Vendored material (planned)
 
 ### diagram-design

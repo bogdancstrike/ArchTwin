@@ -1,17 +1,14 @@
 # Capabilities and dependencies
 
-```mermaid
-flowchart LR
-    P1[01 Foundation security/projects/flags] --> P2[02 Connectors and evidence]
-    P2 --> P3[03 Architecture graph, diagrams, ADRs]
-    P3 --> P4[04 Drift monitoring]
-    P3 --> P5[05 Planning and task traceability]
-    P2 --> P5
-    P3 --> P6[06 AI & integration design]
-    P4 --> P6
-    P5 --> P6
-    P6 --> P7[07 Enterprise hardening]
-```
+| Phase | Depends on | Unlocks |
+|---|---|---|
+| 01 Foundation (security, projects, flags) | — | everything |
+| 02 Connectors and evidence | 01 | 03, 05 |
+| 03 Architecture graph, diagrams, ADRs | 02 | 04, 05, 06 |
+| 04 Drift monitoring | 03 | 06 |
+| 05 Planning and task traceability | 02, 03 | 06 |
+| 06 AI and integration design | 03, 04, 05 | 07 |
+| 07 Enterprise hardening | 06 | — |
 
 ## Deliberately early cross-cutting work
 - Authorization/security, project scoping, feature flags, audit and observability begin in phase 1 and are mandatory for every phase.
