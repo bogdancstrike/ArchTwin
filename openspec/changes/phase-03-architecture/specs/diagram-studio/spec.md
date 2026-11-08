@@ -91,3 +91,19 @@ Before a diagram is published or exported, a linter MUST verify the design syste
 - **GIVEN** a generated diagram that satisfies every rule
 - **WHEN** the linter runs
 - **THEN** the export proceeds and the lint result is stored with the diagram version
+
+### Requirement: C4 zoom navigation
+**Requirement ID:** `AT-DIAGRAM_STUDIO-007`
+
+The platform MUST let users explore C4 levels in place: zooming into a software system MUST animate into its container view (level 2) and zooming into a container MUST animate into its component view (level 3), with breadcrumbs, zoom-out, keyboard access and a reduced-motion alternative.
+
+#### Scenario: Zoom from context to component
+- **GIVEN** a system context diagram where system S has containers and container C has components
+- **WHEN** the user zooms into S and then into C
+- **THEN** S animates open into its container view, C animates open into its component view, and the breadcrumb shows Context › S › C with each level's evidence still inspectable
+
+#### Scenario: No deeper level or reduced motion
+- **GIVEN** a container has no discovered components and the user has prefers-reduced-motion enabled
+- **WHEN** the user tries to zoom into the container
+- **THEN** no animation plays, the UI states that no component-level evidence exists, and the user stays on the container view
+

@@ -29,6 +29,7 @@ XSS through labels (Mermaid/HTML), export leaking restricted elements, renderer 
 Graph builds run in shadow mode first (computed, not shown) until fixture precision is acceptable; diagrams and docs ship behind module flags. Baselines are immutable, so rollback never loses approved intent.
 
 ## Success
+- Users zoom from the system context (L1) into containers (L2) and components (L3) with an animated transition and breadcrumbs.
 - From the fixture, a C4 container diagram is generated with evidence on every element and edge; manual layout survives regeneration.
 - Two snapshots can be diffed (added/removed/changed) with evidence for both sides.
 - An ADR is proposed, independently approved, becomes immutable and is exported as MADR Markdown.
