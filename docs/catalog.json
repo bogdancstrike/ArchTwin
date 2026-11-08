@@ -2,7 +2,7 @@
   "product": "ArchTwin",
   "status": "planned-greenfield",
   "spec_mode": "delta-changes",
-  "generated": "2026-11-07",
+  "generated": "2026-11-08",
   "phases": [
     {
       "id": "phase-01-foundation",
@@ -87,11 +87,19 @@
   ],
   "model_policy": {
     "v1": "OpenAI via LiteLLM",
+    "selectable_models": [
+      "gpt-6-luna",
+      "gpt-6-terra",
+      "gpt-6-sol"
+    ],
+    "default_model": "gpt-6-luna",
+    "fallback": "gpt-5.6-luna",
+    "embedding": "text-embedding-3-large",
     "observability": "Langfuse",
     "future_on_prem": "optional model profile via LiteLLM"
   },
   "feature_flags": {
-    "optional_count": 89,
+    "optional_count": 97,
     "non_bypassable_security": [
       "security.oidc_required",
       "security.cerbos_required",
@@ -99,5 +107,13 @@
       "security.secret_encryption_required",
       "security.project_isolation_required"
     ]
+  },
+  "requirements": 125,
+  "scenarios": 250,
+  "capability_specs": 38,
+  "paths": {
+    "openspec": "openspec/",
+    "docs": "docs/",
+    "adr": "docs/architecture/adr/"
   }
 }
