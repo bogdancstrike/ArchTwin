@@ -20,7 +20,7 @@ Every generative AI and embedding request MUST go through the internal LiteLLM g
 ### Requirement: Horizon-aligned v1 defaults
 **Requirement ID:** `AT-LLM_GATEWAY-002`
 
-Initial model aliases MUST default to Horizon-compatible gpt-6-luna for reasoning (medium effort where supported), optional gpt-5.6-luna fallback and text-embedding-3-large for embeddings, with validated names and dimensions.
+Initial model aliases MUST default to Horizon-compatible gpt-6-luna for reasoning (medium effort where supported), MUST also register gpt-6-terra and gpt-6-sol as selectable chat models, MUST keep gpt-5.6-luna as an optional non-selectable fallback and text-embedding-3-large for embeddings, with validated names and dimensions.
 
 #### Scenario: Model misconfiguration
 - **GIVEN** a model alias is unavailable
@@ -61,3 +61,19 @@ Model selection MUST depend on capabilities, context, latency and privacy policy
 - **GIVEN** a registered local endpoint lacks tool calling
 - **WHEN** a profile that requires tool calling selects it
 - **THEN** profile validation fails before any user request is routed to it
+
+### Requirement: User model selection
+**Requirement ID:** `AT-LLM_GATEWAY-005`
+
+Users MUST be able to choose the chat model for a request or conversation from the selectable set (gpt-6-luna, gpt-6-terra, gpt-6-sol) filtered by organization and project allowlists; when no choice is made the system MUST use gpt-6-luna, and the server MUST validate every choice and record the model alias on the prompt run and trace.
+
+#### Scenario: Default model
+- **GIVEN** a user has not chosen a model and no project default is set
+- **WHEN** they ask the assistant a question
+- **THEN** the request is routed to gpt-6-luna and the trace records gpt-6-luna
+
+#### Scenario: Disallowed model rejected
+- **GIVEN** the project allowlist excludes gpt-6-sol
+- **WHEN** a client submits a request with model gpt-6-sol
+- **THEN** the server rejects it with a validation error before any model call and no tokens are spent
+

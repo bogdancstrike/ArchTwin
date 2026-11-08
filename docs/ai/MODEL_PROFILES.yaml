@@ -1,14 +1,32 @@
-# Application-owned model profiles; model names resolved by internal LiteLLM gateway.
+# Application-owned model policy; model names resolved by the internal LiteLLM gateway.
+# Users choose a chat model per request/conversation from `selectable_models`;
+# the choice is validated server-side against org -> project allowlists and budgets.
+selectable_models:
+  default: gpt-6-luna
+  options:
+    - alias: gpt-6-luna
+      label: "Luna (default — balanced)"
+      reasoning_effort: medium
+    - alias: gpt-6-terra
+      label: "Terra"
+      reasoning_effort: medium
+    - alias: gpt-6-sol
+      label: "Sol"
+      reasoning_effort: medium
+  # Capabilities, context limits and prices MUST be verified at deployment for terra and sol;
+  # a model failing capability validation (tool calling, structured output) is hidden, not degraded.
+  selection_scope: [org_allowlist, project_allowlist, user_preference, per_request]
+  precedence: "per_request > user_preference > project_default > org_default > gpt-6-luna"
 profiles:
   architecture-reasoning:
-    model_alias: gpt-6-luna
+    model_alias: "${selected_model}"     # user choice, default gpt-6-luna
     reasoning_effort: medium
     allowed_operations: [integration_design, adrs, architecture_review, question_answering]
     max_output_tokens: 10000
     require_citations: true
     sensitive_payload_traces: false
   architecture-fast:
-    model_alias: gpt-6-luna
+    model_alias: gpt-6-luna              # system task, not user-selectable
     allowed_operations: [summarization, extraction_assist, task_draft]
     max_output_tokens: 4000
     require_citations: true
@@ -18,7 +36,7 @@ profiles:
     allowed_operations: [integration_design, adrs, architecture_review, question_answering]
     enabled: false
   architecture-embedding:
-    model_alias: text-embedding-3-large
+    model_alias: text-embedding-3-large  # never user-selectable: changing it requires re-indexing
     dimensions: 1024
     enabled: false
 routing:
@@ -34,3 +52,4 @@ limits:
 observability:
   langfuse_enabled: true
   prompt_content_capture_default: false
+  record_selected_model: true            # model alias recorded on every PromptRun and Langfuse trace

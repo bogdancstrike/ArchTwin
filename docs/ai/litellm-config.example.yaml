@@ -1,25 +1,40 @@
 # REFERENCE ONLY — validate against your pinned LiteLLM release before deployment.
-# Model aliases match the existing Horizon convention. Only LiteLLM holds OPENAI_API_KEY.
+# Model aliases follow the Horizon convention. Only LiteLLM holds OPENAI_API_KEY.
+# User-selectable chat models: gpt-6-luna (DEFAULT), gpt-6-terra, gpt-6-sol.
+# Which of them a user may pick is governed by MODEL_PROFILES.yaml (org/project allowlist), not by LiteLLM.
 model_list:
-  - model_name: gpt-6-luna
+  - model_name: gpt-6-luna            # default
     litellm_params:
       model: openai/gpt-6-luna
       api_key: os.environ/OPENAI_API_KEY
-  - model_name: gpt-5.6-luna
+    model_info: {selectable: true, default: true}
+  - model_name: gpt-6-terra
+    litellm_params:
+      model: openai/gpt-6-terra
+      api_key: os.environ/OPENAI_API_KEY
+    model_info: {selectable: true}
+  - model_name: gpt-6-sol
+    litellm_params:
+      model: openai/gpt-6-sol
+      api_key: os.environ/OPENAI_API_KEY
+    model_info: {selectable: true}
+  - model_name: gpt-5.6-luna          # fallback only, not user-selectable
     litellm_params:
       model: openai/gpt-5.6-luna
       api_key: os.environ/OPENAI_API_KEY
+    model_info: {selectable: false}
   - model_name: text-embedding-3-large
     litellm_params:
       model: openai/text-embedding-3-large
       api_key: os.environ/OPENAI_API_KEY
-      # embedding dimension (1024) set and checked at calling layer/model capability validation
+      # embedding dimension (1024) set and checked at the calling layer / capability validation
 litellm_settings:
   success_callback: ["langfuse"]
   failure_callback: ["langfuse"]
   drop_params: false
   request_timeout: 180
 router_settings:
-  num_retries: 0  # retry orchestrated in bounded workflow layer
-# Future, disabled: on-prem model aliases using vLLM / OpenAI-compatible endpoints.
+  num_retries: 0  # retries are orchestrated once, in the Temporal activity layer
+# Pin per-model prices in LiteLLM AND in ArchTwin's cost resolver (as Horizon does) so ledgers agree.
+# Future, disabled: on-prem aliases via vLLM / OpenAI-compatible endpoints.
 # Never silently bypass organization model/data-residency restrictions.

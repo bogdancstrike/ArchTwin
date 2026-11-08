@@ -16,4 +16,4 @@
 - Median/p95 token cost and wall-clock latency tracked per profile, connector corpus and environment.
 - Human architect review of utility with blind comparison to baseline workflow before claiming productivity gains.
 
-Run tests for `gpt-6-luna` initially, then optional `gpt-5.6-luna` fallback and future on-prem models. **Do not assume equivalent quality or pricing.** Use Langfuse traces/evaluations and gateway usage metadata; pin dataset and model profile versions.
+Run the full suite for every selectable model (`gpt-6-luna` default, `gpt-6-terra`, `gpt-6-sol`) — a model is shown in the picker only after it meets the thresholds — then the optional `gpt-5.6-luna` fallback and future on-prem models. **Do not assume equivalent quality or pricing.** Use Langfuse traces/evaluations and gateway usage metadata; pin dataset and model profile versions.

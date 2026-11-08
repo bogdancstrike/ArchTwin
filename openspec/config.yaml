@@ -22,7 +22,7 @@ context: |
   OpenTelemetry service graph (runtime edges), React 19 + Vite + shadcn/ui + TanStack + React Flow + elkjs,
   Mermaid, Structurizr CLI (DSL import/export), Apprise (notifications), Pandoc/WeasyPrint (exports), cosign (signing).
 
-  AI: OpenAI via LiteLLM in v1 with Horizon-aligned aliases (gpt-6-luna medium reasoning, gpt-5.6-luna fallback,
+  AI: OpenAI via LiteLLM in v1 with Horizon-aligned aliases (user-selectable gpt-6-luna [default], gpt-6-terra, gpt-6-sol; gpt-5.6-luna fallback;
   text-embedding-3-large). Future vLLM/local models are a LiteLLM configuration change, never domain code.
 
   Safety invariants (never feature-flagged): authentication, authorization (default deny, fail closed), audit,

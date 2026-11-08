@@ -8,10 +8,13 @@
 ## Model profiles (config, not provider-coupled code)
 | Profile | V1 alias | Tasks | Requirements |
 |---|---|---|---|
-| `architecture-reasoning` | gpt-6-luna | cross-project solution design, ADR alternatives, architecture reviews | tool calling, structured output, medium reasoning when supported |
+| `architecture-reasoning` | **user-selected**: gpt-6-luna (default), gpt-6-terra, gpt-6-sol | cross-project solution design, ADR alternatives, architecture reviews | tool calling, structured output, medium reasoning when supported |
 | `architecture-fast` | gpt-6-luna initially | summaries, constrained labeling, technical clarifications | low latency, structured output |
 | `architecture-fallback` | gpt-5.6-luna | outage response if approved | same data policy, explicit fallback audit |
 | `architecture-embedding` | text-embedding-3-large | optional document/architecture search vectors | verified dimensions, embedding version tracking |
+
+### User-selectable models
+Users pick the chat model per conversation or request from a model picker (Luna — default, Terra, Sol). The list comes from `GET /api/v1/ai/models`, which returns only aliases that (a) are registered in LiteLLM, (b) passed capability validation (tool calling, structured output, context size) and (c) are allowed by the org and project allowlists. Precedence: per-request > user preference > project default > org default > `gpt-6-luna`. The server re-validates the choice on every call; the chosen alias is stored on the `PromptRun`, shown next to the answer and sent to Langfuse so quality and cost can be compared per model. System tasks (`architecture-fast`, embeddings, eval judges) are not user-selectable.
 
 No OpenAI provider client is imported into business services. OpenAI keys are mounted **only** into LiteLLM; workers use scoped gateway keys. No automatic fallback across data residency/privacy policy boundaries.
 
