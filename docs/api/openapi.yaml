@@ -1,0 +1,128 @@
+openapi: 3.1.0
+info:
+  title: ArchTwin API (representative contract)
+  version: 0.1.0-draft
+  description: This is a non-exhaustive OpenAPI contract for the initial platform. Each capability adds paths and schemas during implementation.
+servers:
+  - url: https://archtwin.example.invalid/api/v1
+security:
+  - oidc: []
+paths:
+  /projects:
+    get:
+      summary: List projects authorized for the current principal
+      operationId: listProjects
+      parameters:
+        - in: query
+          name: cursor
+          schema: {type: string}
+      responses:
+        '200':
+          description: Authorized projects
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/Project'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      summary: Create a project
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateProject'}
+      responses:
+        '201':
+          description: Project created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Project'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /projects/{projectId}/architecture:
+    get:
+      summary: Get scoped architecture snapshot
+      operationId: getProjectArchitecture
+      parameters:
+        - {$ref: '#/components/parameters/ProjectId'}
+        - {in: query, name: environment, required: true, schema: {type: string}}
+        - {in: query, name: snapshot_id, schema: {type: string}}
+      responses:
+        '200':
+          description: Scoped architecture, desired/static/observed explicitly separated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  snapshot_id: {type: string}
+                  environment: {type: string}
+                  graph: {type: object, additionalProperties: true}
+                  freshness: {type: object, additionalProperties: true}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /projects/{projectId}/integrations:design:
+    post:
+      summary: Draft cross-platform integration options; does not apply changes
+      operationId: draftIntegration
+      parameters:
+        - {$ref: '#/components/parameters/ProjectId'}
+        - {in: header, name: Idempotency-Key, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_project_id, question]
+              properties:
+                target_project_id: {type: string}
+                question: {type: string, minLength: 1, maxLength: 10000}
+                environment: {type: string, default: prod}
+      responses:
+        '202':
+          description: Authorized async proposal run accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id: {type: string}
+                  state: {type: string, enum: [queued]}
+        '403': {$ref: '#/components/responses/Forbidden'}
+components:
+  securitySchemes:
+    oidc:
+      type: openIdConnect
+      openIdConnectUrl: https://keycloak.example.invalid/realms/archtwin/.well-known/openid-configuration
+  parameters:
+    ProjectId:
+      in: path
+      name: projectId
+      required: true
+      schema: {type: string}
+  responses:
+    Unauthorized:
+      description: Authentication required
+    Forbidden:
+      description: Authorization denied (does not reveal protected details)
+  schemas:
+    CreateProject:
+      type: object
+      required: [slug, title, purpose]
+      properties:
+        slug: {type: string, pattern: '^[a-z0-9][a-z0-9-]{1,62}$'}
+        title: {type: string, minLength: 3, maxLength: 200}
+        purpose: {type: string, maxLength: 5000}
+        scope: {type: object, additionalProperties: true}
+    Project:
+      allOf:
+        - {$ref: '#/components/schemas/CreateProject'}
+        - type: object
+          required: [id, organization_id]
+          properties:
+            id: {type: string, format: uuid}
+            organization_id: {type: string, format: uuid}

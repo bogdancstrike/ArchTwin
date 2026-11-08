@@ -1,0 +1,25 @@
+# REFERENCE ONLY — validate against your pinned LiteLLM release before deployment.
+# Model aliases match the existing Horizon convention. Only LiteLLM holds OPENAI_API_KEY.
+model_list:
+  - model_name: gpt-6-luna
+    litellm_params:
+      model: openai/gpt-6-luna
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: gpt-5.6-luna
+    litellm_params:
+      model: openai/gpt-5.6-luna
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: text-embedding-3-large
+    litellm_params:
+      model: openai/text-embedding-3-large
+      api_key: os.environ/OPENAI_API_KEY
+      # embedding dimension (1024) set and checked at calling layer/model capability validation
+litellm_settings:
+  success_callback: ["langfuse"]
+  failure_callback: ["langfuse"]
+  drop_params: false
+  request_timeout: 180
+router_settings:
+  num_retries: 0  # retry orchestrated in bounded workflow layer
+# Future, disabled: on-prem model aliases using vLLM / OpenAI-compatible endpoints.
+# Never silently bypass organization model/data-residency restrictions.

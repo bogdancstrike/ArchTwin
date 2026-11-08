@@ -1,0 +1,103 @@
+{
+  "product": "ArchTwin",
+  "status": "planned-greenfield",
+  "spec_mode": "delta-changes",
+  "generated": "2026-11-07",
+  "phases": [
+    {
+      "id": "phase-01-foundation",
+      "title": "Secure multi-project foundations",
+      "capabilities": [
+        "organizations",
+        "project-boundaries",
+        "identity-policy",
+        "feature-flags",
+        "audit-provenance",
+        "canonical-events",
+        "ui-workspaces",
+        "llm-gateway"
+      ]
+    },
+    {
+      "id": "phase-02-connectors",
+      "title": "Discovery and connected data",
+      "capabilities": [
+        "connector-platform",
+        "source-code-discovery",
+        "runtime-discovery",
+        "data-topology",
+        "work-connectors",
+        "document-parsing",
+        "normalization-freshness"
+      ]
+    },
+    {
+      "id": "phase-03-architecture",
+      "title": "Living diagrams and architecture knowledge",
+      "capabilities": [
+        "architecture-graph",
+        "diagram-studio",
+        "documentation-engine",
+        "adr-workflow",
+        "architecture-reviews"
+      ]
+    },
+    {
+      "id": "phase-04-drift",
+      "title": "Continuous drift and early-warning intelligence",
+      "capabilities": [
+        "drift-engine",
+        "continuous-watchers",
+        "drift-triage",
+        "architecture-notifications"
+      ]
+    },
+    {
+      "id": "phase-05-delivery",
+      "title": "Plans, task execution and delivery alignment",
+      "capabilities": [
+        "architecture-planning",
+        "issue-synchronization",
+        "implementation-traceability",
+        "release-gates"
+      ]
+    },
+    {
+      "id": "phase-06-intelligence",
+      "title": "Grounded AI and cross-platform design",
+      "capabilities": [
+        "architecture-assistant",
+        "cross-project-federation",
+        "integration-designer",
+        "impact-analysis",
+        "ai-evaluations"
+      ]
+    },
+    {
+      "id": "phase-07-enterprise",
+      "title": "Enterprise operations and extensibility",
+      "capabilities": [
+        "enterprise-operations",
+        "collaboration-approvals",
+        "unified-search-export",
+        "connector-sdk",
+        "architecture-health"
+      ]
+    }
+  ],
+  "model_policy": {
+    "v1": "OpenAI via LiteLLM",
+    "observability": "Langfuse",
+    "future_on_prem": "optional model profile via LiteLLM"
+  },
+  "feature_flags": {
+    "optional_count": 89,
+    "non_bypassable_security": [
+      "security.oidc_required",
+      "security.cerbos_required",
+      "security.audit_required",
+      "security.secret_encryption_required",
+      "security.project_isolation_required"
+    ]
+  }
+}

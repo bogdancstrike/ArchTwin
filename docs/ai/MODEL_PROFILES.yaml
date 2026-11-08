@@ -1,0 +1,36 @@
+# Application-owned model profiles; model names resolved by internal LiteLLM gateway.
+profiles:
+  architecture-reasoning:
+    model_alias: gpt-6-luna
+    reasoning_effort: medium
+    allowed_operations: [integration_design, adrs, architecture_review, question_answering]
+    max_output_tokens: 10000
+    require_citations: true
+    sensitive_payload_traces: false
+  architecture-fast:
+    model_alias: gpt-6-luna
+    allowed_operations: [summarization, extraction_assist, task_draft]
+    max_output_tokens: 4000
+    require_citations: true
+    sensitive_payload_traces: false
+  architecture-fallback:
+    model_alias: gpt-5.6-luna
+    allowed_operations: [integration_design, adrs, architecture_review, question_answering]
+    enabled: false
+  architecture-embedding:
+    model_alias: text-embedding-3-large
+    dimensions: 1024
+    enabled: false
+routing:
+  default_provider: openai-via-litellm
+  allow_direct_provider_api: false
+  allow_unapproved_cross_residency_fallback: false
+  future_on_prem_enabled: false
+limits:
+  max_parallel_requests_per_project: 4
+  max_evidence_items_per_request: 120
+  max_graph_nodes_per_ai_query: 500
+  hard_budget_enforcement: true
+observability:
+  langfuse_enabled: true
+  prompt_content_capture_default: false

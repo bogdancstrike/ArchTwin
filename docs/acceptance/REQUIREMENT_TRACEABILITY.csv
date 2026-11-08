@@ -1,0 +1,122 @@
+requirement_id,phase,capability,requirement,status,test_evidence,implementation_evidence
+AT-ORGANIZATIONS-001,phase-01-foundation,organizations,Organization tenancy,not-started,test-pending,implementation-pending
+AT-ORGANIZATIONS-002,phase-01-foundation,organizations,Organization lifecycle,not-started,test-pending,implementation-pending
+AT-ORGANIZATIONS-003,phase-01-foundation,organizations,Ownership,not-started,test-pending,implementation-pending
+AT-PROJECT_BOUNDARIES-001,phase-01-foundation,project-boundaries,Project creation,not-started,test-pending,implementation-pending
+AT-PROJECT_BOUNDARIES-002,phase-01-foundation,project-boundaries,Project isolation,not-started,test-pending,implementation-pending
+AT-PROJECT_BOUNDARIES-003,phase-01-foundation,project-boundaries,Cross-project linkage,not-started,test-pending,implementation-pending
+AT-PROJECT_BOUNDARIES-004,phase-01-foundation,project-boundaries,Environment separation,not-started,test-pending,implementation-pending
+AT-IDENTITY_POLICY-001,phase-01-foundation,identity-policy,Keycloak authentication,not-started,test-pending,implementation-pending
+AT-IDENTITY_POLICY-002,phase-01-foundation,identity-policy,Fine-grained authorization,not-started,test-pending,implementation-pending
+AT-IDENTITY_POLICY-003,phase-01-foundation,identity-policy,Safe listing,not-started,test-pending,implementation-pending
+AT-IDENTITY_POLICY-004,phase-01-foundation,identity-policy,Credential boundary,not-started,test-pending,implementation-pending
+AT-IDENTITY_POLICY-005,phase-01-foundation,identity-policy,Agent permissions,not-started,test-pending,implementation-pending
+AT-FEATURE_FLAGS-001,phase-01-foundation,feature-flags,Feature flag hierarchy,not-started,test-pending,implementation-pending
+AT-FEATURE_FLAGS-002,phase-01-foundation,feature-flags,All major modules,not-started,test-pending,implementation-pending
+AT-FEATURE_FLAGS-003,phase-01-foundation,feature-flags,Auditable rollout,not-started,test-pending,implementation-pending
+AT-AUDIT_PROVENANCE-001,phase-01-foundation,audit-provenance,Audit envelope,not-started,test-pending,implementation-pending
+AT-AUDIT_PROVENANCE-002,phase-01-foundation,audit-provenance,Evidence references,not-started,test-pending,implementation-pending
+AT-AUDIT_PROVENANCE-003,phase-01-foundation,audit-provenance,Tamper evidence,not-started,test-pending,implementation-pending
+AT-CANONICAL_EVENTS-001,phase-01-foundation,canonical-events,Transaction consistency,not-started,test-pending,implementation-pending
+AT-CANONICAL_EVENTS-002,phase-01-foundation,canonical-events,Stable global identifiers,not-started,test-pending,implementation-pending
+AT-CANONICAL_EVENTS-003,phase-01-foundation,canonical-events,Versioned snapshots,not-started,test-pending,implementation-pending
+AT-UI_WORKSPACES-001,phase-01-foundation,ui-workspaces,Project home,not-started,test-pending,implementation-pending
+AT-UI_WORKSPACES-002,phase-01-foundation,ui-workspaces,Navigation and accessibility,not-started,test-pending,implementation-pending
+AT-UI_WORKSPACES-003,phase-01-foundation,ui-workspaces,Evidence-first interaction,not-started,test-pending,implementation-pending
+AT-LLM_GATEWAY-001,phase-01-foundation,llm-gateway,LiteLLM-only AI egress,not-started,test-pending,implementation-pending
+AT-LLM_GATEWAY-002,phase-01-foundation,llm-gateway,Horizon-aligned v1 defaults,not-started,test-pending,implementation-pending
+AT-LLM_GATEWAY-003,phase-01-foundation,llm-gateway,Langfuse telemetry,not-started,test-pending,implementation-pending
+AT-LLM_GATEWAY-004,phase-01-foundation,llm-gateway,On-prem readiness,not-started,test-pending,implementation-pending
+AT-CONNECTOR_PLATFORM-001,phase-02-connectors,connector-platform,Connector types,not-started,test-pending,implementation-pending
+AT-CONNECTOR_PLATFORM-002,phase-02-connectors,connector-platform,Safe execution,not-started,test-pending,implementation-pending
+AT-CONNECTOR_PLATFORM-003,phase-02-connectors,connector-platform,Resynchronization,not-started,test-pending,implementation-pending
+AT-SOURCE_CODE_DISCOVERY-001,phase-02-connectors,source-code-discovery,Repo scanning,not-started,test-pending,implementation-pending
+AT-SOURCE_CODE_DISCOVERY-002,phase-02-connectors,source-code-discovery,Static analysis evidence,not-started,test-pending,implementation-pending
+AT-SOURCE_CODE_DISCOVERY-003,phase-02-connectors,source-code-discovery,Change tracking,not-started,test-pending,implementation-pending
+AT-RUNTIME_DISCOVERY-001,phase-02-connectors,runtime-discovery,Supported runtimes,not-started,test-pending,implementation-pending
+AT-RUNTIME_DISCOVERY-002,phase-02-connectors,runtime-discovery,Runtime evidence,not-started,test-pending,implementation-pending
+AT-RUNTIME_DISCOVERY-003,phase-02-connectors,runtime-discovery,Source protection,not-started,test-pending,implementation-pending
+AT-DATA_TOPOLOGY-001,phase-02-connectors,data-topology,Database family,not-started,test-pending,implementation-pending
+AT-DATA_TOPOLOGY-002,phase-02-connectors,data-topology,Messaging systems,not-started,test-pending,implementation-pending
+AT-DATA_TOPOLOGY-003,phase-02-connectors,data-topology,Sensitive metadata,not-started,test-pending,implementation-pending
+AT-WORK_CONNECTORS-001,phase-02-connectors,work-connectors,Work connector support,not-started,test-pending,implementation-pending
+AT-WORK_CONNECTORS-002,phase-02-connectors,work-connectors,Change ingestion,not-started,test-pending,implementation-pending
+AT-WORK_CONNECTORS-003,phase-02-connectors,work-connectors,Read-only first,not-started,test-pending,implementation-pending
+AT-DOCUMENT_PARSING-001,phase-02-connectors,document-parsing,Docling ingestion,not-started,test-pending,implementation-pending
+AT-DOCUMENT_PARSING-002,phase-02-connectors,document-parsing,File security,not-started,test-pending,implementation-pending
+AT-DOCUMENT_PARSING-003,phase-02-connectors,document-parsing,Document associations,not-started,test-pending,implementation-pending
+AT-NORMALIZATION_FRESHNESS-001,phase-02-connectors,normalization-freshness,Canonical mapping,not-started,test-pending,implementation-pending
+AT-NORMALIZATION_FRESHNESS-002,phase-02-connectors,normalization-freshness,Provenance confidence,not-started,test-pending,implementation-pending
+AT-NORMALIZATION_FRESHNESS-003,phase-02-connectors,normalization-freshness,Staleness budgets,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_GRAPH-001,phase-03-architecture,architecture-graph,Graph semantics,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_GRAPH-002,phase-03-architecture,architecture-graph,Relationship lifecycle,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_GRAPH-003,phase-03-architecture,architecture-graph,Human model overlay,not-started,test-pending,implementation-pending
+AT-DIAGRAM_STUDIO-001,phase-03-architecture,diagram-studio,Multi-view diagrams,not-started,test-pending,implementation-pending
+AT-DIAGRAM_STUDIO-002,phase-03-architecture,diagram-studio,Round-trip safety,not-started,test-pending,implementation-pending
+AT-DIAGRAM_STUDIO-003,phase-03-architecture,diagram-studio,Architect annotations,not-started,test-pending,implementation-pending
+AT-DIAGRAM_STUDIO-004,phase-03-architecture,diagram-studio,Comparison views,not-started,test-pending,implementation-pending
+AT-DOCUMENTATION_ENGINE-001,phase-03-architecture,documentation-engine,Documentation types,not-started,test-pending,implementation-pending
+AT-DOCUMENTATION_ENGINE-002,phase-03-architecture,documentation-engine,Citations and ownership,not-started,test-pending,implementation-pending
+AT-DOCUMENTATION_ENGINE-003,phase-03-architecture,documentation-engine,Export,not-started,test-pending,implementation-pending
+AT-ADR_WORKFLOW-001,phase-03-architecture,adr-workflow,ADR lifecycle,not-started,test-pending,implementation-pending
+AT-ADR_WORKFLOW-002,phase-03-architecture,adr-workflow,Decision linkage,not-started,test-pending,implementation-pending
+AT-ADR_WORKFLOW-003,phase-03-architecture,adr-workflow,Review and sign-off,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_REVIEWS-001,phase-03-architecture,architecture-reviews,Review packs,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_REVIEWS-002,phase-03-architecture,architecture-reviews,Risk register,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_REVIEWS-003,phase-03-architecture,architecture-reviews,Recommendations as proposals,not-started,test-pending,implementation-pending
+AT-DRIFT_ENGINE-001,phase-04-drift,drift-engine,Drift baseline,not-started,test-pending,implementation-pending
+AT-DRIFT_ENGINE-002,phase-04-drift,drift-engine,Drift taxonomy,not-started,test-pending,implementation-pending
+AT-DRIFT_ENGINE-003,phase-04-drift,drift-engine,Deterministic rules,not-started,test-pending,implementation-pending
+AT-DRIFT_ENGINE-004,phase-04-drift,drift-engine,Suppressions and acceptance,not-started,test-pending,implementation-pending
+AT-CONTINUOUS_WATCHERS-001,phase-04-drift,continuous-watchers,Event-first ingestion,not-started,test-pending,implementation-pending
+AT-CONTINUOUS_WATCHERS-002,phase-04-drift,continuous-watchers,Backpressure and ordering,not-started,test-pending,implementation-pending
+AT-CONTINUOUS_WATCHERS-003,phase-04-drift,continuous-watchers,Failure behavior,not-started,test-pending,implementation-pending
+AT-DRIFT_TRIAGE-001,phase-04-drift,drift-triage,Prioritization,not-started,test-pending,implementation-pending
+AT-DRIFT_TRIAGE-002,phase-04-drift,drift-triage,Workflow,not-started,test-pending,implementation-pending
+AT-DRIFT_TRIAGE-003,phase-04-drift,drift-triage,Traceable alerts,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_NOTIFICATIONS-001,phase-04-drift,architecture-notifications,Notification routing,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_NOTIFICATIONS-002,phase-04-drift,architecture-notifications,Policies,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_NOTIFICATIONS-003,phase-04-drift,architecture-notifications,SLO monitoring,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_PLANNING-001,phase-05-delivery,architecture-planning,Planning hierarchy,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_PLANNING-002,phase-05-delivery,architecture-planning,Plan evidence,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_PLANNING-003,phase-05-delivery,architecture-planning,Progress projection,not-started,test-pending,implementation-pending
+AT-ISSUE_SYNCHRONIZATION-001,phase-05-delivery,issue-synchronization,Issue ingestion,not-started,test-pending,implementation-pending
+AT-ISSUE_SYNCHRONIZATION-002,phase-05-delivery,issue-synchronization,Linking and conflicts,not-started,test-pending,implementation-pending
+AT-ISSUE_SYNCHRONIZATION-003,phase-05-delivery,issue-synchronization,Controlled write-back,not-started,test-pending,implementation-pending
+AT-IMPLEMENTATION_TRACEABILITY-001,phase-05-delivery,implementation-traceability,Evidence chain,not-started,test-pending,implementation-pending
+AT-IMPLEMENTATION_TRACEABILITY-002,phase-05-delivery,implementation-traceability,Status semantics,not-started,test-pending,implementation-pending
+AT-IMPLEMENTATION_TRACEABILITY-003,phase-05-delivery,implementation-traceability,Drift from plan,not-started,test-pending,implementation-pending
+AT-RELEASE_GATES-001,phase-05-delivery,release-gates,Non-blocking-first gates,not-started,test-pending,implementation-pending
+AT-RELEASE_GATES-002,phase-05-delivery,release-gates,Policy control,not-started,test-pending,implementation-pending
+AT-RELEASE_GATES-003,phase-05-delivery,release-gates,Signed artifacts,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_ASSISTANT-001,phase-06-intelligence,architecture-assistant,Bounded context,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_ASSISTANT-002,phase-06-intelligence,architecture-assistant,Explain with sources,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_ASSISTANT-003,phase-06-intelligence,architecture-assistant,Architect workflows,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_ASSISTANT-004,phase-06-intelligence,architecture-assistant,Budget safety,not-started,test-pending,implementation-pending
+AT-CROSS_PROJECT_FEDERATION-001,phase-06-intelligence,cross-project-federation,Explicit grants,not-started,test-pending,implementation-pending
+AT-CROSS_PROJECT_FEDERATION-002,phase-06-intelligence,cross-project-federation,Boundary-preserving graph,not-started,test-pending,implementation-pending
+AT-CROSS_PROJECT_FEDERATION-003,phase-06-intelligence,cross-project-federation,Integration discovery,not-started,test-pending,implementation-pending
+AT-INTEGRATION_DESIGNER-001,phase-06-intelligence,integration-designer,Candidate architectures,not-started,test-pending,implementation-pending
+AT-INTEGRATION_DESIGNER-002,phase-06-intelligence,integration-designer,Constraint accounting,not-started,test-pending,implementation-pending
+AT-INTEGRATION_DESIGNER-003,phase-06-intelligence,integration-designer,Artifacts with approval,not-started,test-pending,implementation-pending
+AT-IMPACT_ANALYSIS-001,phase-06-intelligence,impact-analysis,Graph impact,not-started,test-pending,implementation-pending
+AT-IMPACT_ANALYSIS-002,phase-06-intelligence,impact-analysis,Scenario branches,not-started,test-pending,implementation-pending
+AT-IMPACT_ANALYSIS-003,phase-06-intelligence,impact-analysis,Bounded claims,not-started,test-pending,implementation-pending
+AT-AI_EVALUATIONS-001,phase-06-intelligence,ai-evaluations,Evaluation dataset,not-started,test-pending,implementation-pending
+AT-AI_EVALUATIONS-002,phase-06-intelligence,ai-evaluations,Provider independence,not-started,test-pending,implementation-pending
+AT-AI_EVALUATIONS-003,phase-06-intelligence,ai-evaluations,Human override,not-started,test-pending,implementation-pending
+AT-ENTERPRISE_OPERATIONS-001,phase-07-enterprise,enterprise-operations,SLOs,not-started,test-pending,implementation-pending
+AT-ENTERPRISE_OPERATIONS-002,phase-07-enterprise,enterprise-operations,HA and recovery,not-started,test-pending,implementation-pending
+AT-ENTERPRISE_OPERATIONS-003,phase-07-enterprise,enterprise-operations,Retention,not-started,test-pending,implementation-pending
+AT-COLLABORATION_APPROVALS-001,phase-07-enterprise,collaboration-approvals,Workspace collaboration,not-started,test-pending,implementation-pending
+AT-COLLABORATION_APPROVALS-002,phase-07-enterprise,collaboration-approvals,Approval controls,not-started,test-pending,implementation-pending
+AT-COLLABORATION_APPROVALS-003,phase-07-enterprise,collaboration-approvals,Notifications and access,not-started,test-pending,implementation-pending
+AT-UNIFIED_SEARCH_EXPORT-001,phase-07-enterprise,unified-search-export,Scoped search,not-started,test-pending,implementation-pending
+AT-UNIFIED_SEARCH_EXPORT-002,phase-07-enterprise,unified-search-export,Portable formats,not-started,test-pending,implementation-pending
+AT-UNIFIED_SEARCH_EXPORT-003,phase-07-enterprise,unified-search-export,APIs and events,not-started,test-pending,implementation-pending
+AT-CONNECTOR_SDK-001,phase-07-enterprise,connector-sdk,Versioned SDK,not-started,test-pending,implementation-pending
+AT-CONNECTOR_SDK-002,phase-07-enterprise,connector-sdk,Supply-chain safety,not-started,test-pending,implementation-pending
+AT-CONNECTOR_SDK-003,phase-07-enterprise,connector-sdk,Isolation and limits,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_HEALTH-001,phase-07-enterprise,architecture-health,Quality scorecards,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_HEALTH-002,phase-07-enterprise,architecture-health,Trends,not-started,test-pending,implementation-pending
+AT-ARCHITECTURE_HEALTH-003,phase-07-enterprise,architecture-health,Portfolio rollups,not-started,test-pending,implementation-pending

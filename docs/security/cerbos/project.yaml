@@ -1,0 +1,21 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: project
+  rules:
+    - actions: ["view", "query"]
+      effect: EFFECT_ALLOW
+      roles: ["org_owner", "org_admin", "project_owner", "architect", "tech_lead", "contributor", "reviewer", "viewer"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.org_id == request.resource.attr.org_id &&
+            request.resource.attr.project_id in request.principal.attr.project_ids
+    - actions: ["edit", "publish"]
+      effect: EFFECT_ALLOW
+      roles: ["org_owner", "org_admin", "project_owner", "architect"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.org_id == request.resource.attr.org_id &&
+            request.resource.attr.project_id in request.principal.attr.project_ids

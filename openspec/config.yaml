@@ -1,0 +1,48 @@
+schema: spec-driven
+context: |
+  ArchTwin is a greenfield, architect-first living-architecture platform.
+  Users: enterprise/solution architects, principal engineers, platform/SRE, tech leads, security architects.
+
+  Product loop: design -> ADR -> plan -> issues/commits -> runtime observation -> drift -> review -> updated architecture.
+
+  Architecture (see docs/architecture/SOLUTION_ARCHITECTURE.md and docs/architecture/adr/):
+  - Modular monolith: one FastAPI (asyncio) API process + Temporal workers from the same image. No microservices until measured.
+  - PostgreSQL is the only system of record (graph tables with temporal validity, JSONB snapshots, FTS, pgvector).
+    Valkey = cache/rate limits only. S3-compatible object store (SeaweedFS locally) = raw artifacts.
+  - Transactional outbox in PostgreSQL; Temporal for every durable/long-running job (scans, reconcile, approvals, schedules).
+    No Kafka, Celery or custom scheduler in the MVP.
+  - Evidence model: every fact is an immutable observation with origin (desired/static/runtime/planned/issue/inferred/manual),
+    source revision, observed_at, parser/mapping version, confidence. Missing or stale evidence = UNKNOWN, never absence.
+  - Drift is deterministic (versioned rules over immutable snapshots). LLMs explain and draft; they never detect or authorize.
+
+  Adopted open source (do not rebuild; see docs/TECHNOLOGIES.md):
+  Keycloak (OIDC/PKCE), Cerbos (+ query-plan SQLAlchemy adapter), OpenFeature SDK with a PostgreSQL-backed provider,
+  Temporal, SQLAlchemy 2 async + Alembic, Pydantic v2, LiteLLM (sole AI egress) + Langfuse (traces/evals),
+  Docling (documents), tree-sitter + Syft (code/SBOM), kubernetes_asyncio, confluent-kafka AdminClient,
+  OpenTelemetry service graph (runtime edges), React 19 + Vite + shadcn/ui + TanStack + React Flow + elkjs,
+  Mermaid, Structurizr CLI (DSL import/export), Apprise (notifications), Pandoc/WeasyPrint (exports), cosign (signing).
+
+  AI: OpenAI via LiteLLM in v1 with Horizon-aligned aliases (gpt-6-luna medium reasoning, gpt-5.6-luna fallback,
+  text-embedding-3-large). Future vLLM/local models are a LiteLLM configuration change, never domain code.
+
+  Safety invariants (never feature-flagged): authentication, authorization (default deny, fail closed), audit,
+  secret encryption, project isolation. Connectors are read-only by default; external writes need flag + preview + approval.
+
+  Specs: openspec/changes/phase-* hold planned ADDED requirements; openspec/specs/ stays empty until a phase is
+  genuinely implemented and archived.
+rules:
+  proposal:
+    - State the business outcome, affected users, dependency phase, security risks, rollout and rollback.
+    - Include an Impact section listing new modules, tables, APIs, flags and infrastructure.
+    - Name the open-source components adopted and why building in-house is not justified.
+  specs:
+    - Use MUST/SHALL language; every requirement has a positive and a negative or edge-case Given/When/Then scenario.
+    - Include tenant/project boundaries, provenance, authorization and failure handling in domain contracts.
+    - Treat unavailable source evidence as UNKNOWN, never as proof of absence.
+  design:
+    - Cover data ownership, interfaces, threat controls, idempotency, reconciliation, scalability and testing.
+    - Prefer the modular monolith; justify any separate process. Prefer an adopted OSS component over custom code.
+    - List risks with mitigations, the rollback path, and open questions that block implementation.
+  tasks:
+    - Order tasks so each group ends in a demoable, tested vertical slice; mark MVP vs deferrable work.
+    - Link each task group to requirement IDs; never check a task without merged code and passing tests.
