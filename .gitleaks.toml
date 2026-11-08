@@ -1,0 +1,13 @@
+# Default gitleaks rules + an allowlist for deliberately fake secrets used by redaction/canary tests.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "fake canary tokens, test JWTs and fixture .env used to prove redaction and secret-file skipping"
+paths = [
+  '''apps/api/tests/unit/test_security_primitives\.py''',
+  '''apps/api/tests/fixtures/sample_repo/\.env''',
+  '''apps/api/tests/e2e/test_journey\.py''',
+]
+commits = ['391d4a5eae04f5565cd3259b1737f8d88c37f09e', '3bef62ba623f617079f7cdcc46beb9e72e308c2e']  # prose false positives in docs history
+regexes = ['''ARCHTWIN-CANARY-[A-Za-z0-9]+''']

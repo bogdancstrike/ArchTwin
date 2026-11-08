@@ -7,7 +7,7 @@
 **The living digital twin of your software architecture.**
 Know what was designed, what was planned, what the code says and what is actually running — and get told, with evidence, when they drift apart.
 
-[![Status: specification](https://img.shields.io/badge/status-specification-eb6c36?style=flat-square)](#-roadmap--status)
+[![Status: MVP in progress](https://img.shields.io/badge/status-MVP%20in%20progress-eb6c36?style=flat-square)](#-roadmap--status)
 [![OpenSpec](https://img.shields.io/badge/spec-OpenSpec-2d3142?style=flat-square)](openspec/)
 [![Python FastAPI](https://img.shields.io/badge/API-FastAPI%20asyncio-009688?style=flat-square&logo=fastapi&logoColor=white)](docs/TECHNOLOGIES.md)
 [![React](https://img.shields.io/badge/UI-React%20%2B%20React%20Flow-61DAFB?style=flat-square&logo=react&logoColor=black)](docs/TECHNOLOGIES.md)
@@ -16,14 +16,47 @@ Know what was designed, what was planned, what the code says and what is actuall
 [![Keycloak + Cerbos](https://img.shields.io/badge/auth-Keycloak%20%2B%20Cerbos-4d4d4d?style=flat-square)](docs/architecture/adr/0004-keycloak-cerbos-and-federation.md)
 [![LiteLLM + Langfuse](https://img.shields.io/badge/AI-LiteLLM%20%2B%20Langfuse-6E56CF?style=flat-square)](docs/ai/AI_ARCHITECTURE.md)
 
-[What it is](#-what-it-is) · [Features](#-features) · [How it works](#-how-it-works) · [Architecture](#-architecture) · [Tech stack](#-tech-stack) · [Roadmap](#-roadmap--status) · [Docs](#-documentation) · [Contributing](#-contributing)
+[What it is](#-what-it-is) · [Quick start](#-quick-start) · [Features](#-features) · [How it works](#-how-it-works) · [Architecture](#-architecture) · [Tech stack](#-tech-stack) · [Roadmap](#-roadmap--status) · [Docs](#-documentation) · [Contributing](#-contributing)
 
 </div>
 
 ---
 
 > [!NOTE]
-> **This repository currently contains the product and engineering specification** — PRD, architecture, ADRs, threat model and 7 OpenSpec phase changes (38 capabilities · 125 requirements · 250 scenarios). Implementation starts with the walking skeleton in [`openspec/changes/phase-01-foundation`](openspec/changes/phase-01-foundation/). Nothing below is claimed as implemented yet.
+> **Status:** the walking skeleton and the M1/M2 vertical slice are implemented and tested end to end (phases 01–04 MVP scope plus the
+> grounded assistant from phase 06) on branch `feat/walking-skeleton-m1`. Live progress per task: [`docs/TASKS.md`](docs/TASKS.md).
+> OpenSpec task checkboxes are ticked only after merge with green CI. Phases 05 and 07 are specified, not implemented.
+
+## 🚀 Quick start
+
+```bash
+./scripts/init-env.sh sk-your-openai-key   # writes .env, generates every internal secret (omit the key for zero-token fake LLM mode)
+make up                                     # docker compose up -d --build (first start migrates and seeds)
+open http://localhost:3200                  # admin/admin · alice, bob, vera, mallory / archtwin
+```
+
+Then: **New project → Inventory → Add connector** (`git` with path `/sources/horizon` or `/sources/archtwin`, `docker` for runtime,
+`postgresql` for a catalog) → **Scan** → **Architecture** (C4 zoom: double-click / Enter, Backspace to go up) → **Settings → Propose
+baseline** (a different user approves) → **Drift** → **Assistant**.
+
+| Container | Role | Port |
+|---|---|---|
+| `archtwin-web` | React UI (nginx, CSP, `/api` proxy) | 3200 |
+| `archtwin-api` | FastAPI modular monolith | 127.0.0.1:8200 |
+| `archtwin-worker` | Temporal worker + outbox relay + reconcile loop | — |
+| `archtwin-migrate`, `archtwin-seed` | Alembic migrations, pilot-org seed (one-shot) | — |
+| `archtwin-thirdparty-postgres` | PostgreSQL + pgvector (system of record, RLS) | 127.0.0.1:5452 |
+| `archtwin-thirdparty-keycloak` | OIDC (PKCE) | 8280 |
+| `archtwin-thirdparty-cerbos` | authorization PDP | — |
+| `archtwin-thirdparty-temporal`, `-temporal-ui` | durable jobs | 127.0.0.1:8253 |
+| `archtwin-thirdparty-litellm` | the only AI egress (gpt-6-luna / terra / sol) | 127.0.0.1:4200 |
+| `archtwin-thirdparty-langfuse-web`, `-worker`, `-clickhouse` | LLM traces | 127.0.0.1:3201 |
+| `archtwin-thirdparty-valkey`, `-seaweedfs` | cache / S3 object store | — |
+| `archtwin-thirdparty-docker-proxy` | read-only Docker API for runtime discovery | — |
+| `archtwin-thirdparty-docling` | PDF/DOCX parsing (profile `documents`) | — |
+
+Tests: `make test` (unit) · `make test-integration` (RLS) · `make test-e2e` (API journeys on the live stack) · `make test-ui` (Playwright + axe) ·
+`make policy-test` (Cerbos) · `make spec-validate` (OpenSpec).
 
 ## ✨ What it is
 
@@ -108,12 +141,12 @@ Full adopt-vs-build reasoning: [`docs/TECHNOLOGIES.md`](docs/TECHNOLOGIES.md).
 
 | Phase | Increment | Milestone | Status |
 |---|---|---|---|
-| [01](openspec/changes/phase-01-foundation/) | Secure multi-project foundations (walking skeleton) | M1 | 📝 specified |
-| [02](openspec/changes/phase-02-connectors/) | Discovery and connected evidence | M1 | 📝 specified |
-| [03](openspec/changes/phase-03-architecture/) | Living diagrams, C4 zoom, docs and ADRs | M1 | 📝 specified |
-| [04](openspec/changes/phase-04-drift/) | Continuous drift and alerts | M2 | 📝 specified |
+| [01](openspec/changes/phase-01-foundation/) | Secure multi-project foundations (walking skeleton) | M1 | ✅ MVP implemented (OTel tracing, OpenBao, org deletion, break-glass: later) |
+| [02](openspec/changes/phase-02-connectors/) | Discovery and connected evidence | M1 | 🚧 partial: git (local/HTTPS), Docker runtime, PostgreSQL catalog, live OpenAPI, uploads implemented; Kubernetes, Kafka, OTel service graph, GitHub/GitLab APIs and webhooks still open |
+| [03](openspec/changes/phase-03-architecture/) | Living diagrams, C4 zoom, docs and ADRs | M1 | ✅ MVP implemented: graph, snapshots, baselines, C4 L1–L3 zoom, linter, exports, ADRs, docs (PDF/DOCX, reviews: later) |
+| [04](openspec/changes/phase-04-drift/) | Continuous drift and alerts | M2 | ✅ MVP implemented: three-way drift, triage, suppressions, in-app/SSE notifications (Apprise, metrics: later) |
 | [05](openspec/changes/phase-05-delivery/) | Plans, traceability and CI checks | M2 | 📝 specified |
-| [06](openspec/changes/phase-06-intelligence/) | Grounded AI and cross-platform design | M3 | 📝 specified |
+| [06](openspec/changes/phase-06-intelligence/) | Grounded AI and cross-platform design | M3 | 🚧 assistant, integration designer, ADR drafting, model picker implemented (federation, impact analysis, evals: later) |
 | [07](openspec/changes/phase-07-enterprise/) | Enterprise operations and extensibility | M4 | 📝 specified |
 
 Delivery is risk-first: walking skeleton, time-boxed spikes with go/no-go criteria, then thin vertical slices against a reference fixture (the OpenTelemetry Demo on kind). See the [implementation plan](docs/IMPLEMENTATION_PLAN.md).
