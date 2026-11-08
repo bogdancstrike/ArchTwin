@@ -128,9 +128,9 @@ def _dockerfile_info(path: Path) -> dict[str, Any]:
 
 class RepoAnalyzer:
     def __init__(self, root: Path, revision: str, repo_name: str):
-        self.root, self.repo = root, repo_name
+        self.root, self.repo = root.resolve(), repo_name
         self.r = ScanResult(revision=revision)
-        self.files = list(walk(root))
+        self.files = list(walk(self.root))
         self.services: dict[str, Service] = {}         # service name -> Service (latest compose wins per system)
         self.by_system: dict[str, dict[str, Service]] = defaultdict(dict)
 
@@ -293,7 +293,8 @@ class RepoAnalyzer:
             if (ctx / "package.json").exists():
                 self.typescript(ctx, ctx_files, svcs)
             for f in ctx_files:            # config files inside the context (e.g. nginx templates)
-                if f.suffix in CONFIG_SUFFIXES and f.stat().st_size < 200_000 and "test" not in f.parts and "tests" not in f.parts:
+                rel_parts = f.relative_to(self.root).parts
+                if f.suffix in CONFIG_SUFFIXES and f.stat().st_size < 200_000 and not {"test", "tests"} & set(rel_parts):
                     for s in svcs:
                         # several services share this image: which one reads the file is unknown -> low confidence
                         self._scan_config(s, f, confidence=0.4 if len(svcs) > 1 else None)

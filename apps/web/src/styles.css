@@ -8,7 +8,7 @@
   --color-card: #ffffff;
   --color-ink: #2d3142;
   --color-muted: #4f5d75;
-  --color-soft: #7a8399;
+  --color-soft: #5c6579;            /* darker than the diagram skin for WCAG AA text contrast */
   --color-rule: rgba(45, 49, 66, 0.12);
   --color-accent: #eb6c36;
   --color-accent-tint: rgba(235, 108, 54, 0.08);

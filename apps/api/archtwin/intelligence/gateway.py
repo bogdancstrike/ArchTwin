@@ -16,8 +16,16 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from openai import (APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI, InternalServerError, NotFoundError,
-                    PermissionDeniedError, RateLimitError)
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncOpenAI,
+    InternalServerError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+)
 
 from archtwin.common.errors import problem
 from archtwin.config import settings

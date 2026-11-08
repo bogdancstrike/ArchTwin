@@ -73,8 +73,11 @@ def sniff(data: bytes, filename: str) -> str:
                 return "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if filename.lower().endswith(".docx") \
                     else "application/zip"
             return mime
+    head = data[:8192]
+    if b"\x00" in head or sum(b < 9 or 13 < b < 32 or b == 127 for b in head) > max(4, len(head) // 100):
+        return "application/octet-stream"          # NUL/control bytes: binary regardless of extension
     try:
-        data[:4096].decode("utf-8")
+        head.decode("utf-8")
     except UnicodeDecodeError:
         return "application/octet-stream"
     return "text/markdown" if filename.lower().endswith((".md", ".markdown")) else "text/plain"
