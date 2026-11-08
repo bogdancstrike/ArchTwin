@@ -1,0 +1,67 @@
+[project]
+name = "archtwin"
+version = "0.1.0"
+description = "Add your description here"
+authors = [
+    { name = "bogdan", email = "bogdan.cstrike@yahoo.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "alembic>=1.20.1",
+    "asyncpg>=0.32.0",
+    "cerbos>=0.16.1",
+    "cerbos-sqlalchemy>=0.4.0",
+    "cryptography>=50.0.2",
+    "fastapi>=0.162.2",
+    "httpx>=0.28.1",
+    "jinja2>=3.1.6",
+    "networkx>=3.7",
+    "openai>=3.46.0",
+    "openfeature-sdk>=0.10.0",
+    "psycopg[binary]>=3.3.8",
+    "pydantic>=2.14.3",
+    "pydantic-settings>=2.16.2",
+    "pyjwt[crypto]>=2.15.1",
+    "python-multipart>=0.0.33",
+    "pyyaml>=6.0.3",
+    "sqlalchemy[asyncio]>=2.1.8",
+    "sse-starlette>=3.7.0",
+    "structlog>=26.1.0",
+    "temporalio>=1.35.0",
+    "tree-sitter-language-pack>=1.25.0",
+    "uuid-utils>=1.2.0",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+addopts = "-m 'not integration and not e2e'"
+markers = ["integration: needs the compose PostgreSQL + Cerbos (make test-integration)",
+           "e2e: needs the full running stack (make test-e2e)"]
+
+[tool.ruff]
+line-length = 130
+target-version = "py313"
+
+[tool.ruff.lint]
+extend-select = ["B", "UP", "SIM", "ASYNC"]
+ignore = ["SIM108", "B008", "RUF012", "S110", "S112", "ASYNC109", "ASYNC240", "SIM105", "SIM102", "B007", "S101", "S311", "S603", "S607", "S608", "RUF001", "RUF002", "RUF003", "RUF006", "RUF100", "E501"]
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.170.15",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1.post1",
+    "respx>=0.23.1",
+    "ruff>=0.17.4",
+]

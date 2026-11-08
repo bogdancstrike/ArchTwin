@@ -1,0 +1,381 @@
+name: archtwin
+
+# ArchTwin on one machine. Core containers are named archtwin-<service>, adopted third parties archtwin-thirdparty-<name>.
+# Host ports are chosen not to collide with a Horizon stack on the same machine (web 3200, keycloak 8280, ...).
+
+x-backend: &backend
+  image: archtwin/backend:dev
+  build: {context: ./apps/api}
+  restart: unless-stopped
+  networks: [app]
+  logging: {driver: json-file, options: {max-size: "20m", max-file: "5"}}
+
+x-app-env: &app-env
+  ARCHTWIN_DATABASE_URL: postgresql+asyncpg://archtwin_app:${ARCHTWIN_APP_DB_PASSWORD}@postgres:5432/archtwin
+  ARCHTWIN_TEMPORAL_ADDRESS: temporal:7233
+  ARCHTWIN_CERBOS_URL: http://cerbos:3592
+  ARCHTWIN_OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8280}/realms/archtwin
+  ARCHTWIN_OIDC_JWKS_URL: http://keycloak:8080/realms/archtwin/protocol/openid-connect/certs
+  ARCHTWIN_OIDC_AUDIENCE: archtwin-api
+  ARCHTWIN_KEK: ${ARCHTWIN_KEK}
+  ARCHTWIN_LLM_MODE: ${ARCHTWIN_LLM_MODE:-litellm}
+  ARCHTWIN_LLM_BASE_URL: http://litellm:4000/v1
+  ARCHTWIN_LLM_API_KEY: ${LITELLM_MASTER_KEY}
+  ARCHTWIN_VALKEY_URL: redis://:${VALKEY_PASSWORD}@valkey:6379/2
+  ARCHTWIN_S3_ENDPOINT: http://seaweedfs:8333
+  ARCHTWIN_S3_ACCESS_KEY: ${SEAWEED_ACCESS_KEY}
+  ARCHTWIN_S3_SECRET_KEY: ${SEAWEED_SECRET_KEY}
+  ARCHTWIN_S3_BUCKET: archtwin
+  ARCHTWIN_LOG_LEVEL: ${ARCHTWIN_LOG_LEVEL:-info}
+  ARCHTWIN_LOCAL_SOURCE_ROOTS: /sources
+  ARCHTWIN_EGRESS_ALLOW_PRIVATE_HOSTS: ${ARCHTWIN_EGRESS_ALLOW_PRIVATE_HOSTS:-docker-proxy,api,postgres}
+  ARCHTWIN_DOCLING_URL: ${ARCHTWIN_DOCLING_URL:-}
+
+services:
+  # ------------------------------------------------------------------ third parties
+  postgres:
+    container_name: archtwin-thirdparty-postgres
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: archtwin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: archtwin
+      ARCHTWIN_APP_DB_PASSWORD: ${ARCHTWIN_APP_DB_PASSWORD}
+    command: ["postgres", "-c", "max_connections=300"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
+    ports: ["127.0.0.1:${POSTGRES_PORT:-5452}:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U archtwin -d archtwin"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks: [app]
+
+  temporal:
+    container_name: archtwin-thirdparty-temporal
+    image: temporalio/auto-setup:${TEMPORAL_VERSION:-1.25.2}
+    restart: unless-stopped
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: archtwin
+      POSTGRES_PWD: ${POSTGRES_PASSWORD}
+      POSTGRES_SEEDS: postgres
+    depends_on: {postgres: {condition: service_healthy}}
+    healthcheck:
+      test: ["CMD-SHELL", "temporal operator namespace describe default --address $$(hostname -i | awk '{print $$1}'):7233 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks: [app]
+
+  temporal-ui:
+    container_name: archtwin-thirdparty-temporal-ui
+    image: temporalio/ui:${TEMPORAL_UI_VERSION:-2.31.2}
+    restart: unless-stopped
+    environment: {TEMPORAL_ADDRESS: "temporal:7233"}
+    ports: ["127.0.0.1:${TEMPORAL_UI_PORT:-8253}:8080"]
+    depends_on: [temporal]
+    networks: [app]
+
+  keycloak:
+    container_name: archtwin-thirdparty-keycloak
+    image: quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-26.0}
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: archtwin
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8280}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./deploy/keycloak/realm-archtwin.json:/opt/keycloak/data/import/realm-archtwin.json:ro
+    ports: ["${KEYCLOAK_PORT:-8280}:8080"]
+    depends_on: {postgres: {condition: service_healthy}}
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q ' 200'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks: [app]
+
+  cerbos:
+    container_name: archtwin-thirdparty-cerbos
+    image: ghcr.io/cerbos/cerbos:${CERBOS_VERSION:-0.39.0}
+    restart: unless-stopped
+    command: ["server", "--config=/config/cerbos.yaml"]
+    volumes: ["./deploy/cerbos:/config:ro"]
+    networks: [app]
+
+  valkey:
+    container_name: archtwin-thirdparty-valkey
+    image: valkey/valkey:${VALKEY_VERSION:-8}
+    restart: unless-stopped
+    command: ["valkey-server", "--requirepass", "${VALKEY_PASSWORD}", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    environment: {VALKEY_PASSWORD: "${VALKEY_PASSWORD}"}
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a $$VALKEY_PASSWORD ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [app]
+
+  seaweedfs:
+    container_name: archtwin-thirdparty-seaweedfs
+    image: chrislusf/seaweedfs:${SEAWEEDFS_VERSION:-latest}
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - sed -e "s/SEAWEED_ACCESS_KEY/$$SEAWEED_ACCESS_KEY/" -e "s/SEAWEED_SECRET_KEY/$$SEAWEED_SECRET_KEY/" /cfg/s3.json > /tmp/s3.json &&
+        exec weed server -ip.bind=0.0.0.0 -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json -volume.max=0 -master.volumeSizeLimitMB=256
+    environment:
+      SEAWEED_ACCESS_KEY: ${SEAWEED_ACCESS_KEY}
+      SEAWEED_SECRET_KEY: ${SEAWEED_SECRET_KEY}
+    volumes: [seaweedfs:/data, ./deploy/seaweedfs/s3.json:/cfg/s3.json:ro]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:9333/cluster/status >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks: [app]
+
+  seaweedfs-init:                    # creates the langfuse + archtwin buckets (idempotent)
+    container_name: archtwin-thirdparty-seaweedfs-init
+    image: chrislusf/seaweedfs:${SEAWEEDFS_VERSION:-latest}
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["for b in langfuse archtwin; do for i in $$(seq 1 30); do if echo 's3.bucket.list' | weed shell -master=seaweedfs:9333 2>/dev/null | grep -q $$b; then break; fi; echo \"s3.bucket.create -name $$b\" | weed shell -master=seaweedfs:9333; sleep 2; done; done"]
+    depends_on: {seaweedfs: {condition: service_healthy}}
+    networks: [app]
+
+  docker-proxy:                      # read-only Docker Engine API for the runtime-discovery connector (no POST, no exec)
+    container_name: archtwin-thirdparty-docker-proxy
+    image: tecnativa/docker-socket-proxy:${DOCKER_PROXY_VERSION:-v0.4.1}
+    restart: unless-stopped
+    environment: {CONTAINERS: 1, NETWORKS: 1, IMAGES: 0, INFO: 1, POST: 0, EXEC: 0, VOLUMES: 0}
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock:ro"]
+    networks: [app]
+
+  litellm:
+    container_name: archtwin-thirdparty-litellm
+    image: ghcr.io/berriai/litellm:${LITELLM_VERSION:-v1.108.0}
+    restart: unless-stopped
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "2"]
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      DATABASE_URL: postgresql://archtwin:${POSTGRES_PASSWORD}@postgres:5432/litellm
+      STORE_MODEL_IN_DB: "False"
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_HOST: http://langfuse-web:3000
+      LITELLM_LOG: ERROR
+      UI_USERNAME: admin
+      UI_PASSWORD: ${LITELLM_UI_PASSWORD:-admin}
+      LITELLM_TELEMETRY: "False"
+      REDIS_HOST: valkey
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${VALKEY_PASSWORD}
+    volumes: ["./deploy/litellm/config.yaml:/app/config.yaml:ro"]
+    ports: ["127.0.0.1:${LITELLM_PORT:-4200}:4000"]
+    depends_on: {postgres: {condition: service_healthy}, valkey: {condition: service_healthy}}
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request;urllib.request.urlopen('http://localhost:4000/health/liveliness',timeout=3)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    deploy: {resources: {limits: {memory: 1g}}}
+    networks: [app]
+
+  clickhouse:
+    container_name: archtwin-thirdparty-clickhouse
+    image: clickhouse/clickhouse-server:${CLICKHOUSE_VERSION:-25.8}
+    restart: unless-stopped
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+    volumes: [clickhouse:/var/lib/clickhouse, clickhouse-logs:/var/log/clickhouse-server, ./deploy/clickhouse/low-memory.xml:/etc/clickhouse-server/config.d/low-memory.xml:ro]
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    deploy: {resources: {limits: {memory: 2g}}}
+    networks: [app]
+
+  langfuse-worker:
+    container_name: archtwin-thirdparty-langfuse-worker
+    image: langfuse/langfuse-worker:${LANGFUSE_VERSION:-3}
+    restart: unless-stopped
+    environment: &langfuse-env
+      DATABASE_URL: postgresql://archtwin:${POSTGRES_PASSWORD}@postgres:5432/langfuse
+      SALT: ${LANGFUSE_SALT}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}
+      TELEMETRY_ENABLED: "false"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${SEAWEED_ACCESS_KEY}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${SEAWEED_SECRET_KEY}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://seaweedfs:8333
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${SEAWEED_ACCESS_KEY}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${SEAWEED_SECRET_KEY}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://seaweedfs:8333
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      REDIS_HOST: valkey
+      REDIS_PORT: "6379"
+      REDIS_AUTH: ${VALKEY_PASSWORD}
+    depends_on: &langfuse-deps
+      postgres: {condition: service_healthy}
+      clickhouse: {condition: service_healthy}
+      valkey: {condition: service_healthy}
+      seaweedfs-init: {condition: service_completed_successfully}
+    deploy: {resources: {limits: {memory: 1g}}}
+    networks: [app]
+
+  langfuse-web:
+    container_name: archtwin-thirdparty-langfuse-web
+    image: langfuse/langfuse:${LANGFUSE_VERSION:-3}
+    restart: unless-stopped
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_URL: http://localhost:${LANGFUSE_PORT:-3201}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET}
+      AUTH_DISABLE_SIGNUP: "true"
+      LANGFUSE_INIT_ORG_ID: archtwin
+      LANGFUSE_INIT_ORG_NAME: ArchTwin
+      LANGFUSE_INIT_PROJECT_ID: archtwin
+      LANGFUSE_INIT_PROJECT_NAME: ArchTwin
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_INIT_USER_EMAIL: ${ARCHTWIN_ADMIN_EMAIL:-admin@archtwin.local}
+      LANGFUSE_INIT_USER_NAME: admin
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_ADMIN_PASSWORD}
+      NODE_OPTIONS: --max-old-space-size=1536
+    ports: ["127.0.0.1:${LANGFUSE_PORT:-3201}:3000"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://$$(hostname -i):3000/api/public/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on: *langfuse-deps
+    deploy: {resources: {limits: {memory: 2g}}}
+    networks: [app]
+
+  docling:                           # optional (profile "documents"): PDF/DOCX/PPTX parsing via docling-serve
+    container_name: archtwin-thirdparty-docling
+    profiles: [documents]
+    image: quay.io/docling-project/docling-serve-cpu:${DOCLING_VERSION:-latest}
+    restart: unless-stopped
+    environment: {DOCLING_SERVE_ENABLE_UI: "false"}
+    deploy: {resources: {limits: {cpus: "2", memory: 4g}}}
+    networks: [app]
+
+  # ------------------------------------------------------------------ ArchTwin
+  migrate:
+    container_name: archtwin-migrate
+    <<: *backend
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      ARCHTWIN_DATABASE_URL: postgresql+asyncpg://archtwin:${POSTGRES_PASSWORD}@postgres:5432/archtwin
+    depends_on: {postgres: {condition: service_healthy}}
+
+  seed:                              # idempotent: demo org, flags for the pilot org, demo projects
+    container_name: archtwin-seed
+    <<: *backend
+    restart: "no"
+    command: ["python", "-m", "archtwin.cli", "seed"]
+    environment: {<<: *app-env}
+    depends_on: {migrate: {condition: service_completed_successfully}}
+
+  api:
+    container_name: archtwin-api
+    <<: *backend
+    command: ["uvicorn", "archtwin.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+    environment: {<<: *app-env}
+    volumes:                         # read-only: connector "test" validates local repository paths
+      - ${ARCHTWIN_SOURCE_HORIZON:-../horizon}:/sources/horizon:ro
+      - ./:/sources/archtwin:ro
+    ports: ["127.0.0.1:${API_PORT:-8200}:8000"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      temporal: {condition: service_healthy}
+      cerbos: {condition: service_started}
+      keycloak: {condition: service_started}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  worker:
+    container_name: archtwin-worker
+    <<: *backend
+    command: ["python", "-m", "archtwin.worker"]
+    environment: {<<: *app-env}
+    volumes:
+      - ${ARCHTWIN_SOURCE_HORIZON:-../horizon}:/sources/horizon:ro
+      - ./:/sources/archtwin:ro
+    stop_grace_period: 30s
+    deploy: {resources: {limits: {memory: 2g}}}
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      temporal: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-m", "archtwin.worker.alive"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 40s
+
+  web:
+    container_name: archtwin-web
+    image: archtwin/web:dev
+    build:
+      context: ./apps/web
+      args:
+        VITE_OIDC_AUTHORITY: http://localhost:${KEYCLOAK_PORT:-8280}/realms/archtwin
+        VITE_OIDC_CLIENT_ID: archtwin-web
+    restart: unless-stopped
+    ports: ["${WEB_PORT:-3200}:80"]
+    environment: {KEYCLOAK_PUBLIC_URL: "http://localhost:${KEYCLOAK_PORT:-8280}"}
+    depends_on: {api: {condition: service_healthy}}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+    networks: [app]
+
+volumes:
+  pgdata:
+  clickhouse:
+  clickhouse-logs:
+  seaweedfs:
+
+networks:
+  app:

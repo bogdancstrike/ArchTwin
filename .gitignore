@@ -6,3 +6,13 @@ node_modules/
 __pycache__/
 *.pyc
 .venv/
+
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+dist/
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo
+.coverage

@@ -1,0 +1,67 @@
+name: ArchTwinPolicySuite
+description: Default deny, project isolation, author != approver (AT-IDENTITY_POLICY-001..003)
+principals:
+  alice:   # architect, editor+approver of p1 only
+    id: alice
+    roles: [user]
+    attr: {org_id: o1, org_role: member, viewer_project_ids: [p1], editor_project_ids: [p1], manager_project_ids: [], approver_project_ids: [p1]}
+  bob:     # reviewer of p1
+    id: bob
+    roles: [user]
+    attr: {org_id: o1, org_role: member, viewer_project_ids: [p1], editor_project_ids: [], manager_project_ids: [], approver_project_ids: [p1]}
+  vera:    # viewer of p1
+    id: vera
+    roles: [user]
+    attr: {org_id: o1, org_role: member, viewer_project_ids: [p1], editor_project_ids: [], manager_project_ids: [], approver_project_ids: []}
+  owner:   # org owner of o1
+    id: owner
+    roles: [user]
+    attr: {org_id: o1, org_role: org_owner, viewer_project_ids: [], editor_project_ids: [], manager_project_ids: [], approver_project_ids: []}
+  mallory: # org owner of another org, claims p1 in her lists (must still be denied: org mismatch)
+    id: mallory
+    roles: [user]
+    attr: {org_id: o2, org_role: org_owner, viewer_project_ids: [p1], editor_project_ids: [p1], manager_project_ids: [p1], approver_project_ids: [p1]}
+resources:
+  p1:      {kind: project, id: p1, attr: {org_id: o1, project_id: p1}}
+  p2:      {kind: project, id: p2, attr: {org_id: o1, project_id: p2}}
+  adr_by_alice: {kind: adr, id: a1, attr: {org_id: o1, project_id: p1, author_id: alice}}
+  baseline_by_alice: {kind: architecture, id: b1, attr: {org_id: o1, project_id: p1, author_id: alice}}
+  flag_o1: {kind: flag, id: f, attr: {org_id: o1}}
+  conn_p1: {kind: connector, id: c1, attr: {org_id: o1, project_id: p1, writeback_enabled: false}}
+tests:
+  - name: project visibility and isolation
+    input:
+      principals: [alice, vera, owner, mallory]
+      resources: [p1, p2]
+      actions: [view, edit, delete]
+    expected:
+      - {principal: alice, resource: p1, actions: {view: EFFECT_ALLOW, edit: EFFECT_ALLOW, delete: EFFECT_DENY}}
+      - {principal: alice, resource: p2, actions: {view: EFFECT_DENY, edit: EFFECT_DENY, delete: EFFECT_DENY}}
+      - {principal: vera, resource: p1, actions: {view: EFFECT_ALLOW, edit: EFFECT_DENY, delete: EFFECT_DENY}}
+      - {principal: vera, resource: p2, actions: {view: EFFECT_DENY, edit: EFFECT_DENY, delete: EFFECT_DENY}}
+      - {principal: owner, resource: p1, actions: {view: EFFECT_ALLOW, edit: EFFECT_ALLOW, delete: EFFECT_ALLOW}}
+      - {principal: owner, resource: p2, actions: {view: EFFECT_ALLOW, edit: EFFECT_ALLOW, delete: EFFECT_ALLOW}}
+      - {principal: mallory, resource: p1, actions: {view: EFFECT_DENY, edit: EFFECT_DENY, delete: EFFECT_DENY}}
+      - {principal: mallory, resource: p2, actions: {view: EFFECT_DENY, edit: EFFECT_DENY, delete: EFFECT_DENY}}
+  - name: author cannot approve own ADR or baseline
+    input:
+      principals: [alice, bob, vera]
+      resources: [adr_by_alice, baseline_by_alice]
+      actions: [accept, approve_baseline]
+    expected:
+      - {principal: alice, resource: adr_by_alice, actions: {accept: EFFECT_DENY, approve_baseline: EFFECT_DENY}}
+      - {principal: alice, resource: baseline_by_alice, actions: {accept: EFFECT_DENY, approve_baseline: EFFECT_DENY}}
+      - {principal: bob, resource: adr_by_alice, actions: {accept: EFFECT_ALLOW, approve_baseline: EFFECT_DENY}}
+      - {principal: bob, resource: baseline_by_alice, actions: {accept: EFFECT_DENY, approve_baseline: EFFECT_ALLOW}}
+      - {principal: vera, resource: adr_by_alice, actions: {accept: EFFECT_DENY, approve_baseline: EFFECT_DENY}}
+      - {principal: vera, resource: baseline_by_alice, actions: {accept: EFFECT_DENY, approve_baseline: EFFECT_DENY}}
+  - name: flags editable only by org admins; external writes need writeback
+    input:
+      principals: [alice, owner]
+      resources: [flag_o1, conn_p1]
+      actions: [edit, write_external]
+    expected:
+      - {principal: alice, resource: flag_o1, actions: {edit: EFFECT_DENY, write_external: EFFECT_DENY}}
+      - {principal: owner, resource: flag_o1, actions: {edit: EFFECT_ALLOW, write_external: EFFECT_DENY}}
+      - {principal: alice, resource: conn_p1, actions: {edit: EFFECT_DENY, write_external: EFFECT_DENY}}
+      - {principal: owner, resource: conn_p1, actions: {edit: EFFECT_ALLOW, write_external: EFFECT_DENY}}

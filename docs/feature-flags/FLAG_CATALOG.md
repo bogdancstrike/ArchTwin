@@ -46,6 +46,8 @@ Which chat model a user may pick (`gpt-6-luna` default, `gpt-6-terra`, `gpt-6-so
 | `module.connector-sdk` | `false` | phase-07-enterprise | project | OFF until phase exit gates pass; enabled per pilot project |
 | `module.architecture-health` | `false` | phase-07-enterprise | project | OFF until phase exit gates pass; enabled per pilot project |
 | `connector.github` | `false` | phase-02-connectors | org/project | read-only scopes; org security admin approves scopes and egress |
+| `connector.git` | `false` | phase-02-connectors | org/project | read-only; mounted repository under an allowed source root or HTTPS clone (generic Git, incl. self-hosted) |
+| `connector.docker` | `false` | phase-02-connectors | org/project | read-only Docker Engine API through a proxy with POST/exec disabled (runtime discovery for Compose hosts) |
 | `connector.gitlab` | `false` | phase-02-connectors | org/project | read-only scopes; org security admin approves scopes and egress |
 | `connector.jira` | `false` | phase-02-connectors | org/project | read-only scopes; org security admin approves scopes and egress |
 | `connector.taiga` | `false` | phase-02-connectors | org/project | read-only scopes; org security admin approves scopes and egress |

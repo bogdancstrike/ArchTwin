@@ -1,0 +1,33 @@
+# LiteLLM AI gateway — the ONLY ArchTwin component that holds the provider key (ADR-0005, AT-LLM_GATEWAY).
+# ArchTwin calls it with LITELLM_MASTER_KEY. Users pick gpt-6-luna (default), gpt-6-terra or gpt-6-sol; the API validates
+# the alias server-side against docs/ai/MODEL_PROFILES.yaml. gpt-5.6-luna is the fallback.
+model_list:
+  - model_name: gpt-6-luna
+    litellm_params: {model: openai/gpt-6-luna, api_key: os.environ/OPENAI_API_KEY}
+  - model_name: gpt-6-terra
+    litellm_params: {model: openai/gpt-6-terra, api_key: os.environ/OPENAI_API_KEY}
+  - model_name: gpt-6-sol
+    litellm_params: {model: openai/gpt-6-sol, api_key: os.environ/OPENAI_API_KEY}
+  - model_name: gpt-5.6-luna
+    litellm_params: {model: openai/gpt-5.6-luna, api_key: os.environ/OPENAI_API_KEY}
+  - model_name: text-embedding-3-large
+    litellm_params: {model: openai/text-embedding-3-large, api_key: os.environ/OPENAI_API_KEY}
+    model_info: {mode: embedding}
+
+litellm_settings:
+  success_callback: ["langfuse"]          # every call traced in Langfuse
+  failure_callback: ["langfuse"]
+  drop_params: true
+  request_timeout: 180
+  fallbacks: [{"gpt-6-luna": ["gpt-5.6-luna"]}]
+
+router_settings:
+  num_retries: 0                          # retries happen in exactly one layer: the ArchTwin AI gateway / Temporal activity
+  redis_host: os.environ/REDIS_HOST
+  redis_port: os.environ/REDIS_PORT
+  redis_password: os.environ/REDIS_PASSWORD
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: false

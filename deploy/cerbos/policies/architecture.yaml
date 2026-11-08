@@ -1,0 +1,29 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: architecture
+  importDerivedRoles:
+  - project_roles
+  rules:
+  - actions:
+    - view
+    - compare
+    - export
+    effect: EFFECT_ALLOW
+    derivedRoles:
+    - project_viewer
+  - actions:
+    - edit
+    - propose_baseline
+    - merge_identity
+    effect: EFFECT_ALLOW
+    derivedRoles:
+    - project_editor
+  - actions:
+    - approve_baseline
+    effect: EFFECT_ALLOW
+    derivedRoles:
+    - project_approver
+    condition:
+      match:
+        expr: request.resource.attr.author_id != request.principal.id
