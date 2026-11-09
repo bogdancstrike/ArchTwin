@@ -1,11 +1,11 @@
 import { Link, Outlet, useParams } from "@tanstack/react-router";
-import { AlertTriangle, Bot, FileText, LayoutDashboard, Network, Radar, ScrollText, Settings } from "lucide-react";
+import { AlertTriangle, Bot, FileText, LayoutDashboard, Network, Radar, ScrollText, Settings, Workflow } from "lucide-react";
 import { Avatar, Badge, ErrorBox, Spinner } from "@/components/ui";
 import { FavoriteStar } from "@/components/FavoriteStar";
 import { useApi } from "@/lib/hooks";
 import type { Project } from "@/lib/types";
 
-const TABS = [["", "Overview", LayoutDashboard], ["architecture", "Architecture", Network], ["drift", "Drift", AlertTriangle],
+const TABS = [["", "Overview", LayoutDashboard], ["architecture", "Architecture", Network], ["flows", "Flows", Workflow], ["drift", "Drift", AlertTriangle],
   ["decisions", "Decisions", ScrollText], ["docs", "Docs", FileText], ["assistant", "Assistant", Bot], ["datasources", "Datasources", Radar],
   ["settings", "Settings", Settings]] as const;
 

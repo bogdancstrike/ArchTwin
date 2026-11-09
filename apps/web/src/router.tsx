@@ -10,6 +10,7 @@ import { AssistantPage } from "@/pages/Assistant";
 import { DecisionsPage } from "@/pages/Decisions";
 import { DocsPage } from "@/pages/Docs";
 import { DriftPage } from "@/pages/Drift";
+import { FlowsPage } from "@/pages/Flows";
 import { HomePage } from "@/pages/Home";
 import { InventoryPage } from "@/pages/Inventory";
 import { OverviewPage } from "@/pages/Overview";
@@ -35,7 +36,7 @@ const architecture = createRoute({ getParentRoute: () => project, path: "archite
   validateSearch: (s: Record<string, unknown>) => ({ view: s.view as string | undefined, snapshot: s.snapshot as string | undefined,
     compare: s.compare as string | undefined, full: s.full ? true : undefined, deps: s.deps ? true : undefined, table: s.table ? true : undefined }) });
 
-const tree = root.addChildren([index, home, projectsList, flags, audit, system, roles, usagePage, project.addChildren([sub("/", OverviewPage), architecture, sub("datasources", InventoryPage),
+const tree = root.addChildren([index, home, projectsList, flags, audit, system, roles, usagePage, project.addChildren([sub("/", OverviewPage), architecture, sub("datasources", InventoryPage), sub("flows", FlowsPage),
   sub("inventory", InventoryPage) /* old bookmark path */,
   sub("drift", DriftPage), sub("drift/$findingId", DriftPage), sub("decisions", DecisionsPage), sub("docs", DocsPage), sub("assistant", AssistantPage),
   sub("settings", SettingsPage)])]);
