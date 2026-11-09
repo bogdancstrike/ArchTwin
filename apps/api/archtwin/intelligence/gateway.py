@@ -1,6 +1,7 @@
 """AI gateway (AT-LLM_GATEWAY-001..005, ADR-0005). The ONLY place that talks to a model, always through LiteLLM.
 
-- Model aliases are validated server-side against MODEL_PROFILES.yaml (gpt-6-luna default, gpt-6-terra, gpt-6-sol).
+- Model aliases are validated server-side against MODEL_PROFILES.yaml (gpt-6-luna default, gpt-6-terra; gpt-6-sol is blocked).
+- Each operation's model, reasoning effort and output cap come from the task table (`routing.py`).
 - Retries happen in exactly one layer: here (LiteLLM has num_retries: 0).
 - Langfuse tracing happens in LiteLLM (callback); we pass non-sensitive metadata only (ids, operation).
 - ARCHTWIN_LLM_MODE=fake gives deterministic zero-token responses for CI.
@@ -40,7 +41,8 @@ def profiles() -> dict[str, Any]:
 
 
 def selectable() -> list[dict[str, Any]]:
-    return profiles()["selectable_models"]["options"]
+    blocked = set(profiles().get("blocked_models") or [])
+    return [o for o in profiles()["selectable_models"]["options"] if o["alias"] not in blocked]
 
 
 def default_model() -> str:
@@ -148,9 +150,15 @@ def _fake(messages: list[dict[str, str]], json_mode: bool, operation: str = "") 
 
 
 async def complete(messages: list[dict[str, str]], *, model: str, operation: str, project_id: str, user_id: str,
-                   json_mode: bool = False, max_tokens: int = 4000, ctx: Any = None) -> Completion:
+                   json_mode: bool = False, max_tokens: int | None = None, reasoning_effort: str | None = None, ctx: Any = None) -> Completion:
     """One chat completion through LiteLLM. With `ctx`: monthly spend limits are checked first (402 AT-BUD-001) and the call
     — success or error — is written to the `llm_calls` ledger with tokens and cost."""
+    from archtwin.intelligence import routing  # local: routing imports this module
+    if model in routing.blocked():
+        raise problem(422, "AT-AI-001", "Model not allowed", f"{model} is blocked by the cost policy.")
+    t = routing.task(operation)
+    max_tokens = max_tokens or t.max_output_tokens
+    reasoning_effort = reasoning_effort or t.reasoning_effort
     if ctx is not None:
         await usage.check(ctx)
     t0 = time.monotonic()
@@ -171,7 +179,7 @@ async def complete(messages: list[dict[str, str]], *, model: str, operation: str
         cost = await ledger(input_tokens=tin, output_tokens=tout, trace_id="fake")
         return Completion(txt, model, tin, tout, int((time.monotonic() - t0) * 1000), "fake", cost)
     kwargs: dict[str, Any] = {"model": model, "messages": messages, "max_completion_tokens": max_tokens,
-                              "extra_body": {"reasoning_effort": "medium",
+                              "extra_body": {"reasoning_effort": reasoning_effort,
                                              "metadata": {"trace_name": f"archtwin.{operation}", "generation_name": operation,
                                                           "trace_user_id": user_id, "session_id": f"project-{project_id}",
                                                           "tags": [f"project:{project_id}", f"op:{operation}"]}}}

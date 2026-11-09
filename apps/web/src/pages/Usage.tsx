@@ -4,10 +4,12 @@ import type { ReactNode } from "react";
 import { Badge, Button, Card, ErrorBox, Select, Skeleton, Table, cn } from "@/components/ui";
 import { CapBar, RankBars, StackedBars, compact, usd } from "@/components/charts";
 import { getToken } from "@/lib/auth";
+import { ModelRouting } from "@/components/CostEstimate";
 import { useApi } from "@/lib/hooks";
 
 const OPS: Record<string, string> = { question_answering: "Data questions", general_chat: "General chat", integration_design: "Integration design",
-  adrs: "ADR drafting", architecture_draft: "Architecture drafts", text_extend: "Extend with AI", architecture_review: "Reviews" };
+  adrs: "ADR drafting", architecture_draft: "Architecture drafts", text_extend: "Extend with AI", architecture_review: "Reviews",
+  doc_drafting: "Doc drafting", flow_explain: "Flow search", drift_review: "Drift review", page_ask: "Page questions", summarization: "Summaries" };
 const GROUPS = [["model", "Model"], ["operation", "Operation"], ["project", "Project"], ["user", "User"], ["status", "Status"]] as const;
 
 function Delta({ cur, prev, invert }: { cur: number; prev: number; invert?: boolean }) {
@@ -101,6 +103,7 @@ export function UsagePage() {
           <td className="num px-2">{(t.avg_latency_ms / 1000).toFixed(1)}s</td></tr>)}</Table>
         {br.data?.totals.length === 0 && <p className="py-6 text-center text-sm text-soft">No AI calls in this period.</p>}</div>
     </Card>
+    <ModelRouting />
     <details className="rounded-xl border border-rule bg-card p-4 shadow-card">
       <summary className="cursor-pointer text-sm font-medium">Token prices (USD per 1M tokens) and how cost is computed</summary>
       <p className="my-2 text-sm text-muted">Cost per call = uncached input × input + cached input × cached + output × output. LiteLLM’s reported cost is used when it is within 0.5–2.5× of this table;

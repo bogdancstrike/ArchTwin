@@ -147,6 +147,27 @@ async def request_scan(ctx: RequestContext, cid: uuid.UUID, ref: str | None) -> 
         return row((await conn.execute(select(scan_runs).where(scan_runs.c.id == sid))).first())
 
 
+async def request_project_scan(ctx: RequestContext) -> dict[str, Any]:
+    """Scan every datasource of the project: enabled connectors whose kind is on and that are not already queued/running.
+    Each one becomes its own scan job (independent retries); skipped datasources are reported with the reason."""
+    async with uow(ctx) as conn:
+        cs = rows(await conn.execute(select(connectors).where(connectors.c.project_id == ctx.project_id).order_by(connectors.c.name)))
+        busy = {r.connector_id for r in (await conn.execute(select(scan_runs.c.connector_id).where(
+            scan_runs.c.project_id == ctx.project_id, scan_runs.c.status.in_(("queued", "running"))))).all()}
+    queued, skipped = [], []
+    for c in cs:
+        if not c["enabled"]:
+            skipped.append({"connector_id": str(c["id"]), "name": c["name"], "reason": "disabled"})
+        elif c["id"] in busy:
+            skipped.append({"connector_id": str(c["id"]), "name": c["name"], "reason": "already scanning"})
+        else:
+            try:
+                queued.append({**await request_scan(ctx, c["id"], None), "name": c["name"]})
+            except Exception as e:  # noqa: BLE001 — one datasource (e.g. its kind's flag is off) must not stop the others
+                skipped.append({"connector_id": str(c["id"]), "name": c["name"], "reason": getattr(e, "title", None) or type(e).__name__})
+    return {"queued": queued, "skipped": skipped}
+
+
 SCAN_SORTS = {"created_at": scan_runs.c.created_at, "status": scan_runs.c.status, "connector": connectors.c.name, "revision": scan_runs.c.revision,
               "finished_at": scan_runs.c.finished_at}
 

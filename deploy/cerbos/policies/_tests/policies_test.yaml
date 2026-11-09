@@ -29,7 +29,17 @@ resources:
   flag_o1: {kind: flag, id: f, attr: {org_id: o1}}
   conn_p1: {kind: connector, id: c1, attr: {org_id: o1, project_id: p1, writeback_enabled: false}}
   org_o1:  {kind: org, id: o1, attr: {org_id: o1}}
+  drift_p1: {kind: drift_finding, id: d1, attr: {org_id: o1, project_id: p1}}
 tests:
+  - name: dismissing a drift finding as a false positive needs an approver; viewers only view
+    input:
+      principals: [alice, vera, mallory]
+      resources: [drift_p1]
+      actions: [view, dismiss]
+    expected:
+      - {principal: alice, resource: drift_p1, actions: {view: EFFECT_ALLOW, dismiss: EFFECT_ALLOW}}
+      - {principal: vera, resource: drift_p1, actions: {view: EFFECT_ALLOW, dismiss: EFFECT_DENY}}
+      - {principal: mallory, resource: drift_p1, actions: {view: EFFECT_DENY, dismiss: EFFECT_DENY}}
   - name: org admins may self-approve a baseline (audited exception); architects may not
     input:
       principals: [alice, owner, mallory]

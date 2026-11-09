@@ -34,7 +34,7 @@ from archtwin.drift import service as drift
 from archtwin.flags import service as flags
 from archtwin.home import service as home_svc
 from archtwin.iam import service as iam
-from archtwin.intelligence import assistant, gateway
+from archtwin.intelligence import assistant, gateway, routing
 from archtwin.inventory import service as inventory
 from archtwin.kernel.idempotency import idempotent
 from archtwin.notifications import service as notify
@@ -318,6 +318,14 @@ async def test_connector(cid: uuid.UUID, c: RequestContext = Depends(project_ctx
 async def scan_connector(cid: uuid.UUID, body: S.ScanIn, request: Request, c: RequestContext = Depends(project_ctx)):
     await require(c, "connector", "scan", str(cid))
     return await idempotent(request, c.principal, {"cid": str(cid), **body.model_dump()}, lambda: connectors.request_scan(c, cid, body.ref), 202)
+
+
+@r.post("/projects/{project_id}/scan", status_code=202, tags=["connectors"])
+async def scan_project(request: Request, c: RequestContext = Depends(project_ctx)):
+    """Scan all datasources of the project at once (one job per datasource)."""
+    for cn in await connectors.list_(c):
+        await require(c, "connector", "scan", str(cn["id"]))
+    return await idempotent(request, c.principal, {"project_scan": str(c.project_id)}, lambda: connectors.request_project_scan(c), 202)
 
 
 @r.get("/projects/{project_id}/scans", tags=["connectors"])
@@ -681,9 +689,18 @@ async def drift_get(fid: uuid.UUID, c: RequestContext = Depends(project_ctx)):
 @r.post("/projects/{project_id}/drift/{fid}/transition", tags=["drift"])
 async def drift_transition(fid: uuid.UUID, body: S.TransitionIn, c: RequestContext = Depends(project_ctx)):
     await flags.require(c, "module.drift-engine", "module.drift-triage")
-    action = "suppress" if body.status == "suppressed" else "accept" if body.status == "accepted" else "triage"
+    action = {"suppressed": "suppress", "accepted": "accept", "dismissed": "dismiss"}.get(body.status, "triage")
     await require(c, "drift_finding", action, str(fid))
     return await drift.transition(c, fid, body.status, body.note, body.suppress_days, body.assignee)
+
+
+@r.post("/projects/{project_id}/drift/dismiss", tags=["drift"])
+async def drift_dismiss(body: S.DismissIn, c: RequestContext = Depends(project_ctx)):
+    """Delete findings that are not true (false positives). They stay dismissed across re-evaluations; restore = transition to new."""
+    await flags.require(c, "module.drift-engine", "module.drift-triage")
+    for fid in body.ids:
+        await require(c, "drift_finding", "dismiss", str(fid))
+    return await drift.dismiss_many(c, body.ids, body.note)
 
 
 @r.post("/projects/{project_id}/drift/{fid}/comments", tags=["drift"])
@@ -708,7 +725,7 @@ async def ai_ask(body: S.AskIn, c: RequestContext = Depends(project_ctx)):
         + (["module.integration-designer", "ai.integration_design"] if body.mode == "design" else [])
     await flags.require(c, *keys)
     await require(c, "assistant", "ask")
-    model = gateway.resolve_model(body.model, (await iam.get_preferences(c.actor_id)).get("preferred_model"))
+    model = routing.route(assistant.operation_for(body.scope, body.mode), body.model, (await iam.get_preferences(c.actor_id)).get("preferred_model")).model
     return await assistant.ask(c, body.question, model, body.mode, body.history, scope=body.scope, sources=body.sources,
                                conversation_id=body.conversation_id)
 
@@ -718,7 +735,7 @@ async def ai_complete_adr(body: S.CompleteAdrIn, c: RequestContext = Depends(pro
     """One AI suggestion for the whole ADR form (MADR), from everything the author wrote so far."""
     await flags.require(c, "module.architecture-assistant", "module.adr-workflow", "ai.adr_drafting")
     await require(c, "assistant", "draft")
-    model = gateway.resolve_model(body.model, (await iam.get_preferences(c.actor_id)).get("preferred_model"))
+    model = routing.route("adrs", body.model, (await iam.get_preferences(c.actor_id)).get("preferred_model")).model
     fields = body.model_dump(include={"title", "context", "decision_drivers", "considered_options", "decision_outcome", "consequences"})
     return await assistant.complete_adr(c, fields, model, instruction=body.instruction, grounded=body.grounded)
 
@@ -727,7 +744,7 @@ async def ai_complete_adr(body: S.CompleteAdrIn, c: RequestContext = Depends(pro
 async def ai_extend(body: S.ExtendIn, c: RequestContext = Depends(project_ctx)):
     await flags.require(c, "module.architecture-assistant", "ai.text_extend")
     await require(c, "assistant", "draft")
-    model = gateway.resolve_model(body.model, (await iam.get_preferences(c.actor_id)).get("preferred_model"))
+    model = routing.route("text_extend", body.model, (await iam.get_preferences(c.actor_id)).get("preferred_model")).model
     return await assistant.extend_text(c, body.text, model, mode=body.mode, field=body.field, title=body.title,
                                        instruction=body.instruction, grounded=body.grounded)
 
@@ -769,7 +786,7 @@ async def ai_draft_adr(body: S.AskIn, c: RequestContext = Depends(project_ctx)):
     await flags.require(c, "module.architecture-assistant", "module.adr-workflow", "ai.adr_drafting")
     await require(c, "assistant", "draft")
     await require(c, "adr", "create")
-    model = gateway.resolve_model(body.model, (await iam.get_preferences(c.actor_id)).get("preferred_model"))
+    model = routing.route("adrs", body.model, (await iam.get_preferences(c.actor_id)).get("preferred_model")).model
     return await assistant.draft_adr(c, body.question, model)
 
 

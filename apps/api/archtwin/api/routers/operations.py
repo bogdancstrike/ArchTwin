@@ -12,7 +12,8 @@ from archtwin.common import authz
 from archtwin.common.db import RequestContext
 from archtwin.common.errors import problem
 from archtwin.connectors.adapters import git_repo
-from archtwin.intelligence import usage
+from archtwin.iam import service as iam
+from archtwin.intelligence import routing, usage
 from archtwin.operations import service as ops
 
 router = APIRouter(prefix="/api/v1", tags=["operations"])
@@ -44,6 +45,26 @@ async def usage_breakdown(days: int = DAYS, group_by: str = "model", granularity
 async def usage_export(days: int = DAYS, scope: str = SCOPE, c: RequestContext = Depends(get_ctx)):
     body = await ops.export_csv(c, days, await _everyone(c, scope))
     return Response(body, media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="archtwin-ai-usage-{days}d.csv"'})
+
+
+@router.get("/ai/routing")
+async def ai_routing(c: RequestContext = Depends(get_ctx)):
+    """Which model and reasoning effort each AI task uses, its price, typical cost per call (learned from the ledger) and
+    the blocked models."""
+    await org_require(c, "view_own_usage")
+    return {"tasks": await routing.routing_table(c.org_id), "blocked_models": sorted(routing.blocked()),
+            "history_days": routing.HISTORY_DAYS}
+
+
+@router.post("/ai/estimate")
+async def ai_estimate(body: S.EstimateIn, c: RequestContext = Depends(get_ctx)):
+    """Pre-flight cost estimate of one AI call (no model is called): tokens and USD expected / high / max."""
+    await org_require(c, "view_own_usage")
+    if body.operation not in routing.tasks():
+        raise problem(422, "AT-AI-007", "Unknown AI task", body.operation)
+    pref = (await iam.get_preferences(c.actor_id)).get("preferred_model")
+    return await routing.estimate(c.org_id, body.operation, requested=body.model, preference=pref,
+                                  input_text=body.text if body.text else None)
 
 
 @router.get("/admin/spend-limits")

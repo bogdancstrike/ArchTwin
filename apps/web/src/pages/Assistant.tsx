@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge, Button, ErrorBox, Select, ago, cn } from "@/components/ui";
 import { usd } from "@/components/charts";
+import { CostEstimate, modelLabel } from "@/components/CostEstimate";
 import { RichMarkdown } from "@/components/RichMarkdown";
 import { api } from "@/lib/api";
 import { useApi, useMe } from "@/lib/hooks";
@@ -173,7 +174,7 @@ export function AssistantPage({ projectId }: { projectId: string }) {
                   <div className="font-mono text-[10px] text-soft">{e.source}{e.span?.line_start ? `:${e.span.line_start}` : ""} {e.revision ? `@ ${e.revision.slice(0, 10)}` : ""}</div></li>)}</ul></details> : null}
               <AnswerFooter t={t} />
             </div>)}
-        {busy && <p className="text-sm text-soft">Thinking with {model || "gpt-6-luna"}…</p>}
+        {busy && <p className="text-sm text-soft">Thinking with {modelLabel(model || "gpt-6-luna")}…</p>}
         <ErrorBox error={err} />
         <div ref={endRef} />
       </div>
@@ -185,6 +186,7 @@ export function AssistantPage({ projectId }: { projectId: string }) {
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement).requestSubmit(); } }} />
           <Button variant="primary" disabled={busy || !q.trim()}><Send size={14} /> Send</Button>
         </div>
+        <CostEstimate className="mt-1" operation={scope === "general" ? "general_chat" : mode === "design" ? "integration_design" : "question_answering"} text={q} model={model} />
         <p className="mt-1.5 text-[11px] text-soft">{scope === "general" ? "General: no project data is sent to the model." : "Data: only evidence you can access in this project is sent, as untrusted context."} Enter to send · Shift+Enter for a new line.</p>
       </form>
     </section>

@@ -53,7 +53,9 @@ def test_invalid_citations_are_removed_and_flagged():
 
 def test_model_policy_server_side():
     assert gateway.resolve_model(None, None) == "gpt-6-luna"
-    assert gateway.resolve_model("gpt-6-sol", "gpt-6-terra") == "gpt-6-sol"
+    assert gateway.resolve_model("gpt-6-terra", "gpt-6-luna") == "gpt-6-terra"     # per request beats preference
+    with pytest.raises(Problem):
+        gateway.resolve_model("gpt-6-sol", None)                                   # blocked by cost policy
     assert gateway.resolve_model(None, "gpt-6-terra") == "gpt-6-terra"
     with pytest.raises(Problem):
         gateway.resolve_model("gpt-4o", None)

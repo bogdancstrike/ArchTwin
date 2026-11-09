@@ -27,7 +27,7 @@ from archtwin.common.logging import redact_text
 from archtwin.common.schema import adr_versions, adrs, conversations, prompt_runs
 from archtwin.diagrams import views
 from archtwin.documents import service as docs
-from archtwin.intelligence import gateway
+from archtwin.intelligence import gateway, routing
 
 STOP = {"the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "how", "what", "which", "who", "does", "do", "is", "are", "be", "by", "from", "into", "this", "that", "it", "its", "my", "our", "we", "i", "you", "can", "should", "would"}
 MAX_EVIDENCE = 30
@@ -182,6 +182,24 @@ async def retrieve(ctx: RequestContext, question: str, sources: list[str] | None
     return ev[:MAX_EVIDENCE]
 
 
+def operation_for(scope: str, mode: str) -> str:
+    return "general_chat" if scope == "general" else "integration_design" if mode == "design" else "question_answering"
+
+
+def fit_evidence(ev: list[dict[str, Any]], budget_tokens: int) -> list[dict[str, Any]]:
+    """Keep the best-ranked evidence that fits the task's token budget (fewer input tokens, same citations)."""
+    if budget_tokens <= 0:
+        return ev
+    out, used = [], 0
+    for e in ev:
+        n = routing.count_tokens(e["text"]) + 12
+        if used + n > budget_tokens and out:
+            break
+        out.append(e)
+        used += n
+    return out
+
+
 def _evidence_block(ev: list[dict[str, Any]]) -> str:
     return "\n".join(f"[{e['id']}] ({e['type']}; source: {e['source'] or 'graph'}) {e['text']}" for e in ev)
 
@@ -227,7 +245,8 @@ async def ask(ctx: RequestContext, question: str, model: str, mode: str = "ask",
     sources = normalize_sources(sources) if scope == "data" else None
     async with uow(ctx) as conn:
         conversation_id, server_hist = await _conversation(conn, ctx, conversation_id, scope, sources, question)
-    ev = await retrieve(ctx, question, sources) if scope == "data" else []
+    operation = operation_for(scope, mode)
+    ev = fit_evidence(await retrieve(ctx, question, sources), routing.task(operation).evidence_tokens) if scope == "data" else []
     sys = GENERAL if scope == "general" else SYSTEM + ("\n\n" + DESIGN if mode == "design" else "")
     msgs = [{"role": "system", "content": sys}]
     for h in (server_hist or history or [])[-6:]:
@@ -235,9 +254,7 @@ async def ask(ctx: RequestContext, question: str, model: str, mode: str = "ask",
             msgs.append({"role": h["role"], "content": str(h.get("content", ""))[:4000]})
     msgs.append({"role": "user", "content": question if scope == "general"
                  else f"<evidence>\n{_evidence_block(ev)}\n</evidence>\n\nQuestion: {question}"})
-    operation = "general_chat" if scope == "general" else "integration_design" if mode == "design" else "question_answering"
-    c = await gateway.complete(msgs, model=model, operation=operation, project_id=str(ctx.project_id), user_id=str(ctx.actor_id), ctx=ctx,
-                               max_tokens=6000)
+    c = await gateway.complete(msgs, model=model, operation=operation, project_id=str(ctx.project_id), user_id=str(ctx.actor_id), ctx=ctx)
     if scope == "general":
         answer, good, bad = c.text, [], []
     else:
@@ -313,7 +330,7 @@ async def draft_adr(ctx: RequestContext, question: str, model: str) -> dict[str,
     msgs = [{"role": "system", "content": SYSTEM + "\n\n" + ADR_JSON},
             {"role": "user", "content": f"<evidence>\n{_evidence_block(ev)}\n</evidence>\n\nDecision to record: {question}"}]
     c = await gateway.complete(msgs, model=model, operation="adrs", project_id=str(ctx.project_id), user_id=str(ctx.actor_id), ctx=ctx,
-                               json_mode=True, max_tokens=6000)
+                               json_mode=True)
     try:
         data = json.loads(c.text)
     except json.JSONDecodeError:
@@ -356,7 +373,7 @@ async def extend_text(ctx: RequestContext, text_in: str, model: str, *, mode: st
     user = (f"ADR title: {title or '(none)'}\nField: {field or 'text'}\n" + (f"Extra instruction from the user: {instruction}\n" if instruction else "")
             + (f"<evidence>\n{_evidence_block(ev)}\n</evidence>\n" if ev else "") + f"<text>\n{text_in}\n</text>")
     c = await gateway.complete([{"role": "system", "content": rules}, {"role": "user", "content": user}], model=model, operation="text_extend",
-                               project_id=str(ctx.project_id), user_id=str(ctx.actor_id), ctx=ctx, max_tokens=3000)
+                               project_id=str(ctx.project_id), user_id=str(ctx.actor_id), ctx=ctx)
     out, good, bad = validate_citations(c.text.strip(), ev) if ev else (c.text.strip(), [], [])
     async with uow(ctx) as conn:
         await audit.record(conn, ctx, "ai.text_extend", "assistant", ctx.project_id, details={"model": model, "mode": mode, "field": field,
@@ -409,7 +426,7 @@ async def complete_adr(ctx: RequestContext, fields: dict[str, Any], model: str, 
             + (f"Extra instruction from the author: {instruction}\n" if instruction else "")
             + (f"<evidence>\n{_evidence_block(ev)}\n</evidence>" if ev else ""))
     c = await gateway.complete([{"role": "system", "content": COMPLETE_ADR}, {"role": "user", "content": user}], model=model, operation="adrs",
-                               project_id=str(ctx.project_id), user_id=str(ctx.actor_id), ctx=ctx, json_mode=True, max_tokens=6000)
+                               project_id=str(ctx.project_id), user_id=str(ctx.actor_id), ctx=ctx, json_mode=True)
     try:
         data = json.loads(c.text)
     except json.JSONDecodeError:
