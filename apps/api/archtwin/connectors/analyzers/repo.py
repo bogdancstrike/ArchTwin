@@ -436,6 +436,8 @@ class RepoAnalyzer:
                 self._wire_value(svc, v, rel, span, var=k)
                 if k in KNOWN_EXTERNAL_ENV and v and "..." not in v:
                     ek, en, proto = KNOWN_EXTERNAL_ENV[k]
+                    if ek in self.LLM_SDKS and self._env_target(svc, self.LLM_VAR):
+                        continue           # the key authenticates against the configured gateway, not the provider
                     self.r.node("inferred", ek, "external-system", en, V_INFER, attrs={"evidence": f"{k} configured"}, ref=rel,
                                 span=span, confidence=0.6)
                     self.r.edge("inferred", svc.key, "calls", ek, V_INFER, attrs={"protocol": proto, "via": k}, ref=rel,
@@ -665,10 +667,15 @@ class RepoAnalyzer:
                                          for res, _ in resources.resources_for(mods[module].external_imports, mods[module].source)
                                          if not self._dataplane_excluded(s, res)})
             a = self._asy.get(module)
-            if a:
-                attrs["starts"] = sorted({f"workflow:{s.system}/{n}" for n, _, _ in a.starts})
-                attrs["notifies"] = sorted({f"channel:{s.system}/{c}" for c, _ in a.notifies})
-                attrs["listens"] = sorted({f"channel:{s.system}/{c}" for c, _ in a.listens})
+            units = a.closure(handler) if (a and handler and any(u[0] == handler for u in a.units)) else None
+            if a:          # what THIS handler (and its local helpers) does, not every route of the module
+                pick = (lambda items: a.within(units, items)) if units else (lambda items: items)  # noqa: E731
+                attrs["starts"] = sorted({f"workflow:{s.system}/{n}" for n, _, _ in pick(a.starts)})
+                attrs["notifies"] = sorted({f"channel:{s.system}/{c}" for c, _ in pick(a.notifies)})
+                attrs["listens"] = sorted({f"channel:{s.system}/{c}" for c, _ in pick(a.listens)})
+            if units:
+                attrs["effects"] = [fx for fx in self._code_effects(s, mods, [(module, units)])
+                                    if not fx["target"].startswith(("channel:", "workflow:"))]
         self.r.node("static", ek, "api-endpoint", f"{method} {path}", parser, attrs=attrs, ref=rel, span={"path": rel, "line_start": line, "line_end": line})
         self.r.edge("static", s.key, "exposes", ek, parser, ref=rel, span={"path": rel, "line_start": line})
         return ek
@@ -898,35 +905,98 @@ class RepoAnalyzer:
                 return a["target"]
         return None
 
-    def _wf_effects(self, s: Service, mods: dict, wf_module: str, acts: dict[str, str]) -> list[dict[str, str]]:
-        """What a workflow does through its activities: gateways and SaaS it calls, stores it writes, channels it notifies,
-        MCP servers it uses — from the workflow module, its activity modules and what those import directly."""
-        a = self._asy.get(wf_module)
-        base = {wf_module} | {acts[x] for x in (a.activity_calls if a else ()) if x in acts}
-        involved = set(base)
-        for m in base:
-            involved |= {i for i in mods[m].imports if i in mods and not i.split(".")[-1].startswith("test")}
+    @staticmethod
+    def _unit_text(mod: Any, units: set[str], ma: async_flows.ModuleAsync | None) -> str:
+        if ma is None or not ma.units:
+            return mod.source
+        lines = mod.source.splitlines()
+        return "\n".join("\n".join(lines[a - 1:b]) for n, a, b in ma.units if n in units)
+
+    def _referenced(self, mods: dict, m: str, text: str) -> dict[str, set[str] | None]:
+        """Codebase code that a piece of code uses through imported names, as precisely as the evidence allows:
+        `from x import func` / `alias.func(...)` -> {module x: {func}}; a module used without a visible attribute -> None
+        (the whole module)."""
+        out: dict[str, set[str] | None] = {}
+        idents = set(re.findall(r"(?<![\w.])([A-Za-z_]\w*)\b", text))
+        for ident in idents:
+            fq = mods[m].names.get(ident)
+            if not fq:
+                continue
+            if fq in mods:                                           # a module alias: which of its functions are used?
+                attrs = set(re.findall(rf"(?<![\w.]){re.escape(ident)}\.([A-Za-z_]\w*)", text))
+                cur = out.get(fq, set())
+                out[fq] = None if (cur is None or not attrs) else cur | attrs
+                continue
+            mod, _, attr = fq.rpartition(".")
+            while mod and mod not in mods:
+                mod = mod.rpartition(".")[0]
+            if mod and mod != m:
+                cur = out.get(mod, set())
+                out[mod] = None if cur is None else cur | {attr}
+        return out
+
+    def _code_effects(self, s: Service, mods: dict, pieces: list[tuple[str, set[str] | None]], depth: int = 3) -> list[dict[str, str]]:
+        """What pieces of code do (module + top-level units, None = whole module), following the functions they call in
+        other modules `depth` levels deep: SaaS/gateways via SDK imports, NOTIFY channels, MCP calls, database writes."""
         out: dict[str, dict[str, str]] = {}
         pg = self._pg_host(s)
         mcp = self._env_target(s, re.compile(r"MCP\w*(URL|ENDPOINT|HOST)$", re.IGNORECASE))
-        for m in sorted(involved):
+        sql = {"sqlalchemy", "asyncpg", "psycopg", "psycopg2", "sqlmodel"}
+        todo = [(m, (self._asy[m].closure_all(units) if (units and m in self._asy) else units), 0) for m, units in pieces]
+        done: dict[str, set[str] | None] = {}
+        while todo:
+            m, units, lvl = todo.pop(0)
+            prev = done.get(m, set())
+            if prev is None or (units is not None and units <= prev):
+                continue
+            done[m] = None if units is None else prev | units
+            ma = self._asy.get(m)
+            text = self._unit_text(mods[m], units, ma) if units else mods[m].source
             mod = mods[m]
             for res, _ in resources.resources_for(mod.external_imports, mod.source):
                 if self._dataplane_excluded(s, res) or res.kind == "component":
                     continue
+                if units is not None and not re.search(rf"\b{re.escape(res.technology.split()[0].lower())}|\b(client|openai|complete|chat|embed)", text, re.IGNORECASE):
+                    continue                                      # the SDK is imported by the module, not used by these units
                 tgt = self._resource_target(s, res)
                 key = tgt[0] if tgt else res.key.format(system=s.system, service=s.name)
                 out.setdefault(key, {"target": key, "kind": "calls" if tgt else res.relation, "label": res.technology, "module": m})
-            ma = self._asy.get(m)
-            for ch, _ in (ma.notifies if ma else []):
-                k = f"channel:{s.system}/{ch}"
-                out.setdefault(k, {"target": k, "kind": "publishes", "label": f"NOTIFY {ch}", "module": m})
-            if ma and ma.mcp_client and mcp:
-                out.setdefault(mcp[0], {"target": mcp[0], "kind": "calls", "label": f"MCP tools via {mcp[1]}", "module": m})
-            if pg and mod.external_imports & {"sqlalchemy", "asyncpg", "psycopg", "psycopg2", "sqlmodel"} | \
-                    {i for i in mod.external_imports if i.split(".")[0] in ("sqlalchemy", "asyncpg", "psycopg")}:
+            if ma:
+                for ch, _ in (ma.within(units, ma.notifies) if units else ma.notifies):
+                    k = f"channel:{s.system}/{ch}"
+                    out.setdefault(k, {"target": k, "kind": "publishes", "label": f"NOTIFY {ch}", "module": m})
+                mcp_lines = ma.within(units, [(x,) for x in ma.mcp_client_lines]) if units else ma.mcp_client_lines
+                if mcp_lines and mcp:
+                    out.setdefault(mcp[0] + "#mcp", {"target": mcp[0], "kind": "calls", "label": f"MCP tools via {mcp[1]}", "module": m})
+            if pg and {i.split(".")[0] for i in mod.external_imports} & sql and \
+                    re.search(r"\b(execute|tx|session|insert|update|commit|fetch\w*)\(", text):
                 out.setdefault(pg, {"target": pg, "kind": "writes", "label": "persists state", "module": m})
+            if lvl < depth:
+                for rm, ru in self._referenced(mods, m, text).items():
+                    ra = self._asy.get(rm)
+                    if ru is not None and ra is not None:
+                        ru = ra.closure_all(ru)
+                    todo.append((rm, ru, lvl + 1))
         return list(out.values())[:12]
+
+    def _wf_effects(self, s: Service, mods: dict, wf_module: str, wf_name: str, acts: dict[str, str]) -> tuple[list[dict[str, str]], list[str]]:
+        """A workflow's effects: its own class, the activities it executes (function bodies + local helpers) and what those
+        use. Returns (effects, activity names)."""
+        a = self._asy.get(wf_module)
+        if a is None:
+            return [], []
+        unit = a.unit_of(a.workflows.get(wf_name, 0))
+        wf_units = a.closure(unit) if unit else None
+        called = sorted({n for n, line in a.activity_calls if wf_units is None or a.unit_of(line) in wf_units})
+        pieces: list[tuple[str, set[str] | None]] = [(wf_module, wf_units)]
+        for n in called:
+            am = acts.get(n)
+            aa = self._asy.get(am) if am else None
+            if aa is None:
+                continue
+            au = aa.unit_of(aa.activities.get(n, 0))
+            pieces.append((am, aa.closure(au) if au else None))
+        return self._code_effects(s, mods, pieces), called
 
     def _async_elements(self, s: Service, mods: dict, reach: set[str]) -> None:
         if not self._asy:
@@ -936,7 +1006,7 @@ class RepoAnalyzer:
             return
         wf_def = {n: (m, line) for m, a in self._asy.items() for n, line in a.workflows.items()
                   if not any(p in ("tests", "test") for p in m.split("."))}
-        acts = {n: m for m, a in self._asy.items() for n in a.activities}
+        acts = {n: m for m, a in self._asy.items() for n in a.activities if not any(p in ("tests", "test") for p in m.split("."))}
         host, pg = self._temporal_host(s), self._pg_host(s)
         queues = sorted({q for m in live for q in self._asy[m].worker_queues if q})
         comp = lambda m: f"component:{s.system}/{s.name}/{python_code.component_of(m)}"  # noqa: E731
@@ -957,13 +1027,15 @@ class RepoAnalyzer:
                     continue
                 wk, rel = wf_node(name), _rel(self.root, mods[m].path)
                 a = self._asy[m]
+                effects, called = self._wf_effects(s, mods, m, name, acts)
                 self.r.node("static", wk, "workflow", name, async_flows.V_ASYNC, ref=rel, span={"path": rel, "line_start": line},
-                            attrs={"activities": sorted(x for x in a.activity_calls if x in acts)[:40], "task_queues": queues,
-                                   "effects": self._wf_effects(s, mods, m, acts), "executed_by": s.name})
+                            attrs={"activities": called[:40], "task_queues": queues, "effects": effects, "executed_by": s.name})
                 self.r.edge("static", s.key, "consumes", wk, async_flows.V_ASYNC, ref=rel, span={"path": rel, "line_start": line},
                             attrs={"protocol": "temporal", "label": "executes", "task_queues": queues}, confidence=0.95)
+                unit = a.unit_of(line)
+                own = a.closure(unit) if unit else None
                 for child, how, cline in a.starts:
-                    if child != name and child in wf_def:
+                    if child != name and child in wf_def and (own is None or a.unit_of(cline) in own):
                         self.r.edge("static", wk, "calls", wf_node(child), async_flows.V_ASYNC, ref=rel,
                                     span={"path": rel, "line_start": cline}, attrs={"protocol": "temporal", "label": "child workflow"})
         for m in live:

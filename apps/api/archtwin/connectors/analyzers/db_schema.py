@@ -138,7 +138,7 @@ def parse_sql(text: str) -> list[tuple[str, int, list[Column]]]:
             continue
         ref = re.search(r"references\s+([\w.\"`]+)\s*\(\s*([\w\"`]+)", m.group(4), re.IGNORECASE)
         out.append((_clean(m.group(1)), _line(text, m.start()),
-                    [Column(col, m.group(3), False if "not null" in rest else True, "primary key" in rest,
+                    [Column(col, m.group(3), "not null" not in rest, "primary key" in rest,
                             f"{_clean(ref.group(1))}.{_clean(ref.group(2))}" if ref else "")]))
     return out
 
