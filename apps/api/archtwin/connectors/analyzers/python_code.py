@@ -11,6 +11,7 @@ from tree_sitter import Language, Parser
 
 PARSER_VERSION = "py-treesitter/1.2"     # 1.2: L4 code elements (classes, functions, references)
 KAFKA_PRODUCE = {"produce", "send", "send_and_wait"}
+KAFKA_LIBS = {"confluent_kafka", "kafka", "aiokafka", "faust", "faststream", "quixstreams"}
 KAFKA_CLIENTS = {"Producer", "Consumer", "KafkaProducer", "KafkaConsumer", "AIOKafkaProducer", "AIOKafkaConsumer",
                  "SerializingProducer", "DeserializingConsumer"}
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "websocket", "api_route", "route"}
@@ -504,10 +505,16 @@ def analyze(context_dir: Path, files: list[Path], errors: list[str] | None = Non
             if cand:
                 resolved.add(cand)
         m.imports = resolved - {m.name}
+        # `.send("x")` / `.subscribe(...)` are Kafka only in a module that uses a Kafka client library (not websockets/SSE)
+        if m.kafka and not (m.uses_kafka_client or {i.split(".")[0] for i in m.external_imports} & KAFKA_LIBS):
+            m.kafka = []
     return out
 
 
-def reachable(mods: dict[str, PyModule], entries: list[str]) -> set[str]:
+def reachable(mods: dict[str, PyModule], entries: list[str], parents: bool = True) -> set[str]:
+    """Modules executed from `entries`. With `parents=False`, a package `__init__` reached only because a sub-module was
+    imported does not pull in its own imports (`from pkg.routers.files import helper` does not mean every router runs):
+    used for behaviour (workflows started, channels notified), where the import side effect is not a use."""
     seen: set[str] = set()
     todo = [e for e in entries if e in mods]
     while todo:
@@ -520,7 +527,10 @@ def reachable(mods: dict[str, PyModule], entries: list[str]) -> set[str]:
         for i in range(1, len(parts)):
             p = ".".join(parts[:i])
             if p in mods and p not in seen:
-                todo.append(p)
+                if parents:
+                    todo.append(p)
+                else:
+                    seen.add(p)                          # executed, but its imports are not followed
         todo.extend(i for i in mods[m].imports if i not in seen)
     return seen
 
@@ -547,6 +557,21 @@ def _function_block(src: str, name: str) -> str | None:
     return "\n".join(block)
 
 
+def _dispatch_block(src: str, command: str) -> str | None:
+    """The branch of an argparse/click-style dispatcher that runs `command`: `if args.cmd == "seed":` / `elif cmd in ("seed",)`
+    / `case "seed":` -> its indented body (lazy imports and calls inside it)."""
+    m = re.search(rf"""^(?P<ind>[ \t]*)(?:if|elif|case)\b[^\n]*?["']{re.escape(command)}["'][^\n]*:[ \t]*\n""", src, re.MULTILINE)
+    if not m:
+        return None
+    ind, body = len(m.group("ind")), []
+    for line in src[m.end():].splitlines():
+        if line.strip() and len(line) - len(line.lstrip()) <= ind:
+            break
+        body.append(line.strip())
+    block = "\n".join(body)
+    return block or None
+
+
 def role_entries(mods: dict[str, PyModule], script_module: str, command: str) -> list[str]:
     """Modules a CLI role runs: `service-data query` -> the `query` command function in the script's package -> what it
     imports, the "module:attr" app strings it uses (directly or via module constants such as QUERY_APP)."""
@@ -556,7 +581,7 @@ def role_entries(mods: dict[str, PyModule], script_module: str, command: str) ->
     found: set[str] = set()
     for m in sorted(x for x in mods if x == script_module or x.startswith(package + ".")):
         src = mods[m].source
-        block = _function_block(src, func)
+        block = _function_block(src, func) or _dispatch_block(src, command)
         if block is None:
             continue
         refs = re.findall(r"^\s*from\s+([A-Za-z_][\w.]*)\s+import", block, re.MULTILINE)

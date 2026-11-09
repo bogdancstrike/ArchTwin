@@ -169,7 +169,7 @@ def _context(g: dict[str, Any], title: str, snap: dict[str, Any]) -> tuple[dict[
         flows.append({**f, "steps": steps, "feature": feature,
                       "description": describe_flow(f, {**names, **pnames}),
                       "components": [p["name"] for p in f["participants"] if p["kind"] in ("component", "container")],
-                      "data": [p["name"] for p in f["participants"] if p["kind"] in ("database", "table", "kafka-topic", "external-system")
+                      "data": [p["name"] for p in f["participants"] if p["kind"] in ("database", "table", "kafka-topic", "message-channel", "external-system")
                                or p.get("subtype") in ("storage", "database")],
                       "entry_name": f["participants"][0]["name"] if f["participants"] else "",
                       "first_ref": next((s["ref"] for s in steps if s["ref"] != "no evidence"), "no evidence")})

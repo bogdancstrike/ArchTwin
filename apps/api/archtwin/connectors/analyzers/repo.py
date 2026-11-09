@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 
-from archtwin.connectors.analyzers import db_schema, gateway_maps, python_code, resources, webui
+from archtwin.connectors.analyzers import async_flows, db_schema, gateway_maps, python_code, resources, webui
 from archtwin.connectors.analyzers.common import HOSTPORT_RX, SCHEME_REL, URL_RX, classify, read, safe_url, scheme_base, walk
 from archtwin.connectors.sdk import DocumentOut, ScanResult
 
@@ -144,6 +144,9 @@ ComposeLoader.add_constructor("!reset", _compose_tag)
 ComposeLoader.add_constructor("!override", _compose_tag)
 
 
+V_CODE_URL = "code-urls/1.0"
+
+
 @dataclass
 class Service:
     system: str
@@ -240,6 +243,9 @@ def _entry_modules(argv: list[str], scripts: dict[str, str] | None = None) -> tu
     for i, c in enumerate(argv):
         if c == "-m" and i + 1 < len(argv):
             mods += [argv[i + 1], f"{argv[i + 1]}.__main__"]   # `python -m pkg` runs pkg/__main__.py
+            sub = next((a for a in argv[i + 2:] if not a.startswith("-")), "")
+            if sub and re.fullmatch(r"[A-Za-z][\w\-]*", sub):    # `python -m pkg.cli seed`: the `seed` command of the CLI
+                roles.append((f"{argv[i + 1]}.__main__", sub))
         if c.endswith(".py") and i > 0 and re.search(r"python(3(\.\d+)?)?$", argv[i - 1]):   # python path/to/script.py
             mods.append(c.removesuffix(".py").lstrip("./").replace("/", "."))
         m = re.match(r"^([A-Za-z_][\w.]*):[A-Za-z_]\w*$", c)       # uvicorn pkg.mod:app
@@ -253,6 +259,17 @@ def _entry_modules(argv: list[str], scripts: dict[str, str] | None = None) -> tu
             if sub:
                 roles.append((module, sub))
     return mods, roles
+
+
+def _migration_entries(ctx: Path, argv: list[str], mods: dict) -> list[str]:
+    """Modules a migration job runs: `alembic upgrade head` executes alembic/env.py, which imports the models package."""
+    if not argv or Path(argv[0]).name != "alembic":
+        return []
+    env = next((p for p in (ctx / "alembic" / "env.py", ctx / "migrations" / "env.py") if p.exists()), None)
+    if env is None:
+        return []
+    imported = re.findall(r"^\s*(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))", read(env), re.MULTILINE)
+    return sorted({m for pair in imported for m in pair if m and m in mods})
 
 
 def _dockerfile_info(path: Path) -> dict[str, Any]:
@@ -286,6 +303,8 @@ class RepoAnalyzer:
         self.files = list(walk(self.root))
         self.services: dict[str, Service] = {}         # "system/name" -> Service (a repo may hold several compose projects)
         self.by_system: dict[str, dict[str, Service]] = defaultdict(dict)
+        self._reach_text: dict[str, str] = {}             # service key -> source of the code it runs (config-usage checks)
+        self._asy: dict[str, async_flows.ModuleAsync] = {}
 
     # ------------------------------------------------------------------ orchestrate
     def run(self) -> ScanResult:
@@ -303,6 +322,7 @@ class RepoAnalyzer:
             self.persons()
             self.code()
             self.config_mounts()
+            self._prune_unused_config()
         self.openapi_specs()
         self.catalog_and_owners()
         self.tables()
@@ -567,15 +587,20 @@ class RepoAnalyzer:
             self.r.warnings += [f"python parse failed (module skipped): {e}" for e in errors[:20]]
         if not mods:
             return
+        self._asy = async_flows.analyze(mods)
         for s in svcs:
             entries, roles = _entry_modules(_argv(s.spec), scripts)
+            if not entries and not roles:
+                entries = _migration_entries(ctx, _argv(s.spec), mods)     # `alembic upgrade head`: what env.py imports
             role_mods = [m for mod, sub in roles for m in python_code.role_entries(mods, mod, sub)]
             entries = (role_mods or entries) + dynamic_entries                 # a CLI role runs only what its command starts
             reach = python_code.reachable(mods, entries) if entries else set()
+            seeds = list(entries)
             if len(svcs) > 1 and declared and reach:
                 running = {python_code.component_of(m) for m in reach}
                 handlers = sorted({d.module for d in declared if d.module in mods and python_code.component_of(d.module) in running})
                 reach |= python_code.reachable(mods, handlers)
+                seeds += handlers
             if entries and not reach:
                 continue
             if not entries:
@@ -604,7 +629,11 @@ class RepoAnalyzer:
                 self.r.edge("static", f"component:{s.system}/{s.name}/{a}", "depends-on", f"component:{s.system}/{s.name}/{b}",
                             python_code.PARSER_VERSION, attrs={"imports": n, "protocol": "in-process"},
                             ref=_rel(self.root, mods[a].path) if a in mods else "", confidence=1.0)
+            behaviour = (python_code.reachable(mods, seeds, parents=False) & reach) if seeds else reach
+            self._reach_text[s.key] = "\n".join(mods[m].source for m in sorted(behaviour))
             self._code_elements(s, mods, reach, comps)
+            self._async_elements(s, mods, behaviour)
+            self._code_urls(s, mods, behaviour)
             self._resources(s, mods, reach)
             self._http_calls(s, mods, reach)
             self._kafka(s, mods, reach)
@@ -632,8 +661,14 @@ class RepoAnalyzer:
             attrs["component"] = f"component:{s.system}/{s.name}/{own}"
             attrs["uses"] = sorted({f"component:{s.system}/{s.name}/{python_code.component_of(i)}" for i in mods[module].imports
                                     if python_code.component_of(i) != own and python_code.component_of(i) in comps})
-            attrs["resources"] = sorted({res.key.format(system=s.system, service=s.name)
-                                         for res, _ in resources.resources_for(mods[module].external_imports, mods[module].source)})
+            attrs["resources"] = sorted({(self._resource_target(s, res) or (res.key.format(system=s.system, service=s.name),))[0]
+                                         for res, _ in resources.resources_for(mods[module].external_imports, mods[module].source)
+                                         if not self._dataplane_excluded(s, res)})
+            a = self._asy.get(module)
+            if a:
+                attrs["starts"] = sorted({f"workflow:{s.system}/{n}" for n, _, _ in a.starts})
+                attrs["notifies"] = sorted({f"channel:{s.system}/{c}" for c, _ in a.notifies})
+                attrs["listens"] = sorted({f"channel:{s.system}/{c}" for c, _ in a.listens})
         self.r.node("static", ek, "api-endpoint", f"{method} {path}", parser, attrs=attrs, ref=rel, span={"path": rel, "line_start": line, "line_end": line})
         self.r.edge("static", s.key, "exposes", ek, parser, ref=rel, span={"path": rel, "line_start": line})
         return ek
@@ -692,9 +727,19 @@ class RepoAnalyzer:
             comp_key = f"component:{s.system}/{s.name}/{python_code.component_of(m)}"
             rel = _rel(self.root, mod.path)
             for res, hint in resources.resources_for(mod.external_imports, mod.source):
+                if self._dataplane_excluded(s, res):
+                    continue
                 key = res.key.format(system=s.system, service=s.name)
                 top = hint.split()[-1]
                 span = {"path": rel, "line_start": resources.import_line(mod.source, top)}
+                redirect = self._resource_target(s, res)
+                if redirect:            # the SDK talks to a configured gateway (OPENAI_BASE_URL=http://litellm:4000), not the SaaS
+                    key, via = redirect
+                    if key != comp_key:
+                        self.r.edge("static", comp_key, "calls", key, resources.V_RESOURCES, ref=rel, span=span,
+                                    attrs={"protocol": f"{res.technology} API", "via": via, "module": m, "sdk": top}, confidence=0.9)
+                    rolled.setdefault(key, ("calls", f"{res.technology} API"))
+                    continue
                 self.r.node("static", key, res.kind, res.name, resources.V_RESOURCES, ref=rel, span=span,
                             attrs={"subtype": res.subtype, "technology": res.technology, "used_by": m})
                 if res.kind == "component":
@@ -707,6 +752,245 @@ class RepoAnalyzer:
         for key, (rel_kind, proto) in rolled.items():           # container-level rollup for L1/L2
             self.r.edge("static", s.key, rel_kind, key, resources.V_RESOURCES, attrs={"protocol": proto, "rollup": "from components"},
                         confidence=0.85)
+
+    # ------------------------------------------------------------------ precision: who really talks to what
+    LLM_SDKS = ("external:openai", "external:anthropic", "external:llm-gateway")
+    LLM_VAR = re.compile(r"(?:LLM|OPENAI|ANTHROPIC|LITELLM|GATEWAY|AI|MODEL)\w*(?:BASE_URL|API_BASE|BASE|ENDPOINT|URL|HOST)$", re.IGNORECASE)
+
+    def _env_target(self, s: Service, var_rx: re.Pattern) -> tuple[str, str] | None:
+        """(container key, variable) of the first environment variable matching `var_rx` whose URL names a service here."""
+        names = self.by_system.get(s.system, {})
+        for k, v in _env_items(s.spec):
+            if var_rx.search(k):
+                m = URL_RX.search(v) or HOSTPORT_RX.match(v.strip())
+                host = m.group("host") if m else ""
+                if host in names and host != s.name:
+                    return names[host].key, k
+        return None
+
+    def _resource_target(self, s: Service, res: resources.Resource) -> tuple[str, str] | None:
+        """An LLM SDK pointed at a gateway by configuration calls that gateway, not the provider's SaaS endpoint."""
+        if res.key not in self.LLM_SDKS:
+            return None
+        hit = self._env_target(s, self.LLM_VAR)
+        return (hit[0], f"{res.technology} SDK via {hit[1]}") if hit else None
+
+    def _networks(self, s: Service) -> set[str]:
+        n = s.spec.get("networks")
+        if isinstance(n, dict):
+            return set(map(str, n))
+        if isinstance(n, list):
+            return set(map(str, n))
+        return {"default"}
+
+    LLM_CFG = re.compile(r"(?:OPENAI|ANTHROPIC|LLM|LITELLM|GEMINI|MISTRAL|AZURE_OPENAI)\w*(?:KEY|URL|BASE|ENDPOINT|TOKEN)$", re.IGNORECASE)
+
+    def _siblings(self, s: Service) -> list[Service]:
+        return [o for o in self.services.values() if o.context and o.context == s.context and o.system == s.system]
+
+    def _isolated(self, a: Service, b: Service) -> bool:
+        if "network_mode" in a.spec or "network_mode" in b.spec:
+            return False
+        return not (self._networks(a) & self._networks(b))
+
+    def _dataplane_excluded(self, s: Service, res: resources.Resource) -> bool:
+        """Imports that a service carries but does not use, judged from deployment evidence:
+        * an LLM SDK in a service with no key / base URL while a sibling built from the same image has one;
+        * a database driver whose server is configured at run time, when the image's services are split across networks
+          and this one is not on the extra (data) network."""
+        if res.key in self.LLM_SDKS:
+            if not s.spec or any(self.LLM_CFG.search(k) for k, _ in _env_items(s.spec)):
+                return False
+            return any(self.LLM_CFG.search(k) for o in self._siblings(s) if o is not s for k, _ in _env_items(o.spec))
+        if res.subtype != "database" or not res.key.startswith("external:"):
+            return False
+        tech = res.technology.lower().split()[0]
+        if any(tech in (k + v).lower() for k, v in _env_items(s.spec)):
+            return False                                    # explicitly configured for this service
+        group = self._siblings(s)
+        if len(group) < 2:
+            return False
+        nets = [self._networks(o) for o in group]
+        extra = set().union(*nets) - set.intersection(*nets)
+        return bool(extra) and not (self._networks(s) & extra)
+
+    @staticmethod
+    def _env_used(var: str, text: str) -> bool:
+        """Whether code reads an environment variable: by name, or through a settings field (HORIZON_TEMPORAL_ADDRESS ->
+        temporal_address); OTEL_* variables are read by the OpenTelemetry SDK when the code uses it."""
+        if re.search(rf"""["']{re.escape(var)}["']""", text):     # os.getenv("VAR") / environ["VAR"]
+            return True
+        if var.startswith("OTEL_"):
+            return "opentelemetry" in text
+        toks = var.lower().split("_")
+        for i in range(len(toks) - 1):
+            cand = "_".join(toks[i:])
+            # a settings field is used where it is read (`settings().temporal_address`), not where it is declared
+            if (len(toks) - i >= 2 or len(cand) >= 8) and re.search(rf"\.{re.escape(cand)}\b|\[[\"']{re.escape(cand)}[\"']\]", text):
+                return True
+        return False
+
+    def _prune_unused_config(self) -> None:
+        """Drop connections that exist only because a shared environment block or a shared config file lists them:
+        a service whose analyzed code never reads the variable does not use that connection (e.g. a migration job given
+        the workflow-engine address by a YAML anchor)."""
+        code_backed: dict[str, set[str]] = defaultdict(set)       # target -> services with non-shared evidence
+        for o in self.r.observations:
+            if o.subject_kind == "edge" and o.kind in ("calls", "writes", "reads") and not o.attributes.get("shared_build_context"):
+                code_backed[o.attributes["target"]].add(o.attributes["source"])
+        # a variable shared by several services with the same value (YAML anchor / copied block) that some service's code
+        # demonstrably reads: the services whose code does not read it are only handed it
+        holders: dict[tuple[str, str], list[str]] = defaultdict(list)
+        for svc in self.services.values():
+            for k, v in _env_items(svc.spec):
+                holders[(k, v)].append(svc.key)
+        shared_vars = {k for (k, _), keys in holders.items() if len(keys) > 1}
+        readers = {k: {sk for sk, t in self._reach_text.items() if self._env_used(k, t)} for k in shared_vars}
+        by_key = {svc.key: svc for svc in self.services.values()}
+        keep, dropped = [], 0
+        for o in self.r.observations:
+            a = o.attributes
+            if o.subject_kind == "edge" and o.kind in ("calls", "writes", "reads") and a.get("source") in by_key and a.get("target") in by_key:
+                src_s, tgt_s = by_key[a["source"]], by_key[a["target"]]
+                if src_s.compose_file == tgt_s.compose_file and self._isolated(src_s, tgt_s):
+                    dropped += 1                    # the two containers share no network: they cannot talk
+                    continue
+            if o.subject_kind == "edge" and o.parser_version == V_CONFIG:
+                src, tgt, via = o.attributes["source"], o.attributes["target"], str(o.attributes.get("via", ""))
+                if via in shared_vars and readers[via] and src in self._reach_text and src not in readers[via]:
+                    dropped += 1
+                    continue
+                if o.attributes.get("shared_build_context") and code_backed.get(tgt) and src not in code_backed[tgt]:
+                    dropped += 1                    # another service of the image has direct evidence: the file is theirs
+                    continue
+            keep.append(o)
+        self.r.observations = keep
+        if dropped:
+            self.r.stats["unused_config_links"] = dropped
+
+    def _code_urls(self, s: Service, mods: dict, behaviour: set[str]) -> None:
+        """URL constants in the code a service runs (`DEFAULT_SEARXNG = "http://searxng:8080"`) that name a service here."""
+        names = self.by_system.get(s.system, {})
+        for m in sorted(behaviour):
+            for const, value in mods[m].consts.items():
+                um = URL_RX.match(value)
+                if not um or um.group("host") not in names or um.group("host") == s.name:
+                    continue
+                rel_kind, proto = SCHEME_REL.get(scheme_base(um.group("scheme")), ("calls", um.group("scheme")))
+                rel = _rel(self.root, mods[m].path)
+                line = next((i for i, ln in enumerate(mods[m].source.splitlines(), 1) if ln.lstrip().startswith(const)), 1)
+                self.r.edge("static", s.key, rel_kind, names[um.group("host")].key, V_CODE_URL, ref=rel,
+                            span={"path": rel, "line_start": line}, confidence=0.85,
+                            attrs={"protocol": proto, "via": f"{const} in {m}", "url": safe_url(value)[:200]})
+
+    # ------------------------------------------------------------------ durable workflows, NOTIFY channels, MCP tools
+    def _temporal_host(self, s: Service) -> str | None:
+        for o in self.services.values():
+            img = str(o.spec.get("image", ""))
+            if o.system == s.system and ("temporal" in o.name or "temporalio" in img) and not re.search(r"ui|admin|web", o.name):
+                return o.key
+        return None
+
+    def _pg_host(self, s: Service) -> str | None:
+        for o in self.r.observations:
+            a = o.attributes
+            if o.subject_kind == "edge" and a.get("source") == s.key and str(a.get("protocol", "")).startswith("postgres"):
+                return a["target"]
+        return None
+
+    def _wf_effects(self, s: Service, mods: dict, wf_module: str, acts: dict[str, str]) -> list[dict[str, str]]:
+        """What a workflow does through its activities: gateways and SaaS it calls, stores it writes, channels it notifies,
+        MCP servers it uses — from the workflow module, its activity modules and what those import directly."""
+        a = self._asy.get(wf_module)
+        base = {wf_module} | {acts[x] for x in (a.activity_calls if a else ()) if x in acts}
+        involved = set(base)
+        for m in base:
+            involved |= {i for i in mods[m].imports if i in mods and not i.split(".")[-1].startswith("test")}
+        out: dict[str, dict[str, str]] = {}
+        pg = self._pg_host(s)
+        mcp = self._env_target(s, re.compile(r"MCP\w*(URL|ENDPOINT|HOST)$", re.IGNORECASE))
+        for m in sorted(involved):
+            mod = mods[m]
+            for res, _ in resources.resources_for(mod.external_imports, mod.source):
+                if self._dataplane_excluded(s, res) or res.kind == "component":
+                    continue
+                tgt = self._resource_target(s, res)
+                key = tgt[0] if tgt else res.key.format(system=s.system, service=s.name)
+                out.setdefault(key, {"target": key, "kind": "calls" if tgt else res.relation, "label": res.technology, "module": m})
+            ma = self._asy.get(m)
+            for ch, _ in (ma.notifies if ma else []):
+                k = f"channel:{s.system}/{ch}"
+                out.setdefault(k, {"target": k, "kind": "publishes", "label": f"NOTIFY {ch}", "module": m})
+            if ma and ma.mcp_client and mcp:
+                out.setdefault(mcp[0], {"target": mcp[0], "kind": "calls", "label": f"MCP tools via {mcp[1]}", "module": m})
+            if pg and mod.external_imports & {"sqlalchemy", "asyncpg", "psycopg", "psycopg2", "sqlmodel"} | \
+                    {i for i in mod.external_imports if i.split(".")[0] in ("sqlalchemy", "asyncpg", "psycopg")}:
+                out.setdefault(pg, {"target": pg, "kind": "writes", "label": "persists state", "module": m})
+        return list(out.values())[:12]
+
+    def _async_elements(self, s: Service, mods: dict, reach: set[str]) -> None:
+        if not self._asy:
+            return
+        live = [m for m in sorted(reach) if m in self._asy and not any(p in ("tests", "test") for p in m.split("."))]
+        if not live:
+            return
+        wf_def = {n: (m, line) for m, a in self._asy.items() for n, line in a.workflows.items()
+                  if not any(p in ("tests", "test") for p in m.split("."))}
+        acts = {n: m for m, a in self._asy.items() for n in a.activities}
+        host, pg = self._temporal_host(s), self._pg_host(s)
+        queues = sorted({q for m in live for q in self._asy[m].worker_queues if q})
+        comp = lambda m: f"component:{s.system}/{s.name}/{python_code.component_of(m)}"  # noqa: E731
+
+        def wf_node(name: str) -> str:
+            wk = f"workflow:{s.system}/{name}"
+            m, line = wf_def.get(name, ("", 0))
+            rel = _rel(self.root, mods[m].path) if m in mods else ""
+            self.r.node("static", wk, "workflow", name, async_flows.V_ASYNC, ref=rel, span={"path": rel, "line_start": line} if rel else {},
+                        attrs={"technology": "Temporal workflow", "subtype": "workflow", **({"module": m} if m else {})})
+            if host:
+                self.r.edge("static", host, "contains", wk, async_flows.V_ASYNC, ref=rel)
+            return wk
+
+        if any(self._asy[m].worker_queues for m in live):                 # this service runs a Temporal worker
+            for name, (m, line) in sorted(wf_def.items()):
+                if m not in reach:
+                    continue
+                wk, rel = wf_node(name), _rel(self.root, mods[m].path)
+                a = self._asy[m]
+                self.r.node("static", wk, "workflow", name, async_flows.V_ASYNC, ref=rel, span={"path": rel, "line_start": line},
+                            attrs={"activities": sorted(x for x in a.activity_calls if x in acts)[:40], "task_queues": queues,
+                                   "effects": self._wf_effects(s, mods, m, acts), "executed_by": s.name})
+                self.r.edge("static", s.key, "consumes", wk, async_flows.V_ASYNC, ref=rel, span={"path": rel, "line_start": line},
+                            attrs={"protocol": "temporal", "label": "executes", "task_queues": queues}, confidence=0.95)
+                for child, how, cline in a.starts:
+                    if child != name and child in wf_def:
+                        self.r.edge("static", wk, "calls", wf_node(child), async_flows.V_ASYNC, ref=rel,
+                                    span={"path": rel, "line_start": cline}, attrs={"protocol": "temporal", "label": "child workflow"})
+        for m in live:
+            a, rel = self._asy[m], _rel(self.root, mods[m].path)
+            if not a.workflows:                                               # starts from workflows are child workflows
+                for name, how, line in a.starts:
+                    wk = wf_node(name)
+                    label = "starts and waits for" if how.startswith("execute") else "starts"
+                    span = {"path": rel, "line_start": line}
+                    self.r.edge("static", s.key, "publishes", wk, async_flows.V_ASYNC, ref=rel, span=span,
+                                attrs={"protocol": "temporal", "label": label, "module": m}, confidence=0.95)
+                    self.r.edge("static", comp(m), "publishes", wk, async_flows.V_ASYNC, ref=rel, span=span,
+                                attrs={"protocol": "temporal", "label": label, "module": m}, confidence=0.95)
+            for rel_kind, items in (("publishes", a.notifies), ("consumes", a.listens)):
+                for ch, line in items:
+                    ck = f"channel:{s.system}/{ch}"
+                    span = {"path": rel, "line_start": line}
+                    self.r.node("static", ck, "message-channel", ch, async_flows.V_ASYNC, ref=rel, span=span,
+                                attrs={"technology": "PostgreSQL LISTEN/NOTIFY", "subtype": "channel", "pattern": ch})
+                    if pg:
+                        self.r.edge("static", pg, "contains", ck, async_flows.V_ASYNC, ref=rel)
+                    label = f"NOTIFY {ch}" if rel_kind == "publishes" else f"LISTEN {ch}"
+                    for src in (s.key, comp(m)):
+                        self.r.edge("static", src, rel_kind, ck, async_flows.V_ASYNC, ref=rel, span=span,
+                                    attrs={"protocol": "postgres-notify", "label": label, "module": m}, confidence=0.9)
+            for tool, line in a.mcp_tools:
+                self._endpoint(s, mods, {}, "MCP", tool, m, tool, rel, line, async_flows.V_ASYNC, {"protocol": "mcp", "kind": "mcp-tool"})
 
     def web_ui(self, ctx: Path, files: list[Path], svcs: list[Service]) -> None:
         """A SPA in the build context is the container's Web UI component; its /api calls are matched to the endpoints."""
@@ -987,12 +1271,34 @@ class RepoAnalyzer:
                                     attrs={"method": meth.upper(), "path": p, "contract": rel, "declared": True}, ref=rel, span={"path": rel})
                         self.r.edge("static", ck, "contains", ek, V_OPENAPI, ref=rel)
 
-    def _owner_service(self, f: Path) -> Service | None:
-        best = None
-        for s in self.services.values():
-            if s.context and str(f).startswith(str(s.context) + "/") and (best is None or len(str(s.context)) > len(str(best.context))):
-                best = s
-        return best
+    MIGRATION_CMD = re.compile(r"\b(alembic|flyway|liquibase|migrate|manage\.py\s+migrate|db:migrate|knex|prisma\s+migrate)\b")
+
+    def _owner_service(self, f: Path, schema: bool = False) -> Service | None:
+        """The service whose build context holds `f`. For schema declarations, among services sharing that context the one
+        that runs migrations owns the tables, then the one with the most code (the application), never an arbitrary sibling."""
+        cands = [s for s in self.services.values() if s.context and str(f).startswith(str(s.context) + "/")]
+        if not cands:
+            return None
+        deepest = max(len(str(s.context)) for s in cands)
+        cands = [s for s in cands if len(str(s.context)) == deepest]
+        if schema and len(cands) > 1:
+            mig = [s for s in cands if self.MIGRATION_CMD.search(_cmdline(_argv(s.spec)))]
+            if mig:
+                return mig[0]
+            return max(cands, key=lambda s: (len(self._reach_text.get(s.key, "")), s.name))
+        return cands[0]
+
+    def _db_host(self, owner: Service | None) -> str | None:
+        """The database server the owner (or its siblings) writes to over a SQL protocol: it hosts the declared tables."""
+        if owner is None:
+            return None
+        for svc in [owner, *self._siblings(owner)]:
+            for o in self.r.observations:
+                a = o.attributes
+                if o.subject_kind == "edge" and o.kind == "writes" and a.get("source") == svc.key and \
+                        re.match(r"postgres|mysql|mariadb|sqlserver|mssql|oracle", str(a.get("protocol", ""))):
+                    return a["target"]
+        return None
 
     # ------------------------------------------------------------------ ownership
     def _service_named(self, name: str, near: Path) -> Service | None:
@@ -1049,7 +1355,7 @@ class RepoAnalyzer:
         decl = db_schema.extract(self.root, self.files, read)
         for name, t in sorted(decl.items()):
             first = t.sources[0]
-            owner = self._owner_service(self.root / first["path"])
+            owner = self._owner_service(self.root / first["path"], schema=True)
             system = owner.system if owner else self.repo
             self.by_system.setdefault(system, {})
             tk = f"table:{system}/code/{name}"
@@ -1062,6 +1368,9 @@ class RepoAnalyzer:
             src = owner.key if owner else f"system:{system}"
             self.r.edge("static", src, "references", tk, db_schema.V_SCHEMA, attrs={"relation": "declares schema"}, ref=first["path"],
                         span={"path": first["path"], "line_start": first["line"]})
+            host = self._db_host(owner)
+            if host:
+                self.r.edge("static", host, "contains", tk, db_schema.V_SCHEMA, attrs={"relation": "hosts table"}, ref=first["path"])
             for c in t.columns.values():
                 if c.references:
                     target = c.references.split(".")[-2] if c.references.count(".") >= 1 else c.references

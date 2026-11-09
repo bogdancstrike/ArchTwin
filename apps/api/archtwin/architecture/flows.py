@@ -17,11 +17,12 @@ from collections import defaultdict
 from typing import Any
 
 RUNTIME = ("calls", "writes", "reads", "publishes", "consumes")
-ACTORS = ("container", "software-system", "external-system", "person", "database", "kafka-topic", "service")
+ACTORS = ("container", "software-system", "external-system", "person", "database", "kafka-topic", "service", "workflow", "message-channel")
+CHANNEL_KINDS = ("kafka-topic", "workflow", "message-channel")
 MAX_STEPS = 14
 MAX_FLOWS = 800
 MAX_ENDPOINT_FLOWS = 600
-RESOURCE_KINDS = ("external-system", "database", "kafka-topic")
+RESOURCE_KINDS = ("external-system", "database", "kafka-topic", "workflow", "message-channel")
 
 
 def _systems(g: dict[str, Any]) -> dict[str, str]:

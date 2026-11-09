@@ -1,7 +1,9 @@
 """Database schema declared in code (tables and columns) — so "what is the DB structure of X?" is answered from code.
 
 Sources (static, deterministic, best-effort text parsing; every table keeps file:line evidence):
-  * SQL:        CREATE TABLE [IF NOT EXISTS] [schema.]name ( col type [NOT NULL] [PRIMARY KEY] [REFERENCES t(c)], ... )
+  * SQL:        CREATE TABLE [IF NOT EXISTS] [schema.]name ( col type [NOT NULL] [PRIMARY KEY] [REFERENCES t(c)], ... ) and
+                ALTER TABLE name ADD [COLUMN] col type — in .sql files (Flyway, Liquibase SQL, init scripts) and in SQL strings
+                inside code (Alembic `op.execute("CREATE TABLE ...")`, raw DDL in Python or Java)
   * Alembic:    op.create_table("name", sa.Column("col", sa.Type, ...), ...) and op.add_column("name", sa.Column(...))
   * SQLAlchemy: Table("name", metadata, Column("col", Type, ...)); declarative classes with __tablename__ and
                 `col = Column(...)` / `col: Mapped[T] = mapped_column(...)` / `col = db.Column(...)`
@@ -16,6 +18,8 @@ from pathlib import Path
 
 V_SCHEMA = "code-schema/1.0"
 SQL_CREATE = re.compile(r"create\s+table\s+(?:if\s+not\s+exists\s+)?([`\"\[]?[\w.]+[`\"\]]?)\s*\(", re.IGNORECASE)
+SQL_ALTER_ADD = re.compile(r"alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?([`\"\[]?[\w.]+[`\"\]]?)\s+add\s+(?:column\s+)?(?:if\s+not\s+exists\s+)?"
+                           r"([`\"\[]?\w+[`\"\]]?)\s+([\w\[\]()]+)([^,;\n]*)", re.IGNORECASE)
 SQL_CONSTRAINT = re.compile(r"^\s*(constraint|primary\s+key|foreign\s+key|unique|check|index|key|exclude)\b", re.IGNORECASE)
 CALL_TABLE = re.compile(r"(?:\bop\.create_table|(?<![\w.])(?:sa\.|sqlalchemy\.)?Table)\s*\(\s*['\"]([\w.]+)['\"]")
 ADD_COLUMN = re.compile(r"\bop\.add_column\s*\(\s*['\"]([\w.]+)['\"]")
@@ -128,6 +132,14 @@ def parse_sql(text: str) -> list[tuple[str, int, list[Column]]]:
             cols.append(Column(name, typ.rstrip(","), False if "not null" in low else (None if "primary key" in low else True),
                                "primary key" in low, f"{_clean(ref.group(1))}.{_clean(ref.group(2))}" if ref else ""))
         out.append((_clean(m.group(1)), _line(text, m.start()), cols))
+    for m in SQL_ALTER_ADD.finditer(text):
+        col, rest = _clean(m.group(2)), m.group(4).lower()
+        if col.lower() in ("constraint", "primary", "foreign", "unique", "check", "index"):
+            continue
+        ref = re.search(r"references\s+([\w.\"`]+)\s*\(\s*([\w\"`]+)", m.group(4), re.IGNORECASE)
+        out.append((_clean(m.group(1)), _line(text, m.start()),
+                    [Column(col, m.group(3), False if "not null" in rest else True, "primary key" in rest,
+                            f"{_clean(ref.group(1))}.{_clean(ref.group(2))}" if ref else "")]))
     return out
 
 
@@ -206,17 +218,19 @@ def extract(root: Path, files: list[Path], read) -> dict[str, TableDecl]:
         t.sources.append({"path": rel, "line": line, "kind": kind})
     for f in files:
         suf = f.suffix.lower()
-        if suf not in (".sql", ".py") or f.stat().st_size > 600_000:
+        if suf not in (".sql", ".py", ".java", ".kt") or f.stat().st_size > 600_000:
             continue
         rel = str(f.relative_to(root))
         if any(p in ("tests", "test", "node_modules") for p in f.relative_to(root).parts):
             continue
         text = read(f)
-        if suf == ".sql":
-            if "create table" in text.lower():
+        low = text.lower()
+        if suf == ".sql" or "create table" in low or "alter table" in low:
+            if "create table" in low or "alter table" in low:
                 for name, line, cols in parse_sql(text):
-                    add(name, rel, line, cols, "sql")
-            continue
+                    add(name, rel, line, cols, "sql" if suf == ".sql" else "sql-in-code")
+            if suf != ".py":
+                continue
         if not any(k in text for k in ("create_table", "Table(", "__tablename__", "add_column", "models.Model")):
             continue
         for name, line, cols, kind in parse_python(text):
