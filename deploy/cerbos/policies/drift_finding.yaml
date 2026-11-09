@@ -20,6 +20,7 @@ resourcePolicy:
   - actions:
     - accept
     - suppress
+    - dismiss
     effect: EFFECT_ALLOW
     derivedRoles:
     - project_approver

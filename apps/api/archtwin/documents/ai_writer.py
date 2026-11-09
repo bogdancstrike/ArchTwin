@@ -13,8 +13,7 @@ from archtwin.common.logging import redact_text
 from archtwin.documents.citations import evidence_section
 from archtwin.documents.doctypes import DocType
 from archtwin.flags import service as flags
-from archtwin.iam import service as iam
-from archtwin.intelligence import assistant, gateway
+from archtwin.intelligence import assistant, gateway, routing
 
 MAX_FACTS = 160
 FACT_CHARS = 60_000
@@ -68,12 +67,12 @@ async def write(ctx: RequestContext, dt: DocType, g: dict[str, Any], title: str,
             lines.append(f"[{pid}] ({p['type']} {p['source']}) {p['text'][:700]}")
     block = "\n".join(lines)[:FACT_CHARS]
     all_ev = evidence + extra
-    model = gateway.resolve_model(None, (await iam.get_preferences(ctx.actor_id)).get("preferred_model"))
+    model = routing.route("doc_drafting").model
     msgs = [{"role": "system", "content": RULES},
             {"role": "user", "content": f"Project: {title}\nDocument: {dt.title} (audience: {dt.audience})\nWhat to write: {dt.brief}\n\n"
                                         f"<evidence>\n{block}\n</evidence>"}]
     c = await gateway.complete(msgs, model=model, operation="doc_drafting", project_id=str(ctx.project_id), user_id=str(ctx.actor_id),
-                               ctx=ctx, max_tokens=8000)
+                               ctx=ctx)
     body, good, bad = assistant.validate_citations(c.text.strip(), [{"id": e["id"]} for e in all_ev])
     used = [by_id.get(i) or next(e for e in extra if e["id"] == i) for i in good]
     facts_cited = len({i for i in good})

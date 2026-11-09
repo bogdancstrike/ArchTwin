@@ -6,6 +6,7 @@ import { api, download } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { DataTable } from "@/components/DataTable";
 import { SplitLayout } from "@/components/SplitLayout";
+import { CostEstimate } from "@/components/CostEstimate";
 
 export function DocsPage({ projectId }: { projectId: string }) {
   const gen = useApi<any[]>(["gen", projectId], `/projects/${projectId}/generated-docs`);
@@ -28,6 +29,7 @@ export function DocsPage({ projectId }: { projectId: string }) {
             {types.data?.filter((t) => t.mode === m).map((t) => <option key={t.key} value={t.key}>{t.title}</option>)}</optgroup>)}</Select>
           <Button variant="primary" size="sm" disabled={generate.isPending} onClick={async () => { const r = await generate.mutateAsync(undefined as never); setSel(r.id); setDiff(r.diff ?? ""); }}>
             {generate.isPending ? (curType?.mode === "ai" ? "Drafting…" : "Generating…") : "Generate"}</Button></div>
+        {curType?.mode === "ai" && <CostEstimate className="mt-1" operation="doc_drafting" />}
         {curType && <p className="mt-1.5 text-xs text-muted">{curType.mode === "ai" && <Badge tone="link">AI draft</Badge>} {curType.description} <span className="text-soft">· for {curType.audience}</span></p>}
         <ErrorBox error={generate.error} />
         <ul className="mt-3 space-y-1 text-sm">{gen.data?.map((g) => <li key={g.id}><button className={"w-full rounded px-2 py-1 text-left hover:bg-paper-2 " + (sel === g.id ? "bg-paper-2" : "")} onClick={() => { setSel(g.id); setDiff(""); setDocSel(null); }}>

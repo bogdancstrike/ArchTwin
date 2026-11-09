@@ -69,9 +69,8 @@ export function SettingsPage({ projectId }: { projectId: string }) {
     [["baselines", projectId]], "Baseline decided");
   const isAdmin = !!me.data && ["org_owner", "org_admin"].includes(me.data.org_role);
   const selfApprove = (id: string) => {
-    const reason = prompt("You proposed this baseline. As an organization admin you may approve it yourself — this exception to four-eyes is audited.\n\nReason (required):");
-    if (reason && reason.trim().length >= 10) decide.mutate({ id, d: "approve", note: reason.trim() });
-    else if (reason !== null) toast.error("A reason of at least 10 characters is required.");
+    const reason = prompt("You proposed this baseline. As an organization admin you may approve it yourself — this exception to four-eyes is audited.\n\nReason (optional):");
+    if (reason !== null) decide.mutate({ id, d: "approve", note: reason.trim() });
   };
   const merge = useAction((b: { alias_key: string; canonical_key: string }) => api(`/projects/${projectId}/identities/merge`, { method: "POST", json: { ...b, reason: "merged in UI" } }), [["identities", projectId]], "Identities merged");
   return <div className="grid gap-4 p-6 xl:grid-cols-2">
@@ -82,7 +81,7 @@ export function SettingsPage({ projectId }: { projectId: string }) {
       <Table head={["Snapshot", "Status", "Proposed", ""]}>{baselines.data?.map((b) => <tr key={b.id} className="border-b border-rule"><td className="px-2 py-1.5">v{b.version}</td>
         <td className="px-2"><Badge tone={({ approved: "ok", proposed: "warn", rejected: "bad", superseded: "muted" } as Record<string, string>)[b.status]}>{b.status}</Badge></td><td className="px-2 text-xs">{ago(b.proposed_at)}</td>
         <td className="px-2 text-right">{b.status === "proposed" && <span className="space-x-1">{b.author_id === me.data?.id && isAdmin
-          ? <Button size="sm" title="Approve your own baseline as organization admin (audited, reason required)" onClick={() => selfApprove(b.id)}>Approve (admin)</Button>
+          ? <Button size="sm" title="Approve your own baseline as organization admin (audited; reason optional)" onClick={() => selfApprove(b.id)}>Approve (admin)</Button>
           : <Button size="sm" disabled={b.author_id === me.data?.id} title={b.author_id === me.data?.id ? "Author cannot approve" : ""} onClick={() => decide.mutate({ id: b.id, d: "approve" })}>Approve</Button>}
           <Button size="sm" variant="danger" disabled={b.author_id === me.data?.id} onClick={() => decide.mutate({ id: b.id, d: "reject" })}>Reject</Button></span>}</td></tr>)}</Table>
     </Card>

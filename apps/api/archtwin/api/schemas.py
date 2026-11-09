@@ -93,6 +93,11 @@ class AdrDecideIn(Strict):
     supersedes: uuid.UUID | None = None
 
 
+class DismissIn(Strict):
+    ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+    note: str = Field(default="", max_length=4000)
+
+
 class TransitionIn(Strict):
     status: str
     note: str = Field(default="", max_length=4000)
@@ -143,6 +148,12 @@ class SpendLimitsIn(Strict):
 
 class SourceRootsIn(Strict):
     roots: list[str] | None = Field(default=None, max_length=50)   # None = every mounted boundary
+
+
+class EstimateIn(Strict):
+    operation: str = Field(min_length=1, max_length=60)
+    model: str | None = Field(default=None, max_length=80)
+    text: str = Field(default="", max_length=200_000)        # the user's own input (question, fields) when known
 
 
 class ExtendIn(Strict):

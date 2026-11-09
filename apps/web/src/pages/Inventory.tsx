@@ -188,6 +188,10 @@ export function InventoryPage({ projectId }: { projectId: string }) {
   const [hook, setHook] = useState<Connector | null>(null);
   const names = Object.fromEntries((cs.data ?? []).map((c) => [c.id, c.name]));
   const last = (id: string) => scans.data?.find((s) => s.connector_id === id);
+  const anyRunning = (cs.data ?? []).some((c) => ["queued", "running"].includes(last(c.id)?.status ?? ""));
+  const scanAll = useAction(() => api<{ queued: unknown[]; skipped: { name: string; reason: string }[] }>(`/projects/${projectId}/scan`, { method: "POST", idempotent: true }),
+    [["scans", projectId], ["scans-page", projectId]], (r) => `${r.queued.length} scan${r.queued.length === 1 ? "" : "s"} queued`
+      + (r.skipped.length ? ` · skipped ${r.skipped.map((x) => `${x.name} (${x.reason})`).join(", ")}` : ""));
   const counts: { origin: string; kind: string; n: number }[] = inv.data?.observation_counts ?? [];
   const total = counts.reduce((a, r) => a + r.n, 0);
   const byOrigin = counts.reduce<Record<string, number>>((a, r) => ({ ...a, [r.origin]: (a[r.origin] ?? 0) + r.n }), {});
@@ -203,7 +207,11 @@ export function InventoryPage({ projectId }: { projectId: string }) {
     </section>
     <div className="flex items-end justify-between">
       <div><div className="eyebrow">Read-only datasources</div><h2 className="serif text-3xl">Datasources</h2></div>
-      <Button variant="primary" onClick={() => setOpen(true)}><Plus size={15} /> Add datasource</Button>
+      <div className="flex gap-2">
+        <Button disabled={!cs.data?.length || scanAll.isPending || anyRunning} onClick={() => scanAll.mutate()}
+          title="Scan every datasource of this project (one job each)"><Play size={14} /> {anyRunning ? "Scanning…" : "Scan all"}</Button>
+        <Button variant="primary" onClick={() => setOpen(true)}><Plus size={15} /> Add datasource</Button>
+      </div>
     </div>
     {cs.isLoading && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-44 !rounded-xl" />)}</div>}
     <ErrorBox error={cs.error} />

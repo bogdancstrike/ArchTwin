@@ -20,7 +20,9 @@ from archtwin.kernel import outbox
 from archtwin.notifications import service as notify
 
 OPEN = ("new", "acknowledged", "investigating")
-STATES = {"new", "acknowledged", "investigating", "accepted", "resolved", "suppressed"}
+STATES = {"new", "acknowledged", "investigating", "accepted", "resolved", "suppressed", "dismissed"}
+# "dismissed" = deleted by a person as not true (false positive). The row stays as a tombstone so the next evaluation,
+# which derives the same deterministic finding id, does not resurrect it; it is hidden from every list unless asked for.
 
 
 async def evaluate(ctx: RequestContext) -> dict[str, Any]:
@@ -96,6 +98,8 @@ def _findings(ctx: RequestContext, status: str | None, verdict: str | None, seve
         q = q.where(drift_findings.c.status.in_(OPEN))
     elif status:
         q = q.where(drift_findings.c.status == status)
+    else:
+        q = q.where(drift_findings.c.status != "dismissed")
     if verdict:
         q = q.where(drift_findings.c.verdict == verdict)
     if severity:
@@ -130,8 +134,10 @@ async def transition(ctx: RequestContext, fid: uuid.UUID, status: str, note: str
                      assignee: uuid.UUID | None = None) -> dict[str, Any]:
     if status not in STATES:
         raise problem(422, "AT-DRIFT-001", "Unknown status", status)
-    if status == "suppressed" and (not note or not suppress_days or suppress_days > 365):
-        raise problem(422, "AT-DRIFT-002", "Suppression needs a reason and an expiry (1–365 days)")
+    if status == "suppressed":
+        suppress_days = suppress_days or 30               # the reason is optional; an expiry always exists (default 30 days)
+        if suppress_days > 365:
+            raise problem(422, "AT-DRIFT-002", "Suppression expiry must be 1–365 days")
     async with uow(ctx) as conn:
         f = row((await conn.execute(select(drift_findings).where(drift_findings.c.id == fid))).first())
         if not f:
@@ -149,6 +155,22 @@ async def transition(ctx: RequestContext, fid: uuid.UUID, status: str, note: str
                                                               author_id=ctx.actor_id, body=f"[{status}] {note}"))
         await audit.record(conn, ctx, f"drift.{status}", "drift_finding", fid, details={"note": note, "days": suppress_days})
     return await get_finding(ctx, fid)
+
+
+async def dismiss_many(ctx: RequestContext, ids: list[uuid.UUID], note: str = "") -> dict[str, Any]:
+    """Delete findings the user considers untrue (bulk). Audited one by one; restorable by transitioning back to `new`."""
+    now = datetime.now(UTC)
+    async with uow(ctx) as conn:
+        found = [r.id for r in await conn.execute(select(drift_findings.c.id).where(
+            drift_findings.c.project_id == ctx.project_id, drift_findings.c.id.in_(ids), drift_findings.c.status != "dismissed"))]
+        if found:
+            await conn.execute(drift_findings.update().where(drift_findings.c.id.in_(found)).values(
+                status="dismissed", resolution_note=note or "dismissed as not true", updated_at=now))
+        for fid in found:
+            await conn.execute(drift_comments.insert().values(id=new_id(), org_id=ctx.org_id, project_id=ctx.project_id, finding_id=fid,
+                                                              author_id=ctx.actor_id, body=f"[dismissed] {note or 'not true'}"))
+            await audit.record(conn, ctx, "drift.dismissed", "drift_finding", fid, details={"note": note})
+    return {"dismissed": len(found)}
 
 
 async def comment(ctx: RequestContext, fid: uuid.UUID, body: str) -> dict[str, Any]:

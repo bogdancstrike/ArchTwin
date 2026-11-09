@@ -10,11 +10,11 @@ export function useApi<T>(key: QueryKey, path: string | null, opts: { refetchInt
     placeholderData: opts.keepPrevious ? keepPreviousData : undefined });
 }
 
-export function useAction<TIn, TOut = unknown>(fn: (v: TIn) => Promise<TOut>, invalidate: QueryKey[] = [], ok?: string) {
+export function useAction<TIn, TOut = unknown>(fn: (v: TIn) => Promise<TOut>, invalidate: QueryKey[] = [], ok?: string | ((r: TOut) => string)) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
-    onSuccess: () => { invalidate.forEach((k) => qc.invalidateQueries({ queryKey: k })); if (ok) toast.success(ok); },
+    onSuccess: (r: TOut) => { invalidate.forEach((k) => qc.invalidateQueries({ queryKey: k })); if (ok) toast.success(typeof ok === "function" ? ok(r) : ok); },
     onError: (e: Error) => toast.error(e.message),
   });
 }

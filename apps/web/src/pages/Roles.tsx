@@ -2,6 +2,7 @@ import { Check, Copy, FileCode2, Minus, ShieldCheck } from "lucide-react";
 import { Fragment, useState } from "react";
 import { Badge, Button, Card, ErrorBox, Input, Skeleton, cn } from "@/components/ui";
 import { useApi } from "@/lib/hooks";
+import { CodeBlock } from "@/components/CodeBlock";
 
 const ROLE_HELP: Record<string, string> = {
   project_owner: "Owns a project: everything in it, including members and deletion.",
@@ -75,7 +76,8 @@ function Policies() {
     {cur && <Card eyebrow={`sha256 ${cur.sha256.slice(0, 16)}… · ${cur.lines} lines · read-only`} title={<span className="font-mono text-base">{cur.path}</span>}
       actions={<Button size="sm" onClick={() => { void navigator.clipboard.writeText(cur.content); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
         {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? "Copied" : "Copy"}</Button>}>
-      <pre className="max-h-[65vh] overflow-auto rounded-lg bg-paper/70 p-3 font-mono text-[12px] leading-relaxed">{cur.content}</pre>
+      <CodeBlock src={{ path: cur.path, start: 1, end: cur.lines, language: /\.ya?ml$/.test(cur.path) ? "yaml" : /\.json$/.test(cur.path) ? "json" : "plaintext", text: cur.content }}
+        maxHeight={Math.round(window.innerHeight * 0.65)} />
       <p className="mt-2 text-xs text-soft">Policies are code: change them in <code className="font-mono">deploy/cerbos/policies</code>, run <code className="font-mono">make policy-test</code>, and redeploy.</p>
     </Card>}
   </div>;

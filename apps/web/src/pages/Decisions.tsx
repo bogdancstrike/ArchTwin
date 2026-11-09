@@ -8,6 +8,7 @@ import type { Adr } from "@/lib/types";
 import { usd } from "@/components/charts";
 import { DataTable } from "@/components/DataTable";
 import { SplitLayout } from "@/components/SplitLayout";
+import { CostEstimate, modelLabel } from "@/components/CostEstimate";
 
 const TONE: Record<string, string> = { proposed: "warn", accepted: "ok", rejected: "bad", superseded: "muted" };
 
@@ -44,10 +45,11 @@ function CompleteWithAi({ projectId, current, onApply }: { projectId: string; cu
       <Input className="!w-64 text-xs" placeholder="Optional instruction (e.g. focus on cost)" aria-label="Instruction for the AI" value={instruction} onChange={(e) => setInstruction(e.target.value)} />
       <label className="flex items-center gap-1 text-xs text-muted"><input type="checkbox" checked={grounded} onChange={(e) => setGrounded(e.target.checked)} /> use project evidence</label>
       <Button type="button" size="sm" variant="primary" disabled={busy} onClick={run}>{busy ? "Writing…" : res ? "Regenerate" : "Complete"}</Button>
+      <CostEstimate operation="adrs" text={JSON.stringify(current()) + instruction} />
     </div>
     <ErrorBox error={err} />
     {res && <div className="mt-3 space-y-2">
-      <div className="text-[11px] text-soft">{res.model} · est. {usd(res.cost_usd)}{res.citations.length ? ` · cites ${res.citations.join(" ")}` : ""} — choose the fields to apply</div>
+      <div className="text-[11px] text-soft">{modelLabel(res.model)} · cost {usd(res.cost_usd)}{res.citations.length ? ` · cites ${res.citations.join(" ")}` : ""} — choose the fields to apply</div>
       <ul className="max-h-96 space-y-2 overflow-auto">{(Object.keys(FIELD_LABEL) as (keyof AdrDraft)[]).map((k) => <li key={k} className="rounded border border-rule bg-card p-2 text-xs">
         <label className="mb-1 flex items-center gap-1.5 font-medium"><input type="checkbox" checked={!!pick[k]} onChange={(e) => setPick((p) => ({ ...p, [k]: e.target.checked }))} />{FIELD_LABEL[k]}</label>
         {render(k, res.fields[k])}</li>)}</ul>
