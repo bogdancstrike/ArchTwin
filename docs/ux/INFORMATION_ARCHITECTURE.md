@@ -20,6 +20,22 @@ Approved cross-project landscape, architecture health, top risks, dependency den
 - Assistant: source-grounded chat scoped to selected project(s), environment, snapshot and evidence mode.
 - Settings: member roles, connectors, model profiles, budgets, feature flags, retention and export.
 
+## Command palette (⌘K / Ctrl+K)
+Available on every page from the keyboard or the "Search or jump to…" button in the top bar (`apps/web/src/components/command/`):
+- **Go to**: every tab of the current project (Overview, Architecture, Flows, Drift, Decisions, Docs, Assistant, Datasources, Settings)
+  and the global pages (Home, All projects, Usage & costs; System, Roles & permissions, Feature flags, Audit trail for org admins).
+- **Search the current project** (live, debounced, ≥ 2 characters): architecture elements (open the diagram that draws the element,
+  selected and centered via `?focus=`), recognized flows (`?flow=`), decision records (`?adr=`) and documents (`?doc=`).
+- **Actions**: new project, add datasource, scan all datasources, evaluate drift, generate documentation, new ADR, toggle theme (⌘⇧L), sign out.
+- **Switch project** (favorites first) and **Recent** destinations on an empty query.
+- Fuzzy matching (cmdk), ↑/↓ to move, Enter to open, Esc to close. Deep-link parameters (`?new=1`, `?add=1`, `?flow=`, `?doc=`) are
+  consumed once and removed from the URL.
+
+## Themes
+Light (diagram-design default skin) and **night**: neutral warm-graphite surfaces (`#141414` paper, `#1b1b1b` cards, `#232323` raised)
+with no blue cast; every text token meets WCAG AA (≥ 4.5:1) on all three surfaces, chart series are re-validated on the dark surface,
+and Mermaid diagrams, code highlighting, React Flow canvases (controls, minimap, markers) and toasts follow the theme.
+
 ## Important UX safeguards
 - Persistent scope chip in every view: `[Org] / [Project] / [Environment] / [Snapshot time]`.
 - Side-by-side three-way diff between **desired / code / runtime**; no unlabeled blending.

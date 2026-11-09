@@ -1,21 +1,17 @@
 import { Link, Outlet, useNavigate, useParams } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Bell, Boxes, Building2, Coins, FileClock, Flag, Home, KeyRound, LogOut, Moon, Server, Star, Sun } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Bell, Boxes, Building2, Coins, FileClock, Flag, Home, KeyRound, LogOut, Moon, Search, Server, Star, Sun } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "react-oidc-context";
 import { api, getOrg, setOrg } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import { useApi, useFavorites, useMe } from "@/lib/hooks";
+import { toggleTheme, useTheme } from "@/lib/theme";
 import type { Project } from "@/lib/types";
+import { CommandPalette, MOD, useCommandShortcuts } from "./command/CommandPalette";
 import { ago, Avatar, cn, Select } from "./ui";
 
 interface Notif { id: string; title: string; body: string; link: string; occurrences: number; created_at: string; read_at?: string }
-
-function useTheme() {
-  const [t, setT] = useState(() => localStorage.getItem("at-theme") ?? "light");
-  useEffect(() => { document.documentElement.setAttribute("data-theme", t); localStorage.setItem("at-theme", t); }, [t]);
-  return [t, setT] as const;
-}
 
 function Notifications() {
   const [items, setItems] = useState<Notif[]>([]);
@@ -67,7 +63,10 @@ export function AppShell() {
   const nav = useNavigate();
   const params = useParams({ strict: false }) as { projectId?: string };
   const projects = useApi<Project[]>(["projects", me.data?.org_id], me.data ? "/projects" : null);
-  const [theme, setTheme] = useTheme();
+  const theme = useTheme();
+  const [cmd, setCmd] = useState(false);
+  const toggleCmd = useCallback(() => setCmd((o) => !o), []);
+  useCommandShortcuts(toggleCmd);
   const isAdmin = me.data && ["org_owner", "org_admin"].includes(me.data.org_role);
   const { favs } = useFavorites();
   const list = (projects.data ?? []).filter((p) => favs.includes(p.id)).sort((a, b) => a.title.localeCompare(b.title));
@@ -108,12 +107,17 @@ export function AppShell() {
             {me.data.orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</Select>}
           {me.data && me.data.orgs.length <= 1 && <span className="font-medium text-muted">{me.data.orgs[0]?.name}</span>}
         </div>
+        <button type="button" onClick={() => setCmd(true)} aria-label="Open command palette" aria-keyshortcuts="Meta+K Control+K"
+          className="flex w-full max-w-md items-center gap-2 rounded-lg border border-rule bg-paper px-3 py-1.5 text-sm text-soft transition hover:border-soft hover:text-muted">
+          <Search size={14} aria-hidden /><span className="flex-1 truncate text-left">Search or jump to…</span>
+          <kbd className="rounded border border-rule bg-card px-1.5 py-0.5 font-mono text-[10px]">{MOD}K</kbd></button>
         <div className="flex items-center gap-1">
           <Notifications />
-          <button aria-label="Toggle theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="rounded-md p-1.5 text-muted hover:bg-paper-2 hover:text-ink">{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button>
+          <button aria-label="Toggle theme" title={`Toggle theme (${MOD}⇧L)`} onClick={toggleTheme} className="rounded-md p-1.5 text-muted hover:bg-paper-2 hover:text-ink">{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button>
         </div>
       </header>
       <main className="min-h-0 flex-1 overflow-auto"><Outlet /></main>
+      <CommandPalette open={cmd} onOpenChange={setCmd} />
     </div>
   </div>;
 }

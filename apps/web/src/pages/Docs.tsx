@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { Badge, Button, Card, ErrorBox, Select, Spinner, Table } from "@/components/ui";
 import { RichMarkdown } from "@/components/RichMarkdown";
 import { api, download } from "@/lib/api";
+import { takeParam } from "@/lib/deeplink";
 import { useAction, useApi } from "@/lib/hooks";
 import { DataTable } from "@/components/DataTable";
 import { SplitLayout } from "@/components/SplitLayout";
@@ -31,7 +32,7 @@ export function DocsPage({ projectId }: { projectId: string }) {
   const [tpl, setTpl] = useState("system-overview");
   const [sel, setSel] = useState<string | null>(null);
   const [diff, setDiff] = useState("");
-  const [docSel, setDocSel] = useState<string | null>(null);
+  const [docSel, setDocSel] = useState<string | null>(() => takeParam("doc"));
   const doc = useApi<any>(["doc", docSel], docSel ? `/projects/${projectId}/documents/${docSel}` : null);
   const cur = useApi<any>(["gendoc", sel], sel ? `/projects/${projectId}/generated-docs/${sel}` : null);
   const fileRef = useRef<HTMLInputElement>(null);

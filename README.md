@@ -107,6 +107,7 @@ Design → ADR → plan → issues / commits → runtime observation → drift �
 - **Keycloak** single sign-on, **Cerbos** policy-as-code on every read and write (list filtering included), PostgreSQL row-level security as defence in depth.
 - **Hash-chained audit log** with an export verifier; envelope-encrypted connector secrets that never reach browsers, logs or prompts.
 - **Feature flags** for every optional module, connector and AI operation, with an emergency kill switch — security invariants are never flaggable.
+- **Command palette (⌘K / Ctrl+K)**: jump to any page, switch project, run actions (scan all, evaluate drift, new ADR, add datasource, theme) and search the current project's elements, flows, decisions and documents. **Night mode** uses neutral graphite surfaces (no blue cast), WCAG AA text, theme-aware diagrams and code.
 
 ### Discovery and evidence
 - Connectors for **local directories (single repos, folders of repos, docs/architecture folders), GitHub, GitLab, Taiga, Docker, PostgreSQL/MySQL, Kafka + Schema Registry, OpenAPI, OpenTelemetry service graph** and uploaded documents (Docling); Kubernetes and Jira are planned in the [connector matrix](docs/connectors/CONNECTOR_MATRIX.md).

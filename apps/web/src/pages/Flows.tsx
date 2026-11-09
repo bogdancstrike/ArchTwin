@@ -6,6 +6,8 @@ import { ElementDetail, EvidenceList } from "@/components/ElementInspector";
 import { SplitLayout } from "@/components/SplitLayout";
 import { PageAsk } from "@/components/PageAsk";
 import { StepCode } from "@/components/StepCode";
+import { api } from "@/lib/api";
+import { takeParam } from "@/lib/deeplink";
 
 interface Step { from: string; to: string; kind: string; edge: string; label: string; protocol: string; origins: string[]; confidence: number;
   inferred_only: boolean; documented: boolean; evidence: number }
@@ -72,6 +74,12 @@ function Sequence({ flow, active, onStep, onParticipant, selected }: { flow: Flo
 
 export function FlowsPage({ projectId }: { projectId: string }) {
   const [cur, setCur] = useState<Flow | null>(null);
+  useEffect(() => {                      // ?flow=<id>&q=<name> (command palette): open that flow
+    const id = takeParam("flow"), name = takeParam("q");
+    if (!id) return;
+    void api<{ items: Flow[] }>(`/projects/${projectId}/flows?page=1&page_size=25&q=${encodeURIComponent(name ?? "")}`)
+      .then((r) => { const f = r.items.find((x) => x.id === id); if (f) setCur(f); }).catch(() => undefined);
+  }, [projectId]);
   const [step, setStep] = useState<number | null>(null);
   const [inspect, setInspect] = useState<{ kind: "element" | "relation"; key: string; title: string } | null>(null);
   useEffect(() => { setStep(null); setInspect(null); }, [cur?.id]);

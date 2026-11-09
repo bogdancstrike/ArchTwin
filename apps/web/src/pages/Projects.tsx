@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button, Dialog, Empty, ErrorBox, Field, Input, PageHeader, Select, Skeleton, Textarea } from "@/components/ui";
 import { type HomeData, ProjectHealthCard } from "./Home";
 import { api } from "@/lib/api";
+import { takeFlag } from "@/lib/deeplink";
 import { useAction, useApi, useFavorites, useMe } from "@/lib/hooks";
 import type { Project } from "@/lib/types";
 
@@ -31,7 +32,7 @@ export function ProjectsPage() {
   const me = useMe();
   const { isFav } = useFavorites();
   const h = useApi<HomeData>(["home", me.data?.org_id], me.data ? "/home" : null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => takeFlag("new"));
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<"activity" | "name" | "drift">("activity");
   const matches = (p: { title: string; purpose: string; tags: string[] }) => !q || `${p.title} ${p.purpose} ${p.tags.join(" ")}`.toLowerCase().includes(q.toLowerCase());

@@ -4,6 +4,7 @@ import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { RankBars, StackedBars, compact } from "@/components/charts";
 import { CodeBlock } from "@/components/CodeBlock";
+import { useTheme } from "@/lib/theme";
 import { Table, cn } from "@/components/ui";
 
 /** Markdown with rendered visual blocks — used by the Assistant, generated docs and decision records.
@@ -18,15 +19,24 @@ function loadMermaid() {
   return mermaidReady;
 }
 
+/** Neutral graphite variables for mermaid's "base" theme in night mode (its built-in "dark" theme has a blue cast). */
+const MERMAID_DARK = { background: "transparent", primaryColor: "#262626", primaryTextColor: "#ecebe8", primaryBorderColor: "#5a5751",
+  secondaryColor: "#2c2c2c", tertiaryColor: "#1f1f1f", lineColor: "#9d9991", textColor: "#ecebe8", mainBkg: "#262626", nodeBorder: "#5a5751",
+  clusterBkg: "#1f1f1f", clusterBorder: "#3a3a3a", titleColor: "#ecebe8", edgeLabelBackground: "#1b1b1b", actorBkg: "#262626",
+  actorBorder: "#5a5751", actorTextColor: "#ecebe8", signalColor: "#c2bfb8", signalTextColor: "#ecebe8", labelBoxBkgColor: "#262626",
+  noteBkgColor: "#3a3227", noteTextColor: "#ecebe8", noteBorderColor: "#6b5a43", darkMode: true };
+
 function MermaidBlock({ code }: { code: string }) {
   const id = useId().replace(/[^a-zA-Z0-9]/g, "");
   const [svg, setSvg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const theme = useTheme();
   useEffect(() => {
     let alive = true;
     void loadMermaid().then(async (mermaid) => {
-      const dark = document.documentElement.dataset.theme === "dark";
-      mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: dark ? "dark" : "neutral", fontFamily: "inherit" });
+      const dark = theme === "dark";
+      mermaid.initialize({ startOnLoad: false, securityLevel: "strict", fontFamily: "inherit",
+        ...(dark ? { theme: "base", themeVariables: MERMAID_DARK } : { theme: "neutral" }) });
       try {
         const out = await mermaid.render(`m${id}`, code);
         if (alive) setSvg(out.svg);
@@ -35,7 +45,7 @@ function MermaidBlock({ code }: { code: string }) {
       }
     });
     return () => { alive = false; };
-  }, [code, id]);
+  }, [code, id, theme]);
   if (err) return <div className="my-2"><p className="text-xs text-bad">Diagram could not be rendered: {err}</p>
     <pre className="overflow-auto rounded bg-paper-2 p-2 text-xs">{code}</pre></div>;
   if (!svg) return <div className="my-2 h-24 animate-pulse rounded-lg bg-paper-2" aria-label="Rendering diagram" />;
