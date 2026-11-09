@@ -147,9 +147,10 @@ test("command palette: keyboard open, fuzzy search, navigate, project search; ni
   // theme toggle (button and ⌘⇧L) — night mode surfaces are neutral graphite, not blue
   await page.getByRole("button", { name: "Toggle theme" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  const rgb = await page.evaluate(() => getComputedStyle(document.body).backgroundColor.match(/\d+/g)!.map(Number));
+  const bodyRgb = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor.match(/\d+/g)!.map(Number));
+  await expect.poll(async () => (await bodyRgb())[0]).toBeLessThan(40);                 // style recalculation settles
+  const rgb = await bodyRgb();
   expect(Math.abs(rgb[0] - rgb[2])).toBeLessThanOrEqual(6);
-  expect(rgb[0]).toBeLessThan(40);
   await page.keyboard.press("ControlOrMeta+Shift+l");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 });
