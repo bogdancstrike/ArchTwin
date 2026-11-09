@@ -103,6 +103,8 @@ ACTION_LITERALS = (
 )
 CONST_VALUE = re.compile(rf"""(?:^|[{{,\s])([\w$]+)\s*[:=]\s*['"`]{ACTION_NAME}['"`]""", re.MULTILINE)
 CALL_BY_NAME = re.compile(r"""\b[\w$]*(?:[Ss]end|[Cc]all|[Pp]resenter|[Rr]pc|[Ii]nvoke)[\w$]*\s*\(\s*(?:[\w$]+(?:\.|\[['"]))?([\w$]+)['"\]]*\s*[,)]""")
+NOT_ACTION_KEY = re.compile(r"(?:order|sort|field|column|key|storage|cache|state|type|format|lang|locale|id|by|name|label|class|"
+                            r"color|icon|path|route|url|event)$", re.IGNORECASE)      # order_by: "created_at", STATE_KEY = "x_v1"
 RPC_MODULE = re.compile(r"action|endpoint|api|service|presenter|transport|rpc|command", re.IGNORECASE)
 SENDS = re.compile(r"\bfetch\s*\(|\baxios\b|\.post\s*\(")
 ENV_LINE = re.compile(r"^\s*([A-Z][A-Z0-9_]+)\s*=\s*['\"]?([^'\"\s#]+)", re.MULTILINE)
@@ -158,6 +160,8 @@ def scan_rpc(ui: WebUi, files: list[Path]) -> WebUi:
     for f, text in texts:
         if RPC_MODULE.search(f.stem) or RPC_MODULE.search(f.parent.name):    # action-name constant maps (list: "cases_list")
             for m in CONST_VALUE.finditer(text):
+                if NOT_ACTION_KEY.search(m.group(1).rstrip("_")):
+                    continue
                 consts.setdefault(m.group(1), []).append((m.group(2), f, text.count("\n", 0, m.start(2)) + 1))
     used: set[tuple[str, Path]] = set()
     for f, text in texts:
