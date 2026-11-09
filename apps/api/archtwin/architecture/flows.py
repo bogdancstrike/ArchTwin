@@ -19,9 +19,27 @@ from typing import Any
 RUNTIME = ("calls", "writes", "reads", "publishes", "consumes")
 ACTORS = ("container", "software-system", "external-system", "person", "database", "kafka-topic", "service")
 MAX_STEPS = 14
-MAX_FLOWS = 250
-MAX_ENDPOINT_FLOWS = 150
+MAX_FLOWS = 800
+MAX_ENDPOINT_FLOWS = 600
 RESOURCE_KINDS = ("external-system", "database", "kafka-topic")
+
+
+def _systems(g: dict[str, Any]) -> dict[str, str]:
+    """Every element -> the software system it belongs to (climbing contains/exposes; key prefix as a fallback)."""
+    parent: dict[str, str] = {}
+    for e in g["edges"].values():
+        if e["kind"] in ("contains", "exposes") and e["target"] not in parent:
+            parent[e["target"]] = e["source"]
+    out: dict[str, str] = {}
+    for k in g["nodes"]:
+        cur, hops = k, 0
+        while cur in parent and not cur.startswith("system:") and hops < 6:
+            cur, hops = parent[cur], hops + 1
+        if cur.startswith("system:"):
+            out[k] = cur.split(":", 1)[1]
+        elif k.split(":", 1)[0] in ("container", "component", "endpoint", "code", "table", "database") and "/" in k:
+            out[k] = k.split(":", 1)[1].split("/", 1)[0]
+    return out
 
 
 def _fid(kind: str, key: str) -> str:
@@ -58,10 +76,7 @@ def _finish(g: dict[str, Any], fid: str, kind: str, name: str, steps: list[dict[
 
 def recognize(g: dict[str, Any]) -> dict[str, Any]:
     nodes, edges = g["nodes"], g["edges"]
-    system_of: dict[str, str] = {}
-    for e in edges.values():
-        if e["kind"] == "contains" and e["source"].startswith("system:"):
-            system_of[e["target"]] = e["source"].split(":", 1)[1]
+    system_of = _systems(g)
     out_e: dict[str, list[dict[str, Any]]] = defaultdict(list)
     in_deg: dict[str, int] = defaultdict(int)
     for e in edges.values():
@@ -144,43 +159,72 @@ def _synthetic(src: str, dst: str, kind: str, label: str, confidence: float = 1.
             "origins": origins or ["static"], "confidence": confidence, "inferred_only": False, "documented": False, "evidence": 1}
 
 
+MAX_HOPS = 3
+
+
 def _endpoint_flows(g: dict[str, Any], system_of: dict[str, str]) -> list[dict[str, Any]]:
+    """User -> UI -> endpoint handler -> used components -> resources, continuing into the endpoints it calls in other
+    services (gateways, BFFs, service-to-service HTTP) so distributed flows are end to end."""
     nodes, edges = g["nodes"], g["edges"]
-    callers: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    callers: dict[str, list[dict[str, Any]]] = defaultdict(list)       # endpoint <- who calls it
+    calls: dict[str, list[dict[str, Any]]] = defaultdict(list)         # endpoint -> endpoints/services it calls
+    entry_of: dict[str, list[dict[str, Any]]] = defaultdict(list)      # UI component <- the user
+    owner: dict[str, str] = {}                                         # endpoint -> container exposing it
+    comp_out: dict[str, list[dict[str, Any]]] = defaultdict(list)      # component -> resources
     for e in edges.values():
-        if e["kind"] == "calls" and nodes.get(e["target"], {}).get("kind") == "api-endpoint":
+        sk, tk = nodes.get(e["source"], {}).get("kind"), nodes.get(e["target"], {}).get("kind")
+        if e["kind"] == "exposes" and tk == "api-endpoint":
+            owner[e["target"]] = e["source"]
+        elif e["kind"] == "calls" and tk == "api-endpoint" and sk != "api-endpoint":
             callers[e["target"]].append(e)
-    entry_of: dict[str, list[dict[str, Any]]] = defaultdict(list)          # who reaches a UI component (the user)
-    for e in edges.values():
-        if e["kind"] == "calls" and nodes.get(e["source"], {}).get("kind") == "person":
+        elif e["kind"] == "calls" and sk == "api-endpoint" and tk in ("api-endpoint", "container"):
+            calls[e["source"]].append(e)
+        elif e["kind"] == "calls" and sk == "person":
             entry_of[e["target"]].append(e)
-    comp_out: dict[str, list[dict[str, Any]]] = defaultdict(list)       # component -> runtime relations to resources
-    for e in edges.values():
-        if e["kind"] in RUNTIME and nodes.get(e["source"], {}).get("kind") == "component" and _is_resource(g, e["target"]):
+        if e["kind"] in RUNTIME and sk == "component" and _is_resource(g, e["target"]):
             comp_out[e["source"]].append(e)
     for es in comp_out.values():
         es.sort(key=lambda e: (-e.get("confidence", 1), e["target"]))
-    flows = []
-    eps = sorted((k for k, n in nodes.items() if n["kind"] == "api-endpoint" and n["attributes"].get("component") in nodes),
-                 key=lambda k: (nodes[k]["attributes"].get("path", ""), nodes[k]["attributes"].get("method", "")))
-    for ek in eps[:MAX_ENDPOINT_FLOWS]:
-        a = nodes[ek]["attributes"]
-        handler = a["component"]
-        label = f"{a.get('method', '')} {a.get('path', '')}".strip()
+
+    def handler_of(ek: str) -> str | None:
+        h = nodes[ek]["attributes"].get("component")
+        return h if h in nodes else owner.get(ek)
+
+    def trace(ek: str, hop: int, seen: set[str]) -> list[dict[str, Any]]:
+        a, handler = nodes[ek]["attributes"], handler_of(ek)
+        if not handler:
+            return []
         steps: list[dict[str, Any]] = []
-        for c in callers.get(ek, [])[:1]:
-            for pe in entry_of.get(c["source"], [])[:1]:
-                steps.append(_step(g, pe))
-            steps.append({**_step(g, c, src=c["source"], dst=handler), "label": label, "kind": "calls"})
-        if not steps:
-            steps.append(_synthetic(ek, handler, "handles", label))
         for comp in a.get("uses", [])[:6]:
             if comp in nodes:
                 steps.append(_synthetic(handler, comp, "uses", "imports"))
                 steps += [_step(g, e) for e in comp_out.get(comp, [])[:4]]
-        for r in a.get("resources", [])[:4]:
-            if r in nodes:
-                steps.append(_synthetic(handler, r, "calls", r.split(":")[-1], 0.85))
+        steps += [_synthetic(handler, r, "calls", r.split(":")[-1], 0.85) for r in a.get("resources", [])[:4] if r in nodes]
+        if hop < MAX_HOPS:
+            for e in calls.get(ek, [])[:3]:
+                tgt = e["target"]
+                remote = handler_of(tgt) if nodes[tgt]["kind"] == "api-endpoint" else tgt
+                if not remote or tgt in seen:
+                    continue
+                label = nodes[tgt]["name"] if nodes[tgt]["kind"] == "api-endpoint" else e["attributes"].get("path", "")
+                steps.append({**_step(g, e, src=handler, dst=remote), "label": label})
+                if nodes[tgt]["kind"] == "api-endpoint":
+                    steps += trace(tgt, hop + 1, seen | {tgt})
+        return steps
+
+    flows = []
+    eps = sorted((k for k, n in nodes.items() if n["kind"] == "api-endpoint" and handler_of(k)),
+                 key=lambda k: (nodes[k]["attributes"].get("path", ""), nodes[k]["attributes"].get("method", "")))
+    for ek in eps[:MAX_ENDPOINT_FLOWS]:
+        a = nodes[ek]["attributes"]
+        label = f"{a.get('method', '')} {a.get('path', '')}".strip()
+        head: list[dict[str, Any]] = []
+        for c in callers.get(ek, [])[:1]:
+            head += [_step(g, pe) for pe in entry_of.get(c["source"], [])[:1]]
+            head.append({**_step(g, c, src=c["source"], dst=handler_of(ek)), "label": label, "kind": "calls"})
+        if not head:
+            head.append(_synthetic(ek, handler_of(ek), "handles", label))
+        steps = head + trace(ek, 1, {ek})
         if len(steps) >= 2:
             f = _finish(g, _fid("endpoint", ek), "endpoint", label, steps[:MAX_STEPS], system_of, entry=ek)
             f["endpoint"] = ek

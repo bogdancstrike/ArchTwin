@@ -55,7 +55,61 @@ def _name_index(nodes: dict[str, dict[str, Any]]) -> dict[str, dict[str, set[str
     return idx
 
 
-def _resolve(name: str, idx: dict[str, dict[str, set[str]]], exclude: str) -> str | None:
+GENERIC_TOKENS = {"service", "svc", "app", "api", "server", "backend", "srv", "prod", "dev", "staging"}
+
+
+def _tokens(x: str) -> set[str]:
+    return {t for t in re.split(r"[^a-z0-9]+", x.lower()) if t and t not in GENERIC_TOKENS}
+
+
+def _fuzzy_container(host: str, nodes: dict[str, dict[str, Any]], exclude: str) -> str | None:
+    """Gateway/k8s naming: 'qsint-data-query' -> the container 'query' of system 'service-data' (host ends with the
+    container name and shares a distinctive token with its system), or a single-container system named like the host
+    ('qsint-gate' -> system 'service-qsint-gate'). Unique match only."""
+    h = _norm(host)
+    ht = _tokens(h)
+    hits: set[str] = set()
+    for k, n in nodes.items():
+        if n["kind"] != "container" or k == exclude or n["attributes"].get("volume"):
+            continue
+        system, _, cname = k.split(":", 1)[1].partition("/")
+        c, sysn = _norm(cname), _norm(system)
+        system_and_container = h in (f"{sysn}-{c}", f"{c}-{sysn}")
+        container_suffix_with_system_token = h.endswith("-" + c) and len(c) >= 3 and bool((ht - _tokens(c)) & _tokens(sysn))
+        single_container_system_named_like_host = c == sysn and len(ht) >= 2 and ht <= _tokens(sysn)
+        if system_and_container or container_suffix_with_system_token or single_container_system_named_like_host:
+            hits.add(k)
+    return next(iter(hits)) if len(hits) == 1 else None
+
+
+def _norm_path(p: str) -> str:
+    p = re.sub(r"\{[^}]*\}|<[^>]*>|:[A-Za-z_]\w*", "{}", p.split("?")[0])
+    return p.rstrip("/") or "/"
+
+
+def _resolve_endpoint(container: str, method: str, path: str, nodes: dict[str, dict[str, Any]]) -> str | None:
+    prefix = "endpoint:" + container.split(":", 1)[1] + "/"
+    exact = f"{prefix}{method} {path}"
+    if exact in nodes:
+        return exact
+    want = _norm_path(path)
+    hits = [k for k, n in nodes.items() if k.startswith(prefix) and n["kind"] == "api-endpoint"
+            and n["attributes"].get("method") == method and _norm_path(str(n["attributes"].get("path", ""))) == want]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _resolve(name: str, idx: dict[str, dict[str, set[str]]], exclude: str, nodes: dict[str, dict[str, Any]] | None = None) -> str | None:
+    """`name` may be 'host', 'host:port' or 'host#METHOD /path' (a call to a specific endpoint of that service)."""
+    target, _, ep = name.partition("#")
+    target = target.split(":")[0] if re.fullmatch(r"[^:]+:\d+", target) else target
+    hit = _resolve_name(target, idx, exclude) or (_fuzzy_container(target, nodes, exclude) if nodes else None)
+    if hit and ep and nodes and nodes.get(hit, {}).get("kind") == "container":
+        method, _, path = ep.partition(" ")
+        hit = _resolve_endpoint(hit, method, path, nodes) or hit          # the exact endpoint, else the service itself
+    return hit
+
+
+def _resolve_name(name: str, idx: dict[str, dict[str, set[str]]], exclude: str) -> str | None:
     by_kind = idx.get(_norm(name))
     if not by_kind:
         return None
@@ -78,8 +132,8 @@ def resolve_names(nodes: dict[str, dict[str, Any]], edges: dict[str, dict[str, A
     unresolved: set[str] = set()
     for k in pending:
         e = edges.pop(k)
-        src = e["source"] if not e["source"].startswith("name:") else _resolve(e["source"][5:], idx, "")
-        dst = e["target"] if not e["target"].startswith("name:") else _resolve(e["target"][5:], idx, src or "")
+        src = e["source"] if not e["source"].startswith("name:") else _resolve(e["source"][5:], idx, "", nodes)
+        dst = e["target"] if not e["target"].startswith("name:") else _resolve(e["target"][5:], idx, src or "", nodes)
         if not src or not dst or src == dst:
             unresolved.update(x[5:] for x, r in ((e["source"], src), (e["target"], dst)) if x.startswith("name:") and not r)
             continue

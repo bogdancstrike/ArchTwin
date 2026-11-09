@@ -1,6 +1,7 @@
 """tree-sitter based Python analysis: module index, import graph, FastAPI/Flask-style routes (parser_version below)."""
 from __future__ import annotations
 
+import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,11 +67,23 @@ class PyModule:
     imports: set[str] = field(default_factory=set)
     names: dict[str, str] = field(default_factory=dict)     # local name -> fully qualified imported name
     external_imports: set[str] = field(default_factory=set)  # third-party / stdlib imports (resources: openai, sqlite3, ...)
+    consts: dict[str, str] = field(default_factory=dict)      # module-level string constants (API_PREFIX = "/api/x")
+    prefixes: dict[str, str] = field(default_factory=dict)    # router variable -> URL prefix
+    router_calls: dict[str, tuple[str, list[str]]] = field(default_factory=dict)       # var = factory("...") (resolved later)
+    router_factories: dict[str, tuple[list[tuple[str, str]], str]] = field(default_factory=dict)   # fn -> (params, template)
+    raw_routes: list[tuple[str, str, str, str, int, str]] = field(default_factory=list)  # (method, router var, path, file, line, handler)
     source: str = ""
     defs: list[CodeDef] = field(default_factory=list)
     routes: list[Route] = field(default_factory=list)
     kafka: list[KafkaUse] = field(default_factory=list)
     uses_kafka_client: bool = False
+
+
+NOT_PACKAGES = {"tests", "test", "docs", "doc", "examples", "example", "scripts", "tools", "venv", "env", "build", "dist", "node_modules"}
+
+
+def _is_package_dir(d: Path) -> bool:
+    return (d / "__init__.py").exists() or (d.name.isidentifier() and d.name not in NOT_PACKAGES)
 
 
 def package_roots(context_dir: Path, files: list[Path], entries: list[str] | None = None, copied: list[str] | None = None) -> list[Path]:
@@ -114,8 +127,9 @@ def module_index(context_dir: Path, files: list[Path], roots: list[Path] | None 
             parts = list(rel.with_suffix("").parts)
             if not parts or any(p.startswith(".") or "-" in p for p in parts):
                 continue
-            # only count it as a package module if every parent directory is a package
-            if len(parts) > 1 and not all((base.joinpath(*parts[:i]) / "__init__.py").exists() for i in range(1, len(parts))):
+            # every parent directory must be a package: a regular one (__init__.py) or an implicit namespace package
+            # (PEP 420: a plain directory with an identifier name that is not a test/tooling folder)
+            if len(parts) > 1 and not all(_is_package_dir(base.joinpath(*parts[:i])) for i in range(1, len(parts))):
                 continue
             if parts[-1] == "__init__":
                 parts = parts[:-1]
@@ -132,6 +146,64 @@ def _string_value(n) -> str | None:
     if n.type != "string":
         return None
     return "".join(_text(c) for c in n.children if c.type == "string_content")
+
+
+def _template(n, consts: dict[str, str]) -> str | None:
+    """A string or f-string as a template: constants substituted, other interpolations kept as {name}."""
+    if n is None or n.type != "string":
+        return None
+    out = []
+    for c in n.children:
+        if c.type == "string_content":
+            out.append(_text(c))
+        elif c.type == "interpolation":
+            expr = next((x for x in c.children if x.type not in ("{", "}")), None)
+            name = _text(expr) if expr is not None else ""
+            out.append(consts.get(name, "{" + name + "}"))
+    return "".join(out)
+
+
+def _router_prefix(call, consts: dict[str, str]) -> str | None:
+    args = call.child_by_field_name("arguments")
+    for a in (args.children if args is not None else []):
+        if a.type == "keyword_argument" and _text(a.child_by_field_name("name")) in ("prefix", "url_prefix"):
+            return _template(a.child_by_field_name("value"), consts)
+    return None
+
+
+def _router_factories(root, consts: dict[str, str]) -> dict[str, tuple[list[tuple[str, str]], str]]:
+    """Module-level functions returning APIRouter/Blueprint(prefix=...): fn -> ([(param, default)], prefix template)."""
+    out = {}
+    for top in root.children:
+        d = top.child_by_field_name("definition") if top.type == "decorated_definition" else top
+        if d is None or d.type != "function_definition":
+            continue
+        stack, prefix = [d.child_by_field_name("body")], None
+        while stack and prefix is None:
+            x = stack.pop()
+            if x is None:
+                continue
+            if x.type == "call" and _text(x.child_by_field_name("function") or x).endswith(("APIRouter", "Blueprint")):
+                prefix = _router_prefix(x, consts)
+            stack.extend(x.children)
+        if prefix is None:
+            continue
+        params = []
+        for prm in (d.child_by_field_name("parameters").children if d.child_by_field_name("parameters") is not None else []):
+            if prm.type == "identifier":
+                params.append((_text(prm), ""))
+            elif prm.type in ("default_parameter", "typed_default_parameter"):
+                params.append((_text(prm.child_by_field_name("name")), _string_value(prm.child_by_field_name("value")) or ""))
+            elif prm.type == "typed_parameter":
+                params.append((_text(prm.children[0]), ""))
+        out[_text(d.child_by_field_name("name"))] = (params, prefix)
+    return out
+
+
+def _apply_factory(factory: tuple[list[tuple[str, str]], str], args: list[str]) -> str:
+    params, template = factory
+    values = {name: (args[i] if i < len(args) else default) for i, (name, default) in enumerate(params)}
+    return re.sub(r"\{(\w+)\}", lambda m: values.get(m.group(1), m.group(0)), template)
 
 
 def _strings(n) -> list[str]:
@@ -188,6 +260,8 @@ def _kafka_call(n, mod: PyModule) -> None:
 
 
 MAX_REFS = 200
+DYNAMIC_REF = re.compile(r"""["']([A-Za-z_][\w]*(?:\.[A-Za-z_]\w*)+):[A-Za-z_]\w*["']""")
+IMPORT_MODULE = re.compile(r"""import_module\(\s*["']([A-Za-z_][\w.]*)["']""")
 
 
 def _idents(node, out: set[str]) -> None:
@@ -281,17 +355,22 @@ def parse_module(name: str, path: Path, is_pkg: bool) -> PyModule:
                     mod.imports.add(f"{base}.{_text(nn)}")
                     mod.names[_text(alias) if alias is not None else _text(nn).split(".")[-1]] = f"{base}.{_text(nn)}"
         elif t == "assignment":
-            # router = APIRouter(prefix="/api/v1/x")
             left, right = n.child_by_field_name("left"), n.child_by_field_name("right")
+            if left is not None and right is not None and left.type == "identifier" and right.type == "string" and n.parent is not None \
+                    and n.parent.parent is not None and n.parent.parent.type == "module":
+                v = _string_value(right)                                 # API_PREFIX = "/api/investigations"
+                if v is not None and "{" not in _text(right)[:3]:
+                    mod.consts[_text(left)] = v
             if left is not None and right is not None and right.type == "call":
                 fn = _text(right.child_by_field_name("function") or right)
-                if fn.endswith(("APIRouter", "Blueprint", "FastAPI")):
+                if fn.endswith(("APIRouter", "Blueprint", "FastAPI")):    # router = APIRouter(prefix="/api/v1/x" | f"{API}/x")
+                    v = _router_prefix(right, mod.consts)
+                    if v is not None:
+                        prefixes[_text(left)] = v
+                else:                                                    # router = investigation_router("/{case_id}") (resolved later)
                     args = right.child_by_field_name("arguments")
-                    for a in (args.children if args is not None else []):
-                        if a.type == "keyword_argument" and _text(a.child_by_field_name("name")) in ("prefix", "url_prefix"):
-                            v = _string_value(a.child_by_field_name("value"))
-                            if v is not None:
-                                prefixes[_text(left)] = v
+                    lits = [_string_value(a) or "" for a in (args.children if args is not None else []) if a.type == "string"]
+                    mod.router_calls[_text(left)] = (fn, lits)
         elif t == "call":
             _kafka_call(n, mod)
         elif t == "decorator":
@@ -316,13 +395,37 @@ def parse_module(name: str, path: Path, is_pkg: bool) -> PyModule:
                             mod.routes.append(Route(m, (_text(obj) if obj is not None else "", p), str(path), n.start_point[0] + 1, handler))  # type: ignore[arg-type]
         stack.extend(n.children)
     mod.defs = _code_defs(tree.root_node)
-    # apply router prefixes
-    fixed = []
-    for r in mod.routes:
-        objname, p = r.path  # type: ignore[misc]
-        fixed.append(Route(r.method, (prefixes.get(objname, "") + p) or "/", r.file, r.line, r.handler))
-    mod.routes = sorted(fixed, key=lambda r: (r.line, r.method))
+    # dynamic imports (plugin registries, app factories): "pkg.mod:Attr" strings and import_module("pkg.mod")
+    mod.imports |= {m.group(1) for m in DYNAMIC_REF.finditer(mod.source)}
+    mod.imports |= {m.group(1) for m in IMPORT_MODULE.finditer(mod.source)}
+    mod.router_factories = _router_factories(tree.root_node, mod.consts)
+    mod.prefixes = prefixes
+    mod.raw_routes = [(r.method, r.path[0], r.path[1], r.file, r.line, r.handler) for r in mod.routes]  # type: ignore[index]
+    _finalize_routes(mod)
     return mod
+
+
+def _finalize_routes(mod: PyModule) -> None:
+    mod.routes = sorted((Route(m, (mod.prefixes.get(var, "") + p) or "/", f, line, h) for m, var, p, f, line, h in mod.raw_routes),
+                        key=lambda r: (r.line, r.method))
+
+
+def resolve_router_prefixes(mods: dict[str, PyModule]) -> None:
+    """Prefixes produced by router factories defined in other modules (`router = investigation_router("/{case_id}")`)."""
+    for m in mods.values():
+        changed = False
+        for var, (fn, args) in m.router_calls.items():
+            name = fn.split(".")[-1]
+            factory = m.router_factories.get(name)
+            if factory is None:
+                target = m.names.get(fn) or m.names.get(name)
+                owner = mods.get(target.rpartition(".")[0]) if target else None
+                factory = owner.router_factories.get(name) if owner else None
+            if factory is not None and var not in m.prefixes:
+                m.prefixes[var] = _apply_factory(factory, args)
+                changed = True
+        if changed:
+            _finalize_routes(m)
 
 
 def analyze(context_dir: Path, files: list[Path], errors: list[str] | None = None, roots: list[Path] | None = None) -> dict[str, PyModule]:
@@ -335,6 +438,7 @@ def analyze(context_dir: Path, files: list[Path], errors: list[str] | None = Non
             if errors is not None:
                 errors.append(f"{path.name}: {type(e).__name__}: {str(e)[:120]}")
             continue
+    resolve_router_prefixes(out)
     # keep only imports that resolve to modules in this codebase (prefix match); the rest are kept as external imports
     names = set(out)
     tops = {n.split(".")[0] for n in names}
@@ -371,3 +475,59 @@ def reachable(mods: dict[str, PyModule], entries: list[str]) -> set[str]:
 
 def component_of(module: str, depth: int = 2) -> str:
     return ".".join(module.split(".")[:depth])
+
+
+APP_REF = re.compile(r"""["']([A-Za-z_][\w.]*):[A-Za-z_]\w*["']""")
+CONST_APP_REF = re.compile(r"""^([A-Z_][A-Z0-9_]*)\s*(?::[^=]+)?=\s*["']([A-Za-z_][\w.]*):[A-Za-z_]\w*["']""", re.MULTILINE)
+
+
+def _function_block(src: str, name: str) -> str | None:
+    m = re.search(rf"^([ \t]*)(?:async[ \t]+)?def[ \t]+{re.escape(name)}[ \t]*\(", src, re.MULTILINE)
+    if not m:
+        return None
+    indent = len(m.group(1))
+    lines = src[m.start():].splitlines()
+    block = [lines[0]]
+    for ln in lines[1:]:
+        if ln.strip() and not ln.strip().startswith("#") and len(ln) - len(ln.lstrip()) <= indent and not ln.lstrip().startswith((")", "]")):
+            break
+        block.append(ln)
+    return "\n".join(block)
+
+
+def role_entries(mods: dict[str, PyModule], script_module: str, command: str) -> list[str]:
+    """Modules a CLI role runs: `service-data query` -> the `query` command function in the script's package -> what it
+    imports, the "module:attr" app strings it uses (directly or via module constants such as QUERY_APP)."""
+    func = command.replace("-", "_")
+    package = script_module if any(m.startswith(script_module + ".") for m in mods) else script_module.rpartition(".")[0]
+    names = set(mods)
+    found: set[str] = set()
+    for m in sorted(x for x in mods if x == script_module or x.startswith(package + ".")):
+        src = mods[m].source
+        block = _function_block(src, func)
+        if block is None:
+            continue
+        refs = re.findall(r"^\s*from\s+([A-Za-z_][\w.]*)\s+import", block, re.MULTILINE)
+        refs += re.findall(r"^\s*import\s+([A-Za-z_][\w.]*)", block, re.MULTILINE)
+        refs += APP_REF.findall(block)
+        refs += [mod for const, mod in CONST_APP_REF.findall(src) if re.search(rf"\b{const}\b", block)]
+        for ref in refs:
+            cand = ref
+            while cand and cand not in names:
+                cand = cand.rpartition(".")[0]
+            if cand and cand != m:
+                found.add(cand)
+    return sorted(found)
+
+
+SERVER_CALL = re.compile(r"\b(?:uvicorn|gunicorn|hypercorn|granian|waitress|daphne)\b|\bserve\s*\(|\.run_app\s*\(|app\.run\s*\(")
+
+
+def role_starts_server(mods: dict[str, PyModule], script_module: str, command: str) -> bool:
+    """Whether a CLI role's command function starts an HTTP server (uvicorn.run, serve(...), app.run, …)."""
+    package = script_module if any(m.startswith(script_module + ".") for m in mods) else script_module.rpartition(".")[0]
+    for m in sorted(x for x in mods if x == script_module or x.startswith(package + ".")):
+        block = _function_block(mods[m].source, command.replace("-", "_"))
+        if block and SERVER_CALL.search(block):
+            return True
+    return False

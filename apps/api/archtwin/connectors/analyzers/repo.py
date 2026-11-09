@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 
-from archtwin.connectors.analyzers import db_schema, python_code, resources, webui
+from archtwin.connectors.analyzers import db_schema, gateway_maps, python_code, resources, webui
 from archtwin.connectors.analyzers.common import HOSTPORT_RX, SCHEME_REL, URL_RX, classify, read, safe_url, scheme_base, walk
 from archtwin.connectors.sdk import DocumentOut, ScanResult
 
@@ -200,44 +200,81 @@ def _cmdline(cmd: Any) -> str:
     return cmd if isinstance(cmd, str) else " ".join(map(str, cmd or []))
 
 
-def _entry_modules(spec: dict[str, Any], dockerfile_cmd: list[str]) -> list[str]:
-    cmd = spec.get("command") or dockerfile_cmd or []
-    if isinstance(cmd, str):
-        try:
-            cmd = shlex.split(cmd)
-        except ValueError:
-            cmd = cmd.split()
-    cmd = [str(c) for c in cmd]
-    mods = []
-    for i, c in enumerate(cmd):
-        if c == "-m" and i + 1 < len(cmd):
-            mods += [cmd[i + 1], f"{cmd[i + 1]}.__main__"]   # `python -m pkg` runs pkg/__main__.py
-        if c.endswith(".py") and i > 0 and re.search(r"python(3(\.\d+)?)?$", cmd[i - 1]):   # python path/to/script.py
+def _argv(spec: dict[str, Any]) -> list[str]:
+    """The process a container runs, with Docker semantics: entrypoint (compose overrides Dockerfile) + command (compose
+    `command` replaces the Dockerfile CMD)."""
+    df = spec.get("_df", {})
+
+    def split(v: Any) -> list[str]:
+        if isinstance(v, str):
+            try:
+                return shlex.split(v)
+            except ValueError:
+                return v.split()
+        return [str(x) for x in v or []]
+    entry = split(spec["entrypoint"]) if spec.get("entrypoint") is not None else df.get("entrypoint", [])
+    cmd = split(spec["command"]) if spec.get("command") is not None else df.get("cmd", [])
+    return entry + cmd
+
+
+def console_scripts(ctx: Path) -> dict[str, str]:
+    """`[project.scripts]` / `[tool.poetry.scripts]` of the build context: script name -> "module:function"."""
+    f = ctx / "pyproject.toml"
+    if not f.exists():
+        return {}
+    try:
+        data = tomllib.loads(read(f))
+    except tomllib.TOMLDecodeError:
+        return {}
+    out = dict((data.get("project") or {}).get("scripts") or {})
+    out.update(((data.get("tool") or {}).get("poetry") or {}).get("scripts") or {})
+    return {str(k): str(v) for k, v in out.items() if isinstance(v, str)}
+
+
+def _entry_modules(argv: list[str], scripts: dict[str, str] | None = None) -> tuple[list[str], list[tuple[str, str]]]:
+    """(entry modules, [(script module, sub-command)]) of a command line: `python -m pkg`, `python app.py`, `uvicorn pkg.mod:app`,
+    and console scripts (`service-data query` -> the `query` command of the script's module, resolved later)."""
+    mods: list[str] = []
+    roles: list[tuple[str, str]] = []
+    scripts = scripts or {}
+    for i, c in enumerate(argv):
+        if c == "-m" and i + 1 < len(argv):
+            mods += [argv[i + 1], f"{argv[i + 1]}.__main__"]   # `python -m pkg` runs pkg/__main__.py
+        if c.endswith(".py") and i > 0 and re.search(r"python(3(\.\d+)?)?$", argv[i - 1]):   # python path/to/script.py
             mods.append(c.removesuffix(".py").lstrip("./").replace("/", "."))
         m = re.match(r"^([A-Za-z_][\w.]*):[A-Za-z_]\w*$", c)       # uvicorn pkg.mod:app
         if m and i > 0:
             mods.append(m.group(1))
-    return mods
+        script = scripts.get(Path(c).name)
+        if script:
+            module = script.split(":")[0]
+            mods.append(module)
+            sub = next((a for a in argv[i + 1:] if not a.startswith("-")), "")
+            if sub:
+                roles.append((module, sub))
+    return mods, roles
 
 
 def _dockerfile_info(path: Path) -> dict[str, Any]:
     txt = read(path)
     froms = re.findall(r"^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)", txt, re.MULTILINE | re.IGNORECASE)
-    cmd: list[str] = []
-    m = re.findall(r"^\s*(?:CMD|ENTRYPOINT)\s+(\[.*\]|.+)$", txt, re.MULTILINE | re.IGNORECASE)
-    if m:
-        last = m[-1].strip()
+    def last(instr: str) -> list[str]:
+        found = re.findall(rf"^\s*{instr}\s+(\[.*\]|.+)$", txt, re.MULTILINE | re.IGNORECASE)
+        if not found:
+            return []
+        v = found[-1].strip()
         try:
-            cmd = json.loads(last) if last.startswith("[") else shlex.split(last)
+            return [str(x) for x in json.loads(v)] if v.startswith("[") else shlex.split(v)
         except (ValueError, json.JSONDecodeError):
-            cmd = last.split()
+            return v.split()
+    entrypoint, cmd = last("ENTRYPOINT"), last("CMD")
     expose = re.findall(r"^\s*EXPOSE\s+(.+)$", txt, re.MULTILINE | re.IGNORECASE)
     copied = []
     for cm in re.finditer(r"^\s*(?:COPY|ADD)\s+(?!--from)(?:--\S+\s+)*(.+)$", txt, re.MULTILINE | re.IGNORECASE):
         parts = shlex.split(cm.group(1)) if not cm.group(1).strip().startswith("[") else json.loads(cm.group(1))
         if len(parts) >= 2 and parts[-1] in (".", "./", "/app", "/app/", "/srv", "/code", "/src"):
             copied += [x.rstrip("/") for x in parts[:-1] if x not in (".", "./") and not any(ch in x for ch in "*?")]
-    return {"base_images": froms, "cmd": cmd, "expose": " ".join(expose).split(), "copied": copied}
+    return {"base_images": froms, "entrypoint": entrypoint, "cmd": cmd, "expose": " ".join(expose).split(), "copied": copied}
 
 
 class RepoAnalyzer:
@@ -260,6 +297,8 @@ class RepoAnalyzer:
         compose_files = [cf for cf in compose_files if cf.resolve() not in fragments]
         for cf in compose_files:
             self.compose(cf)
+        if self.content != "docs":
+            self.dockerfile_service()
         if self.content != "docs":
             self.persons()
             self.code()
@@ -289,9 +328,25 @@ class RepoAnalyzer:
             self.r.warnings.append(f"{_rel(self.root, cf)}: invalid YAML ({str(e)[:80]})")
             self.r.complete = False
             return
+        self._register_project(cf, data, text)
+
+    def dockerfile_service(self) -> None:
+        """A repository without Compose services but with a root Dockerfile is one container (its own system), so its code,
+        endpoints and dependencies are analyzed like any other service."""
+        df = self.root / "Dockerfile"
+        if self.services or not df.exists():
+            return
+        info = _dockerfile_info(df)
+        spec: dict[str, Any] = {"build": ".", "ports": [f"{p.split('/')[0]}" for p in info.get("expose", [])], "_from_dockerfile": True}
+        self._register_project(df, {"name": self.repo, "services": {self.repo: spec}}, "")
+
+    def _register_project(self, cf: Path, data: dict, text: str) -> None:
         svcs = data.get("services") or {}
         if not isinstance(svcs, dict) or not svcs:
             return
+        built = {str(v.get("image")): v.get("build") for v in svcs.values() if isinstance(v, dict) and v.get("build") and v.get("image")}
+        svcs = {n: ({**v, "build": built[str(v["image"])], "_shared_image": v["image"]}
+                    if isinstance(v, dict) and not v.get("build") and str(v.get("image")) in built else v) for n, v in svcs.items()}
         rel = _rel(self.root, cf)
         system = str(data.get("name") or (self.repo if cf.parent == self.root else f"{self.repo}-{cf.parent.name}"))
         lines = _service_lines(text)
@@ -497,7 +552,11 @@ class RepoAnalyzer:
 
     def python(self, ctx: Path, files: list[Path], svcs: list[Service]) -> None:
         errors: list[str] = []
-        entries_all = [e for s in svcs for e in _entry_modules(s.spec, s.spec.get("_df", {}).get("cmd", []))]
+        declared = gateway_maps.declared_endpoints(ctx, files) if len(svcs) == 1 else []
+        routes = gateway_maps.routing_tables(ctx, files) if len(svcs) == 1 else []
+        dynamic_entries = sorted({d.module for d in declared if d.module})      # handlers loaded by name from configuration
+        scripts = console_scripts(ctx)
+        entries_all = [e for s in svcs for e in _entry_modules(_argv(s.spec), scripts)[0]] + dynamic_entries
         copied = [c for s in svcs for c in s.spec.get("_df", {}).get("copied", [])]
         roots = python_code.package_roots(ctx, files, entries_all, copied)
         mods = python_code.analyze(ctx, files, errors, roots)
@@ -507,7 +566,9 @@ class RepoAnalyzer:
         if not mods:
             return
         for s in svcs:
-            entries = _entry_modules(s.spec, s.spec.get("_df", {}).get("cmd", []))
+            entries, roles = _entry_modules(_argv(s.spec), scripts)
+            role_mods = [m for mod, sub in roles for m in python_code.role_entries(mods, mod, sub)]
+            entries = (role_mods or entries) + dynamic_entries                 # a CLI role runs only what its command starts
             reach = python_code.reachable(mods, entries) if entries else set()
             if entries and not reach:
                 continue
@@ -540,23 +601,57 @@ class RepoAnalyzer:
             self._code_elements(s, mods, reach, comps)
             self._resources(s, mods, reach)
             self._kafka(s, mods, reach)
-            cmdline = _cmdline(s.spec.get("command") or s.spec.get("_df", {}).get("cmd", []) or [])
-            serves_http = bool(re.search(r"uvicorn|gunicorn|hypercorn|granian|flask\s+run|daphne", cmdline))
+            cmdline = _cmdline(_argv(s.spec))
+            starts_server = any(i.split(".")[0] in ("uvicorn", "gunicorn", "hypercorn", "granian", "daphne") for m in reach for i in mods[m].external_imports)
+            role_server = any(python_code.role_starts_server(mods, mod, sub) for mod, sub in roles)
+            serves_http = bool(re.search(r"uvicorn|gunicorn|hypercorn|granian|flask\s+run|daphne", cmdline)) or starts_server or role_server
             for m in sorted(reach) if serves_http else []:
                 for rt in mods[m].routes:
-                    rel = _rel(self.root, Path(rt.file))
-                    ek = f"endpoint:{s.system}/{s.name}/{rt.method} {rt.path}"
-                    own = python_code.component_of(m)
-                    uses = sorted({f"component:{s.system}/{s.name}/{python_code.component_of(i)}" for i in mods[m].imports
-                                   if python_code.component_of(i) != own and python_code.component_of(i) in comps})
-                    direct = sorted({res.key.format(system=s.system, service=s.name)
-                                     for res, _ in resources.resources_for(mods[m].external_imports, mods[m].source)})
-                    self.r.node("static", ek, "api-endpoint", f"{rt.method} {rt.path}", python_code.PARSER_VERSION,
-                                attrs={"method": rt.method, "path": rt.path, "handler": rt.handler, "module": m,
-                                       "component": f"component:{s.system}/{s.name}/{own}", "uses": uses, "resources": direct},
-                                ref=rel, span={"path": rel, "line_start": rt.line, "line_end": rt.line})
-                    self.r.edge("static", s.key, "exposes", ek, python_code.PARSER_VERSION, ref=rel,
-                                span={"path": rel, "line_start": rt.line})
+                    self._endpoint(s, mods, comps, rt.method, rt.path, m, rt.handler, _rel(self.root, Path(rt.file)), rt.line, python_code.PARSER_VERSION)
+            for d in declared:
+                m = d.module if d.module in mods else ""
+                self._endpoint(s, mods, comps, d.method, d.path, m, d.handler, d.source, d.line, gateway_maps.V_DECLARED, {"declared_in": d.source})
+            self._gateway_routes(s, mods, comps, routes, declared)
+
+    def _endpoint(self, s: Service, mods: dict, comps: dict, method: str, path: str, module: str, handler: str, rel: str, line: int,
+                  parser: str, extra: dict | None = None) -> str:
+        """One HTTP endpoint of a service, with the components its module uses and the resources it touches (for flows)."""
+        ek = f"endpoint:{s.system}/{s.name}/{method} {path}"
+        attrs: dict[str, Any] = {"method": method, "path": path, "handler": handler, "module": module, **(extra or {})}
+        if module:
+            own = python_code.component_of(module)
+            attrs["component"] = f"component:{s.system}/{s.name}/{own}"
+            attrs["uses"] = sorted({f"component:{s.system}/{s.name}/{python_code.component_of(i)}" for i in mods[module].imports
+                                    if python_code.component_of(i) != own and python_code.component_of(i) in comps})
+            attrs["resources"] = sorted({res.key.format(system=s.system, service=s.name)
+                                         for res, _ in resources.resources_for(mods[module].external_imports, mods[module].source)})
+        self.r.node("static", ek, "api-endpoint", f"{method} {path}", parser, attrs=attrs, ref=rel, span={"path": rel, "line_start": line, "line_end": line})
+        self.r.edge("static", s.key, "exposes", ek, parser, ref=rel, span={"path": rel, "line_start": line})
+        return ek
+
+    def _gateway_routes(self, s: Service, mods: dict, comps: dict, routes: list, declared: list) -> None:
+        """An API gateway's routing table: every action becomes an endpoint of this service that calls the backend endpoint
+        (`name:<host>#<METHOD> <path>`, resolved across datasources by the graph builder)."""
+        if not routes:
+            return
+        tables = {r.source.rsplit("/", 1)[-1] for r in routes}
+        dispatchers = [d for d in declared if d.module in mods and any(t in mods[d.module].source for t in tables)]
+        module = dispatchers[0].module if dispatchers else ""
+        via = dispatchers[0].path if dispatchers else ""
+        hosts: dict[str, int] = defaultdict(int)
+        for rt in routes:
+            host = gateway_maps.host_name(rt.host)
+            ak = self._endpoint(s, mods, comps, "ACTION", rt.action, module, "", rt.source, rt.line, gateway_maps.V_ROUTES,
+                                {"dispatcher": via, "roles": rt.roles, "description": rt.description, "routes_to": f"{rt.host} {rt.method} {rt.path}"})
+            if not host:
+                continue                                       # local/dev target: not a resolvable service
+            hosts[host] += 1
+            self.r.edge("static", ak, "calls", f"name:{host}#{rt.method} {rt.path}", gateway_maps.V_ROUTES, ref=rt.source,
+                        span={"path": rt.source, "line_start": rt.line}, confidence=0.85,
+                        attrs={"protocol": "http", "method": rt.method, "path": rt.path, "action": rt.action, "resolved_by": "name"})
+        for host, n in hosts.items():
+            self.r.edge("static", s.key, "calls", f"name:{host}", gateway_maps.V_ROUTES, attrs={"protocol": "http", "routes": n, "resolved_by": "name"},
+                        confidence=0.85)
 
     def _resources(self, s: Service, mods: dict, reach: set[str]) -> None:
         """What each component uses (SaaS APIs, embedded databases, stores, ML runtimes, external tools), from its imports."""
