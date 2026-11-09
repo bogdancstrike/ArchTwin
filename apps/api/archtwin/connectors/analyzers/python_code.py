@@ -8,7 +8,7 @@ from pathlib import Path
 import tree_sitter_python
 from tree_sitter import Language, Parser
 
-PARSER_VERSION = "py-treesitter/1.1"
+PARSER_VERSION = "py-treesitter/1.2"     # 1.2: L4 code elements (classes, functions, references)
 KAFKA_PRODUCE = {"produce", "send", "send_and_wait"}
 KAFKA_CLIENTS = {"Producer", "Consumer", "KafkaProducer", "KafkaConsumer", "AIOKafkaProducer", "AIOKafkaConsumer",
                  "SerializingProducer", "DeserializingConsumer"}
@@ -46,10 +46,25 @@ class KafkaUse:
 
 
 @dataclass
+class CodeDef:
+    """A top-level class or function (C4 L4 code element) with the names its body references."""
+    name: str
+    kind: str                       # class | function
+    line_start: int
+    line_end: int
+    bases: list[str] = field(default_factory=list)
+    refs: set[str] = field(default_factory=set)
+    methods: int = 0
+    is_async: bool = False
+
+
+@dataclass
 class PyModule:
     name: str
     path: Path
     imports: set[str] = field(default_factory=set)
+    names: dict[str, str] = field(default_factory=dict)     # local name -> fully qualified imported name
+    defs: list[CodeDef] = field(default_factory=list)
     routes: list[Route] = field(default_factory=list)
     kafka: list[KafkaUse] = field(default_factory=list)
     uses_kafka_client: bool = False
@@ -142,6 +157,57 @@ def _kafka_call(n, mod: PyModule) -> None:
             mod.kafka.append(KafkaUse("consumes", v, line))
 
 
+MAX_REFS = 200
+
+
+def _idents(node, out: set[str]) -> None:
+    stack = [node]
+    while stack and len(out) < MAX_REFS:
+        n = stack.pop()
+        if n.type == "identifier":
+            out.add(_text(n))
+        elif n.type == "attribute":                       # a.b.c -> "a" (the imported module or object)
+            obj = n.child_by_field_name("object")
+            if obj is not None and obj.type == "identifier":
+                out.add(_text(obj))
+        stack.extend(n.children)
+
+
+def _code_defs(root) -> list[CodeDef]:
+    """Top-level classes and functions of a module (L4), with line span, base classes and referenced names."""
+    out: list[CodeDef] = []
+    for top in root.children:
+        d = top.child_by_field_name("definition") if top.type == "decorated_definition" else top
+        if d is None or d.type not in ("class_definition", "function_definition"):
+            continue
+        nm = d.child_by_field_name("name")
+        if nm is None:
+            continue
+        cd = CodeDef(_text(nm), "class" if d.type == "class_definition" else "function", top.start_point[0] + 1, d.end_point[0] + 1,
+                     is_async=d.type == "function_definition" and _text(d).startswith("async"))
+        if d.type == "class_definition":
+            sup = d.child_by_field_name("superclasses")
+            for c in (sup.children if sup is not None else []):
+                if c.type in ("identifier", "attribute"):
+                    cd.bases.append(_text(c))
+            body = d.child_by_field_name("body")
+            cd.methods = sum(1 for c in (body.children if body is not None else [])
+                             if c.type == "function_definition" or (c.type == "decorated_definition" and c.child_by_field_name("definition") is not None))
+        body = d.child_by_field_name("body")
+        if body is not None:
+            _idents(body, cd.refs)
+        params = d.child_by_field_name("parameters")
+        if params is not None:
+            _idents(params, cd.refs)                      # type annotations name other classes
+        rt = d.child_by_field_name("return_type")
+        if rt is not None:
+            _idents(rt, cd.refs)
+        cd.refs.update(b.split(".")[0] if "." in b else b for b in cd.bases)          # a base class is a reference too
+        cd.refs.discard(cd.name)
+        out.append(cd)
+    return out
+
+
 def parse_module(name: str, path: Path, is_pkg: bool) -> PyModule:
     src = path.read_bytes()
     tree = _parser().parse(src)
@@ -178,7 +244,9 @@ def parse_module(name: str, path: Path, is_pkg: bool) -> PyModule:
                 mod.imports.add(base)
                 for nm in names:
                     nn = nm.children[0] if nm.type == "aliased_import" else nm
+                    alias = nm.child_by_field_name("alias") if nm.type == "aliased_import" else None
                     mod.imports.add(f"{base}.{_text(nn)}")
+                    mod.names[_text(alias) if alias is not None else _text(nn).split(".")[-1]] = f"{base}.{_text(nn)}"
         elif t == "assignment":
             # router = APIRouter(prefix="/api/v1/x")
             left, right = n.child_by_field_name("left"), n.child_by_field_name("right")
@@ -214,6 +282,7 @@ def parse_module(name: str, path: Path, is_pkg: bool) -> PyModule:
                             m = "GET" if meth in ("route", "api_route") else ("WS" if meth == "websocket" else meth.upper())
                             mod.routes.append(Route(m, (_text(obj) if obj is not None else "", p), str(path), n.start_point[0] + 1, handler))  # type: ignore[arg-type]
         stack.extend(n.children)
+    mod.defs = _code_defs(tree.root_node)
     # apply router prefixes
     fixed = []
     for r in mod.routes:

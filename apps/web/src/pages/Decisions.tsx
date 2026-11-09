@@ -3,10 +3,11 @@ import { useState } from "react";
 import Markdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
-import { Badge, Button, Card, Dialog, Empty, ErrorBox, Field, Input, Spinner, Table, Textarea, ago } from "@/components/ui";
+import { Badge, Button, Card, Dialog, Empty, ErrorBox, Field, Input, Spinner, Table, ago } from "@/components/ui";
 import { api, download } from "@/lib/api";
 import { useAction, useApi, useMe } from "@/lib/hooks";
 import type { Adr } from "@/lib/types";
+import { AiTextarea } from "@/components/AiTextarea";
 
 const TONE: Record<string, string> = { proposed: "warn", accepted: "ok", rejected: "bad", superseded: "muted" };
 
@@ -18,11 +19,11 @@ function AdrForm({ projectId, open, onClose }: { projectId: string; open: boolea
   return <Dialog open={open} onClose={onClose} title="New ADR (MADR)" wide>
     <form className="space-y-3" onSubmit={async (e) => { e.preventDefault(); await create.mutateAsync(undefined as never); onClose(); }}>
       <Field label="Title"><Input required value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
-      <Field label="Context and problem statement"><Textarea rows={3} value={f.context} onChange={(e) => setF({ ...f, context: e.target.value })} /></Field>
-      <div className="grid grid-cols-2 gap-3"><Field label="Decision drivers (one per line)"><Textarea rows={3} value={f.decision_drivers} onChange={(e) => setF({ ...f, decision_drivers: e.target.value })} /></Field>
-        <Field label="Considered options (one per line)"><Textarea rows={3} value={f.options} onChange={(e) => setF({ ...f, options: e.target.value })} /></Field></div>
-      <Field label="Decision outcome"><Textarea rows={2} value={f.decision_outcome} onChange={(e) => setF({ ...f, decision_outcome: e.target.value })} /></Field>
-      <Field label="Consequences"><Textarea rows={2} value={f.consequences} onChange={(e) => setF({ ...f, consequences: e.target.value })} /></Field>
+      <Field label="Context and problem statement"><AiTextarea projectId={projectId} field="Context and problem statement" title={f.title} rows={4} value={f.context} onChange={(v) => setF({ ...f, context: v })} /></Field>
+      <div className="grid grid-cols-2 gap-3"><Field label="Decision drivers (one per line)"><AiTextarea projectId={projectId} field="Decision drivers (one per line)" title={f.title} rows={4} value={f.decision_drivers} onChange={(v) => setF({ ...f, decision_drivers: v })} /></Field>
+        <Field label="Considered options (one per line)"><AiTextarea projectId={projectId} field="Considered options (one per line)" title={f.title} rows={4} value={f.options} onChange={(v) => setF({ ...f, options: v })} /></Field></div>
+      <Field label="Decision outcome"><AiTextarea projectId={projectId} field="Decision outcome" title={f.title} rows={3} value={f.decision_outcome} onChange={(v) => setF({ ...f, decision_outcome: v })} /></Field>
+      <Field label="Consequences"><AiTextarea projectId={projectId} field="Consequences" title={f.title} rows={3} value={f.consequences} onChange={(v) => setF({ ...f, consequences: v })} /></Field>
       <ErrorBox error={create.error} /><div className="flex justify-end"><Button variant="primary">Propose</Button></div>
     </form></Dialog>;
 }

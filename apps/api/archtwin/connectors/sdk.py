@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 Origin = Literal["desired", "static", "runtime", "planned", "issue", "inferred", "manual"]
 NODE_KINDS = {"person", "software-system", "external-system", "container", "component", "service", "library", "api-endpoint",
               "api-contract", "event-schema", "kafka-topic", "consumer-group", "database", "db-schema", "table", "deployment",
-              "workload", "network-zone", "team", "adr", "work-item", "document"}
+              "workload", "network-zone", "team", "adr", "work-item", "document", "code"}
 EDGE_KINDS = {"contains", "depends-on", "calls", "publishes", "consumes", "reads", "writes", "deploys-as", "hosted-on", "exposes",
               "authenticated-by", "owned-by", "implements", "decided-by", "tracked-by", "derived-from", "integrates-with", "references"}
 

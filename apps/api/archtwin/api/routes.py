@@ -769,6 +769,15 @@ async def ai_ask(body: S.AskIn, c: RequestContext = Depends(project_ctx)):
                                conversation_id=body.conversation_id)
 
 
+@r.post("/projects/{project_id}/assistant/extend", tags=["ai"])
+async def ai_extend(body: S.ExtendIn, c: RequestContext = Depends(project_ctx)):
+    await flags.require(c, "module.architecture-assistant", "ai.text_extend")
+    await require(c, "assistant", "draft")
+    model = gateway.resolve_model(body.model, (await iam.get_preferences(c.actor_id)).get("preferred_model"))
+    return await assistant.extend_text(c, body.text, model, mode=body.mode, field=body.field, title=body.title,
+                                       instruction=body.instruction, grounded=body.grounded)
+
+
 @r.get("/projects/{project_id}/assistant/conversations", tags=["ai"])
 async def ai_conversations(c: RequestContext = Depends(project_ctx)):
     await flags.require(c, "module.architecture-assistant")

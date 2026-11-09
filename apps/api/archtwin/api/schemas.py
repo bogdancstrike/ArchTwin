@@ -142,3 +142,13 @@ class SpendLimitsIn(Strict):
 
 class SourceRootsIn(Strict):
     roots: list[str] | None = Field(default=None, max_length=50)   # None = every mounted boundary
+
+
+class ExtendIn(Strict):
+    text: str = Field(min_length=1, max_length=12000)
+    mode: Literal["extend", "improve", "concise"] = "extend"
+    field: str = Field(default="", max_length=60)
+    title: str = Field(default="", max_length=300)
+    instruction: str = Field(default="", max_length=1000)
+    grounded: bool = True
+    model: str | None = None

@@ -255,7 +255,8 @@ class RepoAnalyzer:
         systems = sorted(self.by_system)
         self.r.coverage = {"origin": "static", "systems": systems,
                            "prefixes": [f"container:{s}/" for s in systems] + [f"system:{s}" for s in systems] +
-                                       [f"component:{s}/" for s in systems] + [f"endpoint:{s}/" for s in systems]}
+                                       [f"component:{s}/" for s in systems] + [f"endpoint:{s}/" for s in systems] +
+                                       [f"code:{s}/" for s in systems]}
         # kafka topics are only covered where the code was analyzed: declared topics absent in code are UNKNOWN, not drift
         self.r.stats = {"files": len(self.files), "compose_files": len(compose_files), "services": len(self.services),
                         "observations": len(self.r.observations), "documents": len(self.r.documents)}
@@ -453,6 +454,7 @@ class RepoAnalyzer:
                 self.r.edge("static", f"component:{s.system}/{s.name}/{a}", "depends-on", f"component:{s.system}/{s.name}/{b}",
                             python_code.PARSER_VERSION, attrs={"imports": n, "protocol": "in-process"},
                             ref=_rel(self.root, mods[a].path) if a in mods else "", confidence=1.0)
+            self._code_elements(s, mods, reach, comps)
             self._kafka(s, mods, reach)
             cmdline = " ".join(map(str, s.spec.get("command") or s.spec.get("_df", {}).get("cmd", []) or []))
             serves_http = bool(re.search(r"uvicorn|gunicorn|hypercorn|granian|flask\s+run|daphne", cmdline))
@@ -465,6 +467,53 @@ class RepoAnalyzer:
                                 ref=rel, span={"path": rel, "line_start": rt.line, "line_end": rt.line})
                     self.r.edge("static", s.key, "exposes", ek, python_code.PARSER_VERSION, ref=rel,
                                 span={"path": rel, "line_start": rt.line})
+
+    MAX_CODE_PER_COMPONENT = 60
+    MAX_CODE_PER_SERVICE = 1500
+
+    def _code_elements(self, s: Service, mods: dict, reach: set[str], comps: dict[str, list[str]]) -> None:
+        """C4 L4: public top-level classes and functions per component, with inheritance and `uses` references between them
+        (resolved through the module's imports; unresolved names are ignored, never guessed)."""
+        fq: dict[str, tuple[str, Any]] = {}                       # "pkg.mod.Name" -> (module, CodeDef)
+        for m in reach:
+            for d in mods[m].defs:
+                if not d.name.startswith("_"):
+                    fq[f"{m}.{d.name}"] = (m, d)
+        chosen: set[str] = set()
+        total = 0
+        for comp, members in sorted(comps.items()):
+            defs = [(f"{m}.{d.name}", m, d) for m in sorted(members) for d in mods[m].defs if not d.name.startswith("_")]
+            defs.sort(key=lambda x: (x[2].kind != "class", -len(x[2].refs), x[0]))
+            for name, m, d in defs[: self.MAX_CODE_PER_COMPONENT]:
+                if total >= self.MAX_CODE_PER_SERVICE:
+                    self.r.warnings.append(f"{s.name}: L4 code element limit ({self.MAX_CODE_PER_SERVICE}) reached")
+                    break
+                rel = _rel(self.root, mods[m].path)
+                k = f"code:{s.system}/{s.name}/{name}"
+                self.r.node("static", k, "code", d.name, python_code.PARSER_VERSION, ref=rel,
+                            span={"path": rel, "line_start": d.line_start, "line_end": d.line_end},
+                            attrs={"element": d.kind, "module": m, "path": rel, "line_start": d.line_start, "line_end": d.line_end,
+                                   "bases": d.bases[:10], "methods": d.methods, "async": d.is_async, "language": "python",
+                                   "technology": f"python {d.kind}"})
+                self.r.edge("static", f"component:{s.system}/{s.name}/{comp}", "contains", k, python_code.PARSER_VERSION, ref=rel)
+                chosen.add(name)
+                total += 1
+        for name in sorted(chosen):
+            m, d = fq[name]
+            local = mods[m].names
+            seen = 0
+            base_names = {b.split(".")[-1] for b in d.bases}
+            for ref in sorted(d.refs | base_names):
+                tgt = f"{m}.{ref}" if f"{m}.{ref}" in fq else local.get(ref)
+                if not tgt or tgt == name or tgt not in chosen:
+                    continue
+                rel = _rel(self.root, mods[m].path)
+                self.r.edge("static", f"code:{s.system}/{s.name}/{name}", "depends-on", f"code:{s.system}/{s.name}/{tgt}", python_code.PARSER_VERSION,
+                            attrs={"relation": "inherits" if ref in {b.split('.')[-1] for b in d.bases} else "uses", "protocol": "in-process"},
+                            ref=rel, span={"path": rel, "line_start": d.line_start, "line_end": d.line_end}, confidence=0.9)
+                seen += 1
+                if seen >= 15:
+                    break
 
     def _broker_for(self, s: Service) -> Service | None:
         """The Kafka broker this service is configured to use (bootstrap host in its environment)."""

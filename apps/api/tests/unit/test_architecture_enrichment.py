@@ -85,3 +85,30 @@ def test_adrs_and_work_items_link_to_named_elements():
     assert not any(k.endswith("|container:qsint/api") for k in g["edges"])                  # generic names never linked
     e = g["edges"]["work-item:taiga/q#6|references|container:qsint/service-data"]
     assert e["inferred_only"] and e["confidence"] == 0.5
+
+
+def test_l4_code_elements_and_views(tmp_path):
+    from archtwin.diagrams import views
+    root = _write(tmp_path / "demo", {
+        "compose.yaml": "services:\n  api:\n    build: .\n    command: uvicorn app.main:app\n", "Dockerfile": "FROM python:3.12\n",
+        "app/__init__.py": "", "app/svc/__init__.py": "",
+        "app/main.py": "from fastapi import FastAPI\nfrom app.svc.store import Repo as R\napp = FastAPI()\n@app.get('/x')\ndef get_x(r: R):\n    return r.load()\n",
+        "app/svc/store.py": "class Base:\n    pass\n\nclass Repo(Base):\n    def load(self):\n        return helper()\n\ndef helper():\n    return 1\n\ndef _private():\n    pass\n"})
+    g = builder.build(_obs(analyze_repository(root, "rev", "demo"), "c"))
+    code = {k: n for k, n in g["nodes"].items() if n["kind"] == "code"}
+    assert set(code) == {"code:demo/api/app.main.get_x", "code:demo/api/app.svc.store.Base", "code:demo/api/app.svc.store.Repo",
+                         "code:demo/api/app.svc.store.helper"}                                    # private names skipped
+    repo = code["code:demo/api/app.svc.store.Repo"]["attributes"]
+    assert repo["element"] == "class" and repo["bases"] == ["Base"] and repo["methods"] == 1 and repo["line_start"] == 4
+    e = g["edges"]
+    assert e["code:demo/api/app.svc.store.Repo|depends-on|code:demo/api/app.svc.store.Base"]["attributes"]["relation"] == "inherits"
+    assert "code:demo/api/app.main.get_x|depends-on|code:demo/api/app.svc.store.Repo" in e        # resolved through an import alias
+    l3 = views.build_view(g, "container:demo/api")
+    zooms = {n["name"]: n.get("zoom") for n in l3["nodes"]}
+    assert zooms["svc"] == "component:demo/api/app.svc"
+    l4 = views.build_view(g, "component:demo/api/app.svc")
+    assert l4["level"] == 4 and [b["title"] for b in l4["breadcrumbs"]] == ["Context", "demo", "api", "svc"]
+    kinds = {n["name"]: n["kind"] for n in l4["nodes"]}
+    assert kinds == {"Base": "component", "Repo": "component", "helper": "component", "get_x": "external"}
+    labels = {(x["source"].rsplit(".", 1)[-1], x["target"].rsplit(".", 1)[-1]): x["label"] for x in l4["edges"]}
+    assert labels[("Repo", "Base")] == "inherits" and labels[("Repo", "helper")] == "uses"
