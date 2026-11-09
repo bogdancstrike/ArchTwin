@@ -35,7 +35,7 @@ test("login, projects, architecture zoom, evidence, drift, a11y", async ({ page 
   // C4 zoom: context -> system (double-click) -> container view
   await page.locator(".react-flow__node", { hasText: "archtwin" }).first().dblclick();
   await expect(nav).toContainText("archtwin");
-  await page.getByRole("button", { name: /Application/ }).click();
+  await page.getByRole("button", { name: /^Application \(\d+\)$/ }).click();                       // the group chip (not a node's zoom button)
   await expect(nav).toContainText("Application");
   await page.locator(".react-flow__node", { hasText: "api" }).first().click();
   await expect(page.getByRole("complementary", { name: "Evidence" })).toContainText("compose.yaml");
@@ -95,8 +95,8 @@ test("datasources: tab order, folder picker, credential shortcuts, equal resizab
   await page.getByRole("button", { name: "Browse…" }).click();
   const picker = page.getByRole("dialog", { name: "Choose a local directory" });
   await expect(picker.getByRole("navigation", { name: "Places" })).toContainText("All sources");
-  await picker.getByRole("button", { name: /Current path/ }).focus();
-  await page.keyboard.press("Enter");                                                            // edit the path bar
+  await picker.getByRole("button", { name: /Current path/ }).press("Enter");                      // edit the path bar (keyboard)
+  await expect(picker.getByLabel("Type a path", { exact: true })).toBeVisible({ timeout: 15_000 });
   await picker.getByLabel("Type a path", { exact: true }).fill("/sources/archtwin");
   await picker.getByLabel("Type a path", { exact: true }).press("Enter");
   await expect(picker.getByText("repository", { exact: true })).toBeVisible();                   // layout of the chosen folder

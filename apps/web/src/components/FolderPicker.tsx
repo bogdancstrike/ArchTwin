@@ -49,6 +49,7 @@ export function FolderPicker({ endpoint, open, value, onClose, onChoose, title =
 
   const onKey = (e: KeyboardEvent) => {
     if ((e.target as HTMLElement).tagName === "INPUT" && !["ArrowDown", "ArrowUp", "Enter"].includes(e.key)) return;
+    if (e.key === "Enter" && (e.target as HTMLElement).closest('button, [role="button"]')) return;   // Enter on a control is that control's
     if (e.key === "ArrowDown") { e.preventDefault(); setCursor((c) => Math.min(c + 1, shown.length - 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setCursor((c) => Math.max(c - 1, 0)); }
     else if (e.key === "Enter" && shown[cursor]) { e.preventDefault(); if (e.ctrlKey || e.metaKey) choose(shown[cursor].path); else setPath(shown[cursor].path); }
@@ -81,7 +82,8 @@ export function FolderPicker({ endpoint, open, value, onClose, onChoose, title =
           <Button type="button" size="sm" variant="ghost" disabled={!path} onClick={up} aria-label="Up one folder"><ArrowUp size={14} /></Button>
           {typed === null
             ? <div role="button" tabIndex={0} title="Click to type or paste a path" aria-label="Current path — click to type a path"
-                onClick={() => setTyped(data?.path || "")} onKeyDown={(e) => e.key === "Enter" && setTyped(data?.path || "")}
+                onClick={() => setTyped(data?.path || "")}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); setTyped(data?.path || ""); } }}
                 className="flex min-w-0 flex-1 cursor-text items-center gap-0.5 overflow-hidden rounded-md border border-rule bg-paper/60 px-2 py-1 font-mono text-[12px]">
                 <button type="button" onClick={(e) => { e.stopPropagation(); setPath(root || ""); }} className="inline-flex shrink-0 items-center gap-1 text-muted hover:text-ink">
                   <HardDrive size={12} /> {root || "All sources"}</button>
@@ -91,7 +93,11 @@ export function FolderPicker({ endpoint, open, value, onClose, onChoose, title =
                     className={cn("truncate hover:text-ink", i === parts.length - 1 ? "font-medium text-ink" : "text-muted")}>{p}</button></span>)}
               </div>
             : <Input autoFocus value={typed} aria-label="Type a path" className="font-mono text-xs" placeholder="/home/me/workspace/project/backend"
-                onChange={(e) => setTyped(e.target.value)} onBlur={() => setTyped(null)}
+                onChange={(e) => setTyped(e.target.value)}
+                onBlur={(e) => {   // close when the user moves to another control of the picker; a focus loss to the page (re-render) keeps editing
+                  const to = e.relatedTarget as Node | null;
+                  if (to && e.currentTarget.closest('[role="dialog"]')?.contains(to)) setTyped(null);
+                }}
                 onKeyDown={(e) => { if (e.key === "Escape") setTyped(null); if (e.key === "Enter") { e.preventDefault(); setPath(typed.trim().replace(/\/+$/, "")); setTyped(null); } e.stopPropagation(); }} />}
         </div>
         <div className="relative mb-2"><Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-soft" />
