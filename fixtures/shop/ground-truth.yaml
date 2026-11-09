@@ -1,0 +1,30 @@
+# Labelled ground truth for the shop fixture (phase-02 task 0.2). Used for precision/recall in CI (tests/unit) and by the
+# live e2e suite. Keys use the canonical identity scheme so static, runtime and catalog evidence must agree on them.
+system: archtwin-fixtures
+containers: [shop-web, shop-orders, shop-inventory, shop-billing, shop-loadgen, orders-db, inventory-db, kafka, schema-registry,
+             otel-collector, prometheus, kafka-init, schema-init]
+static_edges:              # recovered from compose + code (tree-sitter)
+  - [shop-loadgen, calls, shop-web]
+  - [shop-web, calls, shop-orders]
+  - [shop-web, calls, shop-inventory]
+  - [shop-orders, writes, orders-db]
+  - [shop-inventory, writes, inventory-db]
+  - [shop-orders, publishes, "kafka-topic:archtwin-fixtures/kafka/orders.created"]
+  - [shop-billing, consumes, "kafka-topic:archtwin-fixtures/kafka/orders.created"]
+endpoints:
+  shop-web: ["GET /health", "GET /api/products/{sku}", "POST /api/checkout"]
+  shop-orders: ["GET /health", "POST /orders", "GET /orders/{order_id}"]
+  shop-inventory: ["GET /health", "GET /stock/{sku}"]
+runtime_edges:             # OTel service graph (Prometheus), with peer_map {orders: orders-db, inventory: inventory-db}
+  - [shop-loadgen, calls, shop-web]
+  - [shop-web, calls, shop-orders]
+  - [shop-web, calls, shop-inventory]
+  - [shop-orders, writes, orders-db]
+  - [shop-inventory, writes, inventory-db]
+topics:                    # Kafka cluster metadata
+  orders.created: {partitions: 3, schema_subject: orders.created-value, consumer_groups: [billing]}
+  inventory.audit: {partitions: 1}          # declared by kafka-init, used by no code: runtime-only evidence
+tables:
+  orders-db/orders: [public.customers, public.orders, public.payments]
+  inventory-db/inventory: [inventory.warehouses, inventory.stock, inventory.suppliers]
+sensitive_tables: [public.customers, public.payments, inventory.suppliers]   # email, card_last4, contact_phone

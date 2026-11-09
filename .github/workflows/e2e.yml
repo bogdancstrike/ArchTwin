@@ -1,0 +1,30 @@
+name: e2e (full stack, fake LLM)
+on:
+  workflow_dispatch:
+  schedule: [{cron: "0 3 * * *"}]
+
+jobs:
+  stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - name: env (fake LLM, zero tokens)
+        run: ./scripts/init-env.sh && mkdir -p ../horizon
+      - run: docker compose up -d --build --wait --wait-timeout 900
+      - name: reference fixture (Kafka, PostgreSQL, MySQL, OTel) for the connector e2e tests
+        run: |
+          docker compose -f fixtures/shop/compose.yaml up -d --build
+          timeout 300 sh -c 'until curl -sf http://127.0.0.1:9390/-/ready >/dev/null; do sleep 3; done'
+      - run: cd apps/api && uv sync --frozen
+      - run: cd apps/web && npm ci && npx playwright install --with-deps chromium
+      - name: whole-system coverage gate (unit + integration + e2e + UI; API and worker instrumented) >= 90%
+        run: ./scripts/coverage.sh 90
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: {name: coverage, path: apps/api/.coverage-data/coverage.xml, if-no-files-found: ignore}
+      - if: failure()
+        run: docker compose logs --tail=300 api worker

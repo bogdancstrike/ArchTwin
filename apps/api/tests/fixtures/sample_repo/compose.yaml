@@ -1,0 +1,32 @@
+name: shop
+services:
+  db:
+    image: postgres:17
+  cache:
+    image: valkey/valkey:8
+  gateway:
+    image: ghcr.io/berriai/litellm:v1
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    volumes: ["./deploy/gw/config.yaml:/app/config.yaml:ro"]
+  api:
+    build: ./svc
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0"]
+    environment:
+      DATABASE_URL: postgresql://shop:${DB_PASSWORD}@db:5432/shop
+      CACHE_URL: redis://cache:6379/0
+      LLM_URL: http://gateway:4000/v1
+    depends_on: [db, cache]
+  worker:
+    build: ./svc
+    command: ["python", "-m", "app.worker"]
+    environment:
+      DATABASE_URL: postgresql://shop:${DB_PASSWORD}@db:5432/shop
+  web:
+    build: ./web
+    ports: ["8080:80"]
+    depends_on: [api]
+  migrate:
+    build: ./svc
+    restart: "no"
+    command: ["python", "-m", "app.migrate"]

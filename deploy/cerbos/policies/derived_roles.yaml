@@ -1,0 +1,64 @@
+# Project-scoped roles derived from PostgreSQL memberships (authoritative, ADR-0004). The API passes the principal's
+# project ID lists per capability; org owners/admins get every project of THEIR org. Cross-org access is impossible:
+# every rule also requires resource.org_id == principal.org_id.
+apiVersion: api.cerbos.dev/v1
+derivedRoles:
+  name: project_roles
+  definitions:
+    - name: project_viewer
+      parentRoles: ["user"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.org_id == request.principal.attr.org_id
+              - any:
+                  of:
+                    - expr: request.resource.attr.project_id in request.principal.attr.viewer_project_ids
+                    - expr: request.principal.attr.org_role in ["org_owner", "org_admin"]
+    - name: project_editor
+      parentRoles: ["user"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.org_id == request.principal.attr.org_id
+              - any:
+                  of:
+                    - expr: request.resource.attr.project_id in request.principal.attr.editor_project_ids
+                    - expr: request.principal.attr.org_role in ["org_owner", "org_admin"]
+    - name: project_manager
+      parentRoles: ["user"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.org_id == request.principal.attr.org_id
+              - any:
+                  of:
+                    - expr: request.resource.attr.project_id in request.principal.attr.manager_project_ids
+                    - expr: request.principal.attr.org_role in ["org_owner", "org_admin"]
+    - name: project_approver
+      parentRoles: ["user"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.org_id == request.principal.attr.org_id
+              - any:
+                  of:
+                    - expr: request.resource.attr.project_id in request.principal.attr.approver_project_ids
+                    - expr: request.principal.attr.org_role in ["org_owner", "org_admin"]
+    - name: org_member
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: request.resource.attr.org_id == request.principal.attr.org_id
+    - name: org_administrator
+      parentRoles: ["user"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.org_id == request.principal.attr.org_id
+              - expr: request.principal.attr.org_role in ["org_owner", "org_admin"]

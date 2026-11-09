@@ -1,0 +1,17 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: assistant
+  importDerivedRoles:
+  - project_roles
+  rules:
+  - actions:
+    - ask
+    effect: EFFECT_ALLOW
+    derivedRoles:
+    - project_viewer
+  - actions:
+    - draft
+    effect: EFFECT_ALLOW
+    derivedRoles:
+    - project_editor

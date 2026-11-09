@@ -1,0 +1,628 @@
+generated_from: docs/feature-flags/FLAG_CATALOG.md
+flags:
+- key: module.llm-gateway
+  default: false
+  phase: phase-01-foundation
+  scope: org
+  enforcement: admin diagnostics only until phase 06
+  immutable: false
+- key: module.connector-platform
+  default: false
+  phase: phase-02-connectors
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.source-code-discovery
+  default: false
+  phase: phase-02-connectors
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.runtime-discovery
+  default: false
+  phase: phase-02-connectors
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.data-topology
+  default: false
+  phase: phase-02-connectors
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.work-connectors
+  default: false
+  phase: phase-02-connectors
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.document-parsing
+  default: false
+  phase: phase-02-connectors
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.normalization-freshness
+  default: false
+  phase: phase-02-connectors
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.architecture-graph
+  default: false
+  phase: phase-03-architecture
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.diagram-studio
+  default: false
+  phase: phase-03-architecture
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.documentation-engine
+  default: false
+  phase: phase-03-architecture
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.adr-workflow
+  default: false
+  phase: phase-03-architecture
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.architecture-reviews
+  default: false
+  phase: phase-03-architecture
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.drift-engine
+  default: false
+  phase: phase-04-drift
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.continuous-watchers
+  default: false
+  phase: phase-04-drift
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.drift-triage
+  default: false
+  phase: phase-04-drift
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.architecture-notifications
+  default: false
+  phase: phase-04-drift
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.architecture-planning
+  default: false
+  phase: phase-05-delivery
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.issue-synchronization
+  default: false
+  phase: phase-05-delivery
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.implementation-traceability
+  default: false
+  phase: phase-05-delivery
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.release-gates
+  default: false
+  phase: phase-05-delivery
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.architecture-assistant
+  default: false
+  phase: phase-06-intelligence
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.cross-project-federation
+  default: false
+  phase: phase-06-intelligence
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.integration-designer
+  default: false
+  phase: phase-06-intelligence
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.impact-analysis
+  default: false
+  phase: phase-06-intelligence
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.ai-evaluations
+  default: false
+  phase: phase-06-intelligence
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.enterprise-operations
+  default: false
+  phase: phase-07-enterprise
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.collaboration-approvals
+  default: false
+  phase: phase-07-enterprise
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.unified-search-export
+  default: false
+  phase: phase-07-enterprise
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.connector-sdk
+  default: false
+  phase: phase-07-enterprise
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: module.architecture-health
+  default: false
+  phase: phase-07-enterprise
+  scope: project
+  enforcement: OFF until phase exit gates pass; enabled per pilot project
+  immutable: false
+- key: connector.github
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.git
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only; mounted repository under an allowed source root or HTTPS
+    clone (generic Git, incl. self-hosted)
+  immutable: false
+- key: connector.docker
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only Docker Engine API through a proxy with POST/exec disabled
+    (runtime discovery for Compose hosts)
+  immutable: false
+- key: connector.gitlab
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.jira
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.taiga
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.bitbucket
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.azure_devops
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.confluence
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.notion
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.backstage
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.kubernetes
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.docker_swarm
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.argocd
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.prometheus
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.opentelemetry
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.postgresql
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.mysql
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.mongodb
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.elasticsearch
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.opensearch
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.neo4j
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.qdrant
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.kafka
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.s3
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.http_openapi
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.file_upload
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: ai.answers
+  default: false
+  phase: phase-06-intelligence
+  scope: org/project
+  enforcement: explicit enable; eval thresholds must pass
+  immutable: false
+- key: ai.adr_drafting
+  default: false
+  phase: phase-06-intelligence
+  scope: org/project
+  enforcement: explicit enable; eval thresholds must pass
+  immutable: false
+- key: ai.diagram_drafting
+  default: false
+  phase: phase-06-intelligence
+  scope: org/project
+  enforcement: explicit enable; eval thresholds must pass
+  immutable: false
+- key: ai.integration_design
+  default: false
+  phase: phase-06-intelligence
+  scope: org/project
+  enforcement: explicit enable; eval thresholds must pass
+  immutable: false
+- key: ai.task_drafting
+  default: false
+  phase: phase-06-intelligence
+  scope: org/project
+  enforcement: explicit enable; eval thresholds must pass
+  immutable: false
+- key: ai.model_evaluation
+  default: false
+  phase: phase-06-intelligence
+  scope: org/project
+  enforcement: explicit enable; eval thresholds must pass
+  immutable: false
+- key: ai.external_data_allowed
+  default: false
+  phase: phase-06-intelligence
+  scope: org/project
+  enforcement: explicit enable; eval thresholds must pass
+  immutable: false
+- key: ai.prompt_content_tracing
+  default: false
+  phase: phase-06-intelligence
+  scope: org/project
+  enforcement: explicit enable; eval thresholds must pass
+  immutable: false
+- key: connectors.webhooks
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: explicit enable
+  immutable: false
+- key: connectors.full_reconciliation
+  default: false
+  phase: phase-02-connectors
+  scope: org/project
+  enforcement: explicit enable
+  immutable: false
+- key: connectors.writeback.jira
+  default: false
+  phase: phase-05-delivery
+  scope: org/project
+  enforcement: also requires Cerbos write_external + preview + explicit approval
+  immutable: false
+- key: connectors.writeback.taiga
+  default: false
+  phase: phase-05-delivery
+  scope: org/project
+  enforcement: also requires Cerbos write_external + preview + explicit approval
+  immutable: false
+- key: connectors.writeback.github
+  default: false
+  phase: phase-05-delivery
+  scope: org/project
+  enforcement: also requires Cerbos write_external + preview + explicit approval
+  immutable: false
+- key: connectors.writeback.gitlab
+  default: false
+  phase: phase-05-delivery
+  scope: org/project
+  enforcement: also requires Cerbos write_external + preview + explicit approval
+  immutable: false
+- key: drift.blocking_ci
+  default: false
+  phase: phase-05-delivery
+  scope: org/project
+  enforcement: explicit enable
+  immutable: false
+- key: drift.email_alerts
+  default: false
+  phase: phase-04-drift
+  scope: org/project
+  enforcement: explicit enable
+  immutable: false
+- key: drift.external_webhook_alerts
+  default: false
+  phase: phase-04-drift
+  scope: org/project
+  enforcement: explicit enable
+  immutable: false
+- key: projects.federation
+  default: false
+  phase: phase-06-intelligence
+  scope: org/project
+  enforcement: explicit enable
+  immutable: false
+- key: architecture.neo4j_projection
+  default: false
+  phase: phase-07-enterprise
+  scope: org/project
+  enforcement: explicit enable
+  immutable: false
+- key: search.qdrant_projection
+  default: false
+  phase: phase-07-enterprise
+  scope: org/project
+  enforcement: explicit enable
+  immutable: false
+- key: docs.pdf_export
+  default: false
+  phase: phase-03-architecture
+  scope: org/project
+  enforcement: explicit enable
+  immutable: false
+- key: docs.docx_export
+  default: false
+  phase: phase-03-architecture
+  scope: org/project
+  enforcement: explicit enable
+  immutable: false
+- key: docs.git_pr_publish
+  default: false
+  phase: phase-03-architecture
+  scope: org/project
+  enforcement: explicit enable
+  immutable: false
+- key: ui.portfolio
+  default: false
+  phase: phase-07-enterprise
+  scope: org/project
+  enforcement: explicit enable
+  immutable: false
+- key: ui.executive_dashboard
+  default: false
+  phase: phase-07-enterprise
+  scope: org/project
+  enforcement: explicit enable
+  immutable: false
+- key: security.emergency_kill_switch
+  default: false
+  phase: phase-01-foundation
+  scope: global/org/project
+  enforcement: turns optional functionality OFF; cannot disable security invariants
+  immutable: false
+- key: security.oidc_required
+  default: true
+  phase: phase-01-foundation
+  scope: immutable-security
+  enforcement: cannot be disabled, including via emergency flags
+  immutable: true
+- key: security.cerbos_required
+  default: true
+  phase: phase-01-foundation
+  scope: immutable-security
+  enforcement: cannot be disabled, including via emergency flags
+  immutable: true
+- key: security.audit_required
+  default: true
+  phase: phase-01-foundation
+  scope: immutable-security
+  enforcement: cannot be disabled, including via emergency flags
+  immutable: true
+- key: security.secret_encryption_required
+  default: true
+  phase: phase-01-foundation
+  scope: immutable-security
+  enforcement: cannot be disabled, including via emergency flags
+  immutable: true
+- key: security.project_isolation_required
+  default: true
+  phase: phase-01-foundation
+  scope: immutable-security
+  enforcement: cannot be disabled, including via emergency flags
+  immutable: true
+- key: connector.aws
+  default: false
+  phase: phase-07-enterprise
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.azure
+  default: false
+  phase: phase-07-enterprise
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.gcp
+  default: false
+  phase: phase-07-enterprise
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.terraform
+  default: false
+  phase: phase-02-connectors (wave 2)
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.opentofu
+  default: false
+  phase: phase-02-connectors (wave 2)
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.helm
+  default: false
+  phase: phase-02-connectors (wave 2)
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.kustomize
+  default: false
+  phase: phase-02-connectors (wave 2)
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.harbor
+  default: false
+  phase: phase-07-enterprise
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.vault_metadata
+  default: false
+  phase: phase-07-enterprise
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.grafana
+  default: false
+  phase: phase-07-enterprise
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.jenkins
+  default: false
+  phase: phase-02-connectors (wave 2)
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.sharepoint
+  default: false
+  phase: phase-07-enterprise
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.onedrive
+  default: false
+  phase: phase-07-enterprise
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.slack
+  default: false
+  phase: phase-07-enterprise
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false
+- key: connector.teams
+  default: false
+  phase: phase-07-enterprise
+  scope: org/project
+  enforcement: read-only scopes; org security admin approves scopes and egress
+  immutable: false

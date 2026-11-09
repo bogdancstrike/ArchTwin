@@ -37,3 +37,15 @@ Each scenario includes a happy path, isolation case and failure path. Every deli
 
 ## E2E-12 — Cloud/on-prem extension
 **Given** OpenAI-based AI profile in initial release; **when** an administrator later registers approved vLLM behind LiteLLM; **then** model profile routing changes without altering core app service code, after security/eval gates pass. This is a **future acceptance scenario**, not MVP delivery.
+
+## Automated coverage (implementation)
+| Journey | Automated in | Notes |
+|---|---|---|
+| E2E-01 isolation | `apps/api/tests/e2e/test_journey.py::test_cross_org_isolation`, `::test_cross_project_isolation_in_assistant_and_search`, `tests/integration/test_isolation.py` | org, project, search and assistant retrieval |
+| E2E-02 inventory code + runtime | `::test_connector_scan_to_snapshot_and_views`, `::test_runtime_discovery_reconciles_with_code` | Git + Docker; K8s/Kafka adapters open |
+| E2E-03 living diagram | `::test_connector_scan_to_snapshot_and_views`, Playwright `smoke.spec.ts` | overrides persisted per view |
+| E2E-04 three-way drift | `tests/unit/test_drift_rules.py`, `::test_baseline_separation_of_duties_and_drift` | stale runtime ⇒ UNKNOWN (unit) |
+| E2E-06 integration design | manual run with `gpt-6-sol` (see `docs/TASKS.md`) | federation open |
+| E2E-08 outage | `test_drift_rules.py::test_missing_with_stale_coverage_is_unknown_not_drift` | |
+| E2E-09 AI provider failure | `gateway.py` problem mapping; capability probe | |
+| E2E-11 historical reproducibility | snapshots are immutable; `?snapshot_id=` and diff endpoints | |

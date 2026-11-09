@@ -1,0 +1,6 @@
+{
+  "identities": [
+    {"name": "langfuse", "credentials": [{"accessKey": "SEAWEED_ACCESS_KEY", "secretKey": "SEAWEED_SECRET_KEY"}],
+     "actions": ["Admin", "Read", "Write", "List", "Tagging"]}
+  ]
+}

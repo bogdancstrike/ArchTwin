@@ -1,0 +1,28 @@
+# Labelled ground truth for tests/fixtures/sample_repo (precision/recall of the static analyzers, task 3.4)
+nodes:
+  - system:shop
+  - container:shop/db
+  - container:shop/cache
+  - container:shop/gateway
+  - container:shop/api
+  - container:shop/worker
+  - container:shop/web
+  - container:shop/migrate
+  - external:openai
+  - person:user
+  - endpoint:shop/api/GET /health
+  - endpoint:shop/api/GET /orders/{order_id}
+  - endpoint:shop/api/POST /orders
+  - component:shop/api/app.api
+  - component:shop/api/app.db
+  - component:shop/worker/app.db
+edges:
+  - container:shop/api|writes|container:shop/db
+  - container:shop/api|calls|container:shop/cache
+  - container:shop/api|calls|container:shop/gateway
+  - container:shop/worker|writes|container:shop/db
+  - container:shop/web|calls|container:shop/api
+  - container:shop/gateway|calls|external:openai
+  - container:shop/api|depends-on|container:shop/db
+  - person:user|calls|container:shop/web
+  - component:shop/api/app.api|depends-on|component:shop/api/app.db

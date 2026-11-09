@@ -1,0 +1,21 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: org
+  importDerivedRoles:
+  - project_roles
+  rules:
+  - actions:
+    - view
+    - create_project
+    effect: EFFECT_ALLOW
+    derivedRoles:
+    - org_member
+  - actions:
+    - manage
+    - manage_members
+    - view_audit
+    - export_audit
+    effect: EFFECT_ALLOW
+    derivedRoles:
+    - org_administrator

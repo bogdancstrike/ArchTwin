@@ -1,0 +1,5 @@
+openapi: 3.0.0
+info: {title: Shop API, version: "1.0"}
+paths:
+  /orders/{order_id}:
+    get: {summary: get}

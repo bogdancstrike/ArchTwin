@@ -1,0 +1,25 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: drift_finding
+  importDerivedRoles:
+  - project_roles
+  rules:
+  - actions:
+    - view
+    effect: EFFECT_ALLOW
+    derivedRoles:
+    - project_viewer
+  - actions:
+    - triage
+    - comment
+    - evaluate
+    effect: EFFECT_ALLOW
+    derivedRoles:
+    - project_editor
+  - actions:
+    - accept
+    - suppress
+    effect: EFFECT_ALLOW
+    derivedRoles:
+    - project_approver
