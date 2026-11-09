@@ -2,6 +2,7 @@ import { Activity, ArrowLeft, Box, CheckCircle2, Dices, ExternalLink, Eye, EyeOf
 import { useState, type ReactNode } from "react";
 import { Badge, Button, Card, Dialog, Empty, ErrorBox, Field, FreshnessBadge, Input, OriginBadges, Skeleton, StatTile, StatusDot, Table, Textarea, ago, cn } from "@/components/ui";
 import { api } from "@/lib/api";
+import { takeFlag } from "@/lib/deeplink";
 import { useAction, useApi } from "@/lib/hooks";
 import type { Connector, Scan } from "@/lib/types";
 import { FolderPicker } from "@/components/FolderPicker";
@@ -184,7 +185,7 @@ export function InventoryPage({ projectId }: { projectId: string }) {
   const scans = useApi<Scan[]>(["scans", projectId], `/projects/${projectId}/scans`, { refetchInterval: 4000 });
   const inv = useApi<any>(["inventory", projectId], `/projects/${projectId}/inventory`, { refetchInterval: 10_000 });
   const kinds = useApi<Kind[]>(["kinds", projectId], `/connector-kinds?project_id=${projectId}`);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => takeFlag("add"));
   const [hook, setHook] = useState<Connector | null>(null);
   const names = Object.fromEntries((cs.data ?? []).map((c) => [c.id, c.name]));
   const last = (id: string) => scans.data?.find((s) => s.connector_id === id);

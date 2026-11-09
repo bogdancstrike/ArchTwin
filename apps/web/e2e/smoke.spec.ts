@@ -115,3 +115,41 @@ test("datasources: tab order, folder picker, credential shortcuts, equal resizab
   await expect(page.getByLabel("credential webhook_secret")).toHaveValue(/^[0-9a-f]{64}$/);
   await expect(page.getByLabel("credential token")).toHaveAttribute("type", "password");
 });
+
+test("command palette: keyboard open, fuzzy search, navigate, project search; night theme is neutral, not blue", async ({ page }) => {
+  await login(page);
+  await page.keyboard.press("ControlOrMeta+k");
+  const palette = page.getByRole("dialog");
+  const input = page.getByTestId("cmdk-input");
+  await expect(input).toBeFocused();
+  await input.fill("usage cost");                                                // fuzzy: matches "Usage & costs"
+  await expect(page.getByRole("option", { name: /Usage & costs/ })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/usage$/);
+  await expect(palette).toHaveCount(0);
+
+  // switch to a project from the palette, then search inside it
+  await page.getByRole("button", { name: "Open command palette" }).click();
+  await input.fill("archtwin self");
+  await page.getByRole("option", { name: /ArchTwin \(self\)/ }).first().click();
+  await expect(page.getByRole("heading", { name: "ArchTwin (self)", level: 1 })).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+k");
+  await input.fill("flows");
+  await expect(page.getByRole("option", { name: /^Flows/ }).first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(palette).toHaveCount(0);
+
+  // recent destinations are offered on an empty query
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByRole("group", { name: "Recent" }).getByRole("option", { name: /Usage & costs/ })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // theme toggle (button and ⌘⇧L) — night mode surfaces are neutral graphite, not blue
+  await page.getByRole("button", { name: "Toggle theme" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  const rgb = await page.evaluate(() => getComputedStyle(document.body).backgroundColor.match(/\d+/g)!.map(Number));
+  expect(Math.abs(rgb[0] - rgb[2])).toBeLessThanOrEqual(6);
+  expect(rgb[0]).toBeLessThan(40);
+  await page.keyboard.press("ControlOrMeta+Shift+l");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+});

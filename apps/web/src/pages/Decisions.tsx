@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Badge, Button, Card, Dialog, ErrorBox, Field, Input, Spinner, Textarea, ago } from "@/components/ui";
 import { RichMarkdown } from "@/components/RichMarkdown";
 import { api, download } from "@/lib/api";
+import { takeFlag } from "@/lib/deeplink";
 import { useAction, useApi, useMe } from "@/lib/hooks";
 import type { Adr } from "@/lib/types";
 import { usd } from "@/components/charts";
@@ -114,7 +115,7 @@ function AdrView({ projectId, id }: { projectId: string; id: string }) {
 
 export function DecisionsPage({ projectId }: { projectId: string }) {
   const [sel, setSel] = useState<string | null>(() => new URLSearchParams(window.location.search).get("adr"));   // deep link from Home
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => takeFlag("new"));
   return <SplitLayout storageKey="decisions" title="Decision records" sideWidth="xl:w-[460px]" side={(toggle) => <div className="space-y-4">
     <PageAsk projectId={projectId} page="decisions" selected={sel} onPick={(m) => setSel(m.id)} />
     <Card eyebrow="MADR" title="Decision records" actions={<><Button size="sm" variant="primary" onClick={() => setOpen(true)}><Plus size={14} /> New</Button>{toggle}</>}>
