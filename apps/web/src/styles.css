@@ -1,5 +1,9 @@
 @import "tailwindcss";
 @import "@xyflow/react/dist/style.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "@fontsource/instrument-serif";
+@import "@fontsource/instrument-serif/400-italic.css";
 
 /* diagram-design default skin as the app theme (packages/diagram-design-system/tokens.json) */
 @theme {
@@ -15,10 +19,18 @@
   --color-link: #2e5aa8;
   --color-ok: #3c7a55;
   --color-warn: #b8822a;
+  --color-warn-ink: #855a12;          /* AA text on light tints */
+  --color-accent-ink: #b3491a;
   --color-bad: #b84a3a;
-  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-sans: "Geist Variable", "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --font-serif: "Instrument Serif", Georgia, "Times New Roman", serif;
+  --color-side: #262a39;            /* sidebar: deep ink */
+  --color-side-2: #31364a;
+  --color-side-ink: #e9eaee;
+  --color-side-soft: #a9b0c2;
+  --shadow-card: 0 1px 2px rgba(45, 49, 66, 0.05), 0 1px 1px rgba(45, 49, 66, 0.03);
+  --shadow-lift: 0 8px 24px -10px rgba(45, 49, 66, 0.22), 0 2px 6px rgba(45, 49, 66, 0.06);
 }
 :root[data-theme="dark"] {
   --color-paper: #2d3142;
@@ -30,12 +42,32 @@
   --color-rule: rgba(245, 245, 245, 0.12);
   --color-accent: #f08a59;
   --color-accent-tint: rgba(240, 138, 89, 0.12);
+  --color-warn-ink: #e0b25e;
+  --color-accent-ink: #f4a27a;
   --color-link: #6a95d8;
+  --color-side: #22263a;
+  --color-side-2: #2c3146;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-lift: 0 10px 28px -12px rgba(0, 0, 0, 0.55);
 }
 html, body, #root { height: 100%; }
 body { background: var(--color-paper); color: var(--color-ink); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
 .eyebrow { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--color-soft); }
-.serif { font-family: var(--font-serif); }
+.serif { font-family: var(--font-serif); font-weight: 400; letter-spacing: -0.005em; }
+.num { font-variant-numeric: tabular-nums; }
+.dot-grid { background-image: radial-gradient(var(--color-rule) 1px, transparent 1px); background-size: 18px 18px; }
+.hero-wash { background:
+  radial-gradient(1200px 300px at 0% 0%, var(--color-accent-tint), transparent 60%),
+  radial-gradient(800px 260px at 100% 0%, rgba(46, 90, 168, 0.06), transparent 60%); }
+@keyframes at-fade-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.fade-up { animation: at-fade-up 0.28s ease-out both; }
+@keyframes at-shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+.skeleton { border-radius: 6px; background: linear-gradient(90deg, var(--color-paper-2) 0px, var(--color-paper) 120px, var(--color-paper-2) 240px);
+  background-size: 800px 100%; animation: at-shimmer 1.4s linear infinite; }
+.avatar { background: color-mix(in srgb, var(--av) 13%, transparent); color: var(--av-ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--av) 28%, transparent); }
+.avatar-dark, :root[data-theme="dark"] .avatar { background: color-mix(in srgb, var(--av) 38%, #22263a); color: #ffffff; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--av) 60%, transparent); }
+::selection { background: var(--color-accent-tint); }
+* { scrollbar-width: thin; scrollbar-color: var(--color-rule) transparent; }
 :focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .prose-at h1 { font-family: var(--font-serif); font-size: 1.8rem; margin: 0.4em 0; }
 .prose-at h2 { font-weight: 600; font-size: 1.15rem; margin: 1.2em 0 0.4em; }

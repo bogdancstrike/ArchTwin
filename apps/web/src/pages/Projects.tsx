@@ -1,7 +1,8 @@
-import { Link, useNavigate } from "@tanstack/react-router";
-import { Plus } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import { Plus, Search } from "lucide-react";
 import { useState } from "react";
-import { Badge, Button, Card, Dialog, Empty, ErrorBox, Field, Input, Spinner, Textarea } from "@/components/ui";
+import { Button, Dialog, Empty, ErrorBox, Field, Input, PageHeader, Select, Skeleton, Textarea } from "@/components/ui";
+import { type HomeData, ProjectHealthCard } from "./Home";
 import { api } from "@/lib/api";
 import { useAction, useApi, useMe } from "@/lib/hooks";
 import type { Project } from "@/lib/types";
@@ -11,7 +12,7 @@ export function NewProjectDialog({ open, onClose }: { open: boolean; onClose: ()
   const [f, setF] = useState({ title: "", purpose: "", tags: "", environments: "production" });
   const create = useAction((b: typeof f) => api<Project>("/projects", { method: "POST", idempotent: true, json: {
     title: b.title, purpose: b.purpose, tags: b.tags.split(",").map((t) => t.trim()).filter(Boolean),
-    environments: b.environments.split(",").map((t) => t.trim()).filter(Boolean) } }), [["projects"]], "Project created");
+    environments: b.environments.split(",").map((t) => t.trim()).filter(Boolean) } }), [["projects"], ["home"]], "Project created");
   return <Dialog open={open} onClose={onClose} title="New project">
     <form className="space-y-3" onSubmit={async (e) => { e.preventDefault(); const p = await create.mutateAsync(f); onClose(); nav({ to: "/projects/$projectId", params: { projectId: p.id } }); }}>
       <Field label="Title"><Input required minLength={2} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="e.g. Payments platform" autoFocus /></Field>
@@ -27,20 +28,29 @@ export function NewProjectDialog({ open, onClose }: { open: boolean; onClose: ()
 
 export function ProjectsPage() {
   const me = useMe();
-  const projects = useApi<Project[]>(["projects", me.data?.org_id], me.data ? "/projects" : null);
+  const h = useApi<HomeData>(["home", me.data?.org_id], me.data ? "/home" : null);
   const [open, setOpen] = useState(false);
-  return <div className="mx-auto max-w-5xl space-y-6 p-8">
-    <div className="flex items-end justify-between">
-      <div><div className="eyebrow">{me.data?.orgs.find((o) => o.id === me.data?.org_id)?.name}</div><h1 className="serif text-4xl">Projects</h1>
-        <p className="mt-1 text-muted">Each project is a living twin of one architecture: what was designed, what the code says and what is running.</p></div>
-      <Button variant="primary" onClick={() => setOpen(true)}><Plus size={16} /> New project</Button>
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState<"activity" | "name" | "drift">("activity");
+  const list = (h.data?.projects ?? []).filter((p) => !q || `${p.title} ${p.purpose} ${p.tags.join(" ")}`.toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => sort === "name" ? a.title.localeCompare(b.title) : sort === "drift" ? (b.drift?.open ?? 0) - (a.drift?.open ?? 0) : b.last_activity.localeCompare(a.last_activity));
+  return <div className="hero-wash min-h-full"><div className="mx-auto max-w-7xl space-y-6 p-8">
+    <PageHeader eyebrow={me.data?.orgs.find((o) => o.id === me.data?.org_id)?.name} title="Projects"
+      actions={<Button variant="primary" onClick={() => setOpen(true)}><Plus size={16} /> New project</Button>}>
+      Each project is a living twin of one architecture: what was designed, what the code says and what is running.</PageHeader>
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="relative w-full max-w-sm"><Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-soft" />
+        <Input aria-label="Search projects" placeholder="Search projects, purposes, tags…" value={q} onChange={(e) => setQ(e.target.value)} className="pl-8" /></div>
+      <Select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}>
+        <option value="activity">Recent activity</option><option value="name">Name</option><option value="drift">Most drift</option></Select>
+      {h.data && <span className="ml-auto text-sm text-soft">{list.length} of {h.data.projects.length}</span>}
     </div>
-    {projects.isLoading && <Spinner />}<ErrorBox error={projects.error} />
-    {projects.data?.length === 0 && <Empty title="No projects yet">Create one, connect a repository and the platform builds the architecture from evidence.</Empty>}
-    <div className="grid gap-4 sm:grid-cols-2">{projects.data?.map((p) => <Link key={p.id} to="/projects/$projectId" params={{ projectId: p.id }}>
-      <Card className="h-full transition hover:border-muted"><div className="flex items-start justify-between"><h2 className="text-lg font-semibold">{p.title}</h2>{p.my_role && <Badge>{p.my_role.replace("_", " ")}</Badge>}</div>
-        <p className="mt-1 line-clamp-2 text-sm text-muted">{p.purpose || "No purpose stated."}</p>
-        <div className="mt-3 flex flex-wrap gap-1">{p.tags.map((t) => <Badge key={t} tone="link">{t}</Badge>)}</div></Card></Link>)}</div>
+    <ErrorBox error={h.error} />
+    {h.data?.projects.length === 0 && <Empty title="No projects yet">Create one, connect a repository and the platform builds the architecture from evidence.</Empty>}
+    {h.data && h.data.projects.length > 0 && list.length === 0 && <Empty title="No match">Nothing matches “{q}”.</Empty>}
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {!h.data ? [0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-48 !rounded-xl" />) : list.map((p) => <ProjectHealthCard key={p.id} p={p} />)}
+    </div>
     <NewProjectDialog open={open} onClose={() => setOpen(false)} />
-  </div>;
+  </div></div>;
 }

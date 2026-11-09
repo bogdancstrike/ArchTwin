@@ -198,3 +198,13 @@ async def persist(ctx: RequestContext, c: dict[str, Any], scan_id: uuid.UUID, re
         await outbox.emit(conn, ctx.org_id, ctx.project_id, "inventory", ctx.project_id, "inventory.changed",
                           {"scan_id": str(scan_id), "connector_id": str(c["id"])})
     return {"status": status, "observations": len(batch), "revision": result.revision, "documents_new": new_docs}
+
+
+async def recent_scans(ctx: RequestContext, limit: int = 10) -> list[dict[str, Any]]:
+    """Latest scans with their connector name (home activity feed)."""
+    async with uow(ctx) as conn:
+        return rows(await conn.execute(
+            select(scan_runs.c.id, scan_runs.c.status, scan_runs.c.revision, scan_runs.c.ref, scan_runs.c.created_at,
+                   scan_runs.c.finished_at, scan_runs.c.stats, connectors.c.name.label("connector"), connectors.c.kind)
+            .join(connectors, connectors.c.id == scan_runs.c.connector_id)
+            .where(scan_runs.c.project_id == ctx.project_id).order_by(scan_runs.c.created_at.desc()).limit(limit)))

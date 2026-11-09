@@ -105,8 +105,15 @@ against the approved baseline produced 12 findings (unplanned `backup`/`demo-see
 | ADR drafting (proposed, AI-flagged) | ✅ | |
 | federation, impact analysis, evals | ⏳ | |
 
+## Cross-cutting — web experience
+| Item | Status | Notes |
+|---|---|---|
+| Personal home `/home` (`GET /api/v1/home`) | ✅ | totals, needs-attention (pending baselines, proposed ADRs, high drift, stale sources), activity feed, project health cards; only Cerbos-visible projects, each read under its own RLS context; e2e `test_home.py` (outsider sees nothing) |
+| Visual refresh | ✅ | self-hosted Geist / Instrument Serif, deep-ink sidebar with project avatars, project header + icon tabs, stat tiles, skeleton loaders, richer project overview (snapshot trend, evidence by origin, top drift, recent scans, latest ADRs), searchable/sortable projects; axe (WCAG 2 AA) clean on Home and Projects |
+
 ## Phases 05, 07
 Specified, not started.
 
 ## Changelog
+- 2026-11-09 — `/home` dashboard + UI refresh (fonts, shell, overview, projects); axe AA clean.
 - 2026-11-08 — walking skeleton + M1/M2 slice, web UI, full test pyramid, CI; live verification against Horizon (see above).

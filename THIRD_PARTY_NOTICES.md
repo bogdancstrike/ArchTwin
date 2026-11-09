@@ -12,3 +12,8 @@ The documentation diagrams in `docs/diagrams/` are drawn with the diagram-design
 - Source: https://github.com/cathrynlavery/diagram-design
 - Licence: MIT — Copyright (c) 2025 Cathryn Lavery
 - Use: design references (style-guide tokens, visual-type references, connector rules, anti-patterns) vendored into `packages/diagram-design-system/` (tokens + rules) and implemented as ArchTwin's export renderer/linter (`apps/api/archtwin/diagrams/`) and canvas styling (`apps/web/src/diagram/`). Full licence text: `packages/diagram-design-system/LICENSE`.
+
+## Bundled fonts
+Self-hosted via Fontsource npm packages (no third-party font CDN; CSP stays `font-src 'self'`):
+- **Geist** and **Geist Mono** (Vercel) — SIL Open Font License 1.1 — `@fontsource-variable/geist`, `@fontsource-variable/geist-mono`
+- **Instrument Serif** (Instrument) — SIL Open Font License 1.1 — `@fontsource/instrument-serif`

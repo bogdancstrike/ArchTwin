@@ -30,6 +30,7 @@ from archtwin.documents import engine as docengine
 from archtwin.documents import service as docs
 from archtwin.drift import service as drift
 from archtwin.flags import service as flags
+from archtwin.home import service as home_svc
 from archtwin.iam import service as iam
 from archtwin.intelligence import assistant, gateway
 from archtwin.inventory import service as inventory
@@ -89,6 +90,13 @@ async def _org_tokens(org_id: uuid.UUID) -> dict[str, str]:
     return s.get("diagram_tokens") or {}
 
 
+# ------------------------------------------------------------------ home
+@r.get("/home", tags=["identity"])
+async def personal_home(c: RequestContext = Depends(get_ctx)):
+    """Cross-project overview: only projects the caller may view, each read under its own RLS context."""
+    return await home_svc.home(c)
+
+
 # ------------------------------------------------------------------ projects
 @r.get("/projects", tags=["projects"])
 async def list_projects(c: RequestContext = Depends(get_ctx)):
@@ -136,15 +144,32 @@ async def project_home(c: RequestContext = Depends(project_ctx)):
         return all([await flags.enabled(x, c.org_id, c.project_id) for x in k])
     cards = {}
     inv = await inventory.summary(c)
-    cards["freshness"] = {"configured": bool(inv["connectors"]), "connectors": inv["connectors"]}
+    by_origin: dict[str, int] = {}
+    for oc in inv["observation_counts"]:
+        by_origin[oc["origin"]] = by_origin.get(oc["origin"], 0) + oc["n"]
+    cards["freshness"] = {"configured": bool(inv["connectors"]), "connectors": inv["connectors"], "observations_by_origin": by_origin,
+                          "recent_scans": await connectors.recent_scans(c, 6)}
     if await on("module.architecture-graph"):
-        snaps = await arch.list_snapshots(c, 1)
-        cards["architecture"] = {"configured": bool(snaps), "snapshot": snaps[0] if snaps else None}
+        snaps = await arch.list_snapshots(c, 12)
+        bl = [b for b in await arch.list_baselines(c)]
+        approved = next((b for b in bl if b["status"] == "approved"), None)
+        cards["architecture"] = {"configured": bool(snaps), "snapshot": {k: v for k, v in snaps[0].items() if k != "inputs"} if snaps else None,
+                                 "history": [{"version": s["version"], "nodes": s["node_count"], "edges": s["edge_count"], "at": s["created_at"]}
+                                             for s in reversed(snaps)],
+                                 "baseline": {"version": approved["version"], "decided_at": approved["decided_at"]} if approved else None,
+                                 "pending_baselines": sum(b["status"] == "proposed" for b in bl)}
     else:
         cards["architecture"] = {"configured": False, "reason": "module.architecture-graph is off"}
     cards["drift"] = ({"configured": True, **await drift.stats(c)} if await on("module.drift-engine")
                       else {"configured": False, "reason": "module.drift-engine is off"})
-    cards["decisions"] = ({"configured": True, "adrs": len(await decisions.list_(c))} if await on("module.adr-workflow")
+    if cards["drift"].get("configured"):
+        cards["drift"]["top"] = [{k: f[k] for k in ("id", "title", "severity", "subject_key", "last_seen", "rule_id")}
+                                 for f in (await drift.list_findings(c, status="open", verdict="drift"))[:5]]
+    adr_list = await decisions.list_(c) if await on("module.adr-workflow") else []
+    cards["decisions"] = ({"configured": True, "adrs": len(adr_list), "proposed": sum(a["status"] == "proposed" for a in adr_list),
+                           "accepted": sum(a["status"] == "accepted" for a in adr_list),
+                           "recent": [{k: a[k] for k in ("id", "number", "title", "status", "ai_drafted", "created_at")} for a in adr_list[:4]]}
+                          if await on("module.adr-workflow")
                           else {"configured": False, "reason": "module.adr-workflow is off"})
     cards["assistant"] = {"configured": await on("module.architecture-assistant", "ai.answers")}
     return cards
