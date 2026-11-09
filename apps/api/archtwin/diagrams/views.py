@@ -13,13 +13,13 @@ MAX_PRIMARY = 9
 MAX_FOCAL = 2
 RUNTIME_RELS = ("calls", "writes", "reads", "publishes", "consumes")
 L2_RELS = (*RUNTIME_RELS, "depends-on")
-GROUPS = [  # (group id, title, predicate on container node)
+GROUPS = [  # (group id, title, predicate on container node) — first match wins
+    ("jobs", "Jobs & tooling", lambda n: n["attributes"].get("one_shot") or n["attributes"].get("optional")),
     ("data", "Data stores", lambda n: n["attributes"].get("subtype") in ("database", "storage")),
     ("messaging", "Messaging & cache", lambda n: n["attributes"].get("subtype") in ("cache", "queue")),
     ("identity", "Identity & policy", lambda n: n["attributes"].get("subtype") in ("identity", "policy")),
     ("platform", "AI & workflow platform", lambda n: n["attributes"].get("subtype") in ("gateway", "workflow")),
     ("observability", "Observability", lambda n: n["attributes"].get("subtype") == "observability"),
-    ("jobs", "Jobs & tooling", lambda n: n["attributes"].get("one_shot") or n["attributes"].get("optional")),
     ("app", "Application", lambda n: True),
 ]
 
@@ -43,14 +43,19 @@ def _node_out(n: dict[str, Any], *, vkind: str, primary: bool = True, zoom: str 
             "technology": a.get("technology") or a.get("engine") or a.get("language") or "", "subtype": a.get("subtype", ""),
             "description": a.get("description", ""), "owner": a.get("owner", ""), "origins": n.get("origins", []),
             "confidence": n.get("confidence", 1), "inferred_only": n.get("inferred_only", False), "primary": primary,
-            "zoom": zoom, "evidence_count": len(n.get("evidence", [])), "state": a.get("state", ""), "focal": False, **(extra or {})}
+            "zoom": zoom, "evidence_count": len(n.get("evidence", [])),
+            "state": "completed" if a.get("one_shot_exited_ok") else a.get("state", ""), "focal": False, **(extra or {})}
 
 
 def _edge_out(eid: str, src: str, dst: str, edges: list[dict[str, Any]]) -> dict[str, Any]:
     kinds = sorted({e["kind"] for e in edges})
     protos = sorted({str(e["attributes"].get("protocol")) for e in edges if e["attributes"].get("protocol")})
-    kind = next((k for k in ("writes", "calls", "reads", "publishes", "consumes", "depends-on") if k in kinds), kinds[0])
-    label = (kind if kind != "depends-on" else "depends on") + (f" · {protos[0]}" if protos and protos[0] not in ("library", "in-process") else "")
+    kind = next((k for k in ("writes", "publishes", "consumes", "calls", "reads", "depends-on") if k in kinds), kinds[0])
+    topics = sorted({str(e["attributes"]["via_topic"]) for e in edges if e["kind"] == kind and e["attributes"].get("via_topic")})
+    if topics:      # messaging rolled up from topics hosted by the broker: name the topic, not the transport
+        label = f"{kind} · {topics[0]}" + (f" +{len(topics) - 1}" if len(topics) > 1 else "")
+    else:
+        label = (kind if kind != "depends-on" else "depends on") + (f" · {protos[0]}" if protos and protos[0] not in ("library", "in-process") else "")
     return {"id": eid, "source": src, "target": dst, "kind": kind, "kinds": kinds, "label": label, "protocols": protos,
             "count": len(edges), "origins": sorted({o for e in edges for o in e.get("origins", [])}),
             "confidence": max(float(e.get("confidence", 1)) for e in edges),
@@ -109,6 +114,33 @@ def context_view(g: dict[str, Any], drift_keys: set[str]) -> dict[str, Any]:
             "budget": {"primary": len(systems), "max": MAX_PRIMARY, "split": False}}
 
 
+HOSTED_KINDS = ("kafka-topic", "consumer-group", "event-schema", "database", "table")
+
+
+def _hosts(g: dict[str, Any]) -> dict[str, str]:
+    """Element -> container that hosts it (topic -> broker, table -> database server), from `contains` evidence."""
+    h = {}
+    for e in g["edges"].values():
+        if e["kind"] == "contains" and g["nodes"].get(e["source"], {}).get("kind") == "container" \
+                and g["nodes"].get(e["target"], {}).get("kind") in HOSTED_KINDS:
+            h[e["target"]] = e["source"]
+    for _ in range(2):                      # table -> database -> container
+        for k, v in list(h.items()):
+            if v in h:
+                h[k] = h[v]
+    return h
+
+
+def _rollup(e: dict[str, Any], hosts: dict[str, str]) -> dict[str, Any]:
+    """container -publishes-> topic becomes container -publishes-> broker (topic kept as `via_topic` for the label)."""
+    s, t = hosts.get(e["source"], e["source"]), hosts.get(e["target"], e["target"])
+    if (s, t) == (e["source"], e["target"]):
+        return e
+    via = e["target"] if t != e["target"] else e["source"]
+    topic = via.rsplit("/", 1)[-1] if via.startswith("kafka-topic:") else ""
+    return {**e, "source": s, "target": t, "attributes": {**e.get("attributes", {}), **({"via_topic": topic} if topic else {})}}
+
+
 def _group_of(n: dict[str, Any]) -> tuple[str, str]:
     for gid, title, pred in GROUPS:
         if pred(n):
@@ -134,9 +166,11 @@ def system_view(g: dict[str, Any], system: str, drift_keys: set[str], group: str
     neighbours: set[str] = set()
     raw = []
     rels = L2_RELS if deps else RUNTIME_RELS
-    for e in g["edges"].values():
-        if e["kind"] not in rels or float(e.get("confidence", 1)) < min_conf:
+    hosts = _hosts(g)
+    for e0 in g["edges"].values():
+        if e0["kind"] not in rels or float(e0.get("confidence", 1)) < min_conf:
             continue
+        e = _rollup(e0, hosts)
         s_in, t_in = e["source"] in cset, e["target"] in cset
         if not (s_in or t_in):
             continue

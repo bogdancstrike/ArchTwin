@@ -5,10 +5,11 @@ import os
 import psycopg
 from confluent_kafka import Producer
 from fastapi import FastAPI
-from opentelemetry.instrumentation.confluent_kafka import ConfluentKafkaInstrumentor
+from opentelemetry import propagate, trace
 
 DATABASE_URL = os.environ["DATABASE_URL"]
-producer = ConfluentKafkaInstrumentor().instrument_producer(Producer({"bootstrap.servers": os.environ["KAFKA_BOOTSTRAP"], "client.id": "shop-orders"}))
+producer = Producer({"bootstrap.servers": os.environ["KAFKA_BOOTSTRAP"], "client.id": "shop-orders"})
+tracer = trace.get_tracer("shop-orders")
 app = FastAPI(title="shop-orders")
 
 
@@ -22,7 +23,13 @@ def create_order(body: dict):
     with psycopg.connect(DATABASE_URL) as conn:
         oid = conn.execute("INSERT INTO orders (customer_id, sku, qty, total_cents) VALUES (%s, %s, %s, %s) RETURNING id",
                            (body.get("customer_id", 1), body["sku"], body.get("qty", 1), 1999 * body.get("qty", 1))).fetchone()[0]
-    producer.produce("orders.created", key=str(oid), value=json.dumps({"order_id": oid, "sku": body["sku"]}))
+    # explicit PRODUCER span; trace context travels in Kafka headers so the consumer span becomes its child
+    with tracer.start_as_current_span("orders.created publish", kind=trace.SpanKind.PRODUCER,
+                                      attributes={"messaging.system": "kafka", "messaging.destination.name": "orders.created"}):
+        carrier: dict[str, str] = {}
+        propagate.inject(carrier)
+        producer.produce("orders.created", key=str(oid), value=json.dumps({"order_id": oid, "sku": body["sku"]}),
+                         headers=list(carrier.items()))
     producer.flush(5)
     return {"id": oid}
 

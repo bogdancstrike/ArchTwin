@@ -1,6 +1,8 @@
 """Personal home (/home): cross-project overview never leaks projects the caller cannot view."""
 import pytest
 
+pytestmark = pytest.mark.e2e
+
 
 @pytest.fixture(scope="module")
 def project(users, run_id):

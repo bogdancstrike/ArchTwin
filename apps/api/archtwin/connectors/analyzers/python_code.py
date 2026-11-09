@@ -1,8 +1,8 @@
 """tree-sitter based Python analysis: module index, import graph, FastAPI/Flask-style routes (parser_version below)."""
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
-from functools import lru_cache
 from pathlib import Path
 
 from tree_sitter_language_pack import get_parser
@@ -14,9 +14,15 @@ KAFKA_CLIENTS = {"Producer", "Consumer", "KafkaProducer", "KafkaConsumer", "AIOK
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "websocket", "api_route", "route"}
 
 
-@lru_cache
+_local = threading.local()
+
+
 def _parser():
-    return get_parser("python")
+    """One parser per thread: tree-sitter parsers are not thread-safe and scans run concurrently in worker threads."""
+    p = getattr(_local, "parser", None)
+    if p is None:
+        p = _local.parser = get_parser("python")
+    return p
 
 
 @dataclass
@@ -214,13 +220,15 @@ def parse_module(name: str, path: Path, is_pkg: bool) -> PyModule:
     return mod
 
 
-def analyze(context_dir: Path, files: list[Path]) -> dict[str, PyModule]:
+def analyze(context_dir: Path, files: list[Path], errors: list[str] | None = None) -> dict[str, PyModule]:
     idx = module_index(context_dir, files)
     out = {}
     for name, path in idx.items():
         try:
             out[name] = parse_module(name, path, path.name == "__init__.py")
-        except Exception:  # noqa: BLE001 — a broken file never aborts the scan (partial evidence is still evidence)
+        except Exception as e:  # noqa: BLE001 — a broken file never aborts the scan, but it is reported (never silent)
+            if errors is not None:
+                errors.append(f"{path.name}: {type(e).__name__}: {str(e)[:120]}")
             continue
     # keep only imports that resolve to modules in this codebase (prefix match)
     names = set(out)

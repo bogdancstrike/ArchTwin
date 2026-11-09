@@ -25,7 +25,7 @@ export function C4Node({ data, selected }: NodeProps) {
     <Handle type="source" position={Position.Right} className="!h-1 !w-1 !border-0 !bg-transparent" />
     <div className="flex items-center justify-between font-mono text-[8px] uppercase tracking-[0.16em] text-soft">
       <span className="flex items-center gap-1">{Icon && <Icon size={10} />}{eyebrow}</span>
-      <span className="flex items-center gap-1">{n.state && n.state !== "running" && <span className="text-bad">{n.state}</span>}
+      <span className="flex items-center gap-1">{n.state && n.state !== "running" && <span className={n.state === "completed" ? "text-ok" : "text-bad"}>{n.state === "completed" ? "✓ completed" : n.state}</span>}
         {n.zoom && <ZoomIn size={11} className="text-link" aria-label="zoomable" />}</span>
     </div>
     <div className="mt-0.5 truncate text-[12.5px] font-semibold text-ink">{n.name}</div>

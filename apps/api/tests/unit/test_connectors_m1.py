@@ -86,18 +86,27 @@ k = KafkaConsumer("audit.log", group_id="auditor")
 
 
 def test_fixture_repo_ground_truth():
-    """The shop fixture's static topology, including Kafka, is recovered from code + compose (precision/recall on fixture)."""
+    """Static recall/precision on the labelled shop fixture (phase-02 tasks 0.2 / 3.4): compose + code -> expected topology."""
+    import yaml
     root = Path(__file__).resolve().parents[4] / "fixtures" / "shop"
-    r = analyze_repository(root, "wt", "archtwin-fixtures")
-    edges = {o.subject_key for o in r.observations if o.subject_kind == "edge"}
-    c = "container:archtwin-fixtures/"
-    expected = {f"{c}shop-web|calls|{c}shop-orders", f"{c}shop-web|calls|{c}shop-inventory", f"{c}shop-orders|writes|{c}orders-db",
-                f"{c}shop-inventory|writes|{c}inventory-db", f"{c}shop-loadgen|calls|{c}shop-web",
-                f"{c}shop-orders|publishes|kafka-topic:archtwin-fixtures/kafka/orders.created",
-                f"{c}shop-billing|consumes|kafka-topic:archtwin-fixtures/kafka/orders.created"}
-    assert expected <= edges, expected - edges
-    eps = {o.name for o in r.observations if o.kind == "api-endpoint"}
-    assert {"POST /api/checkout", "POST /orders", "GET /stock/{sku}"} <= eps
+    gt = yaml.safe_load((root / "ground-truth.yaml").read_text())
+    sysn = gt["system"]
+    r = analyze_repository(root, "wt", sysn)
+
+    def key(x):
+        return x if ":" in x else f"container:{sysn}/{x}"
+    expected = {f"{key(s)}|{k}|{key(t)}" for s, k, t in gt["static_edges"]}
+    got = {o.subject_key for o in r.observations if o.subject_kind == "edge" and o.kind in ("calls", "writes", "publishes", "consumes")
+           and o.attributes.get("target", "").split("/")[-1] not in ("otel-collector",)}
+    missing = expected - got
+    assert not missing, missing                                     # recall 100% on labelled edges
+    business = {e for e in got if not e.endswith(("/kafka", "/schema-registry")) and "prometheus" not in e and "schema-init" not in e}
+    assert business <= expected, business - expected                # precision: no invented application edges
+    eps = {(o.attributes["source"].split("/")[-1], o.attributes["target"].split("/", 2)[-1]) for o in r.observations if o.kind == "exposes"}
+    for svc, routes in gt["endpoints"].items():
+        assert {(svc, rt) for rt in routes} <= eps, (svc, routes)
+    nodes = {o.subject_key for o in r.observations if o.subject_kind == "node" and o.kind == "container"}
+    assert {key(c) for c in gt["containers"]} == nodes
 
 
 # ------------------------------------------------------------------ OTel service graph (task 4.3)
@@ -189,3 +198,43 @@ def test_github_has_no_write_calls():
     src = inspect.getsource(gh)
     for verb in (".post(", ".put(", ".patch(", ".delete(", "method=\"POST\""):
         assert verb not in src
+
+
+# ------------------------------------------------------------------ L2 roll-up of messaging through the broker
+def test_l2_rolls_topic_edges_up_to_broker_and_groups_one_shots():
+    from archtwin.diagrams.views import system_view
+
+    def n(key, kind, **a):
+        return key, {"key": key, "kind": kind, "name": key.rsplit("/", 1)[-1], "attributes": a, "origins": ["static"], "evidence": []}
+
+    def e(s, k, t, **a):
+        return f"{s}|{k}|{t}", {"key": f"{s}|{k}|{t}", "kind": k, "source": s, "target": t, "attributes": a, "origins": ["static"], "confidence": 1}
+    c = "container:shop/"
+    nodes = dict([n("system:shop", "software-system"), n(f"{c}orders", "container", subtype="service"),
+                  n(f"{c}billing", "container", subtype="service"), n(f"{c}kafka", "container", subtype="queue"),
+                  n(f"{c}kafka-init", "container", subtype="queue", one_shot=True, one_shot_exited_ok=True, state="exited"),
+                  n("kafka-topic:shop/kafka/orders.created", "kafka-topic")])
+    edges = dict([*(e("system:shop", "contains", k) for k in nodes if k.startswith(c)),
+                  e(f"{c}kafka", "contains", "kafka-topic:shop/kafka/orders.created"),
+                  e(f"{c}orders", "calls", f"{c}kafka", protocol="tcp"),
+                  e(f"{c}orders", "publishes", "kafka-topic:shop/kafka/orders.created"),
+                  e(f"{c}billing", "consumes", "kafka-topic:shop/kafka/orders.created")])
+    v = system_view({"nodes": nodes, "edges": edges}, "shop", set())
+    by = {(x["source"], x["target"]): x for x in v["edges"]}
+    assert by[(f"{c}orders", f"{c}kafka")]["label"] == "publishes · orders.created"
+    assert by[(f"{c}billing", f"{c}kafka")]["label"] == "consumes · orders.created"
+    init = next(x for x in v["nodes"] if x["id"] == f"{c}kafka-init")
+    assert init["state"] == "completed"
+
+
+def test_same_service_name_in_two_compose_projects(tmp_path: Path):
+    """A repo may hold several compose projects; `api` in one must not overwrite `api` in the other."""
+    for proj in ("alpha", "beta"):
+        d = tmp_path / proj
+        (d / "svc" / "pkg").mkdir(parents=True)
+        (d / "svc" / "pkg" / "__init__.py").write_text("")
+        (d / "svc" / "pkg" / "app.py").write_text("from fastapi import FastAPI\napp = FastAPI()\n@app.get('/x')\ndef x(): ...\n")
+        (d / "compose.yaml").write_text(f"name: {proj}\nservices:\n  api:\n    build: ./svc\n    command: [uvicorn, 'pkg.app:app']\n")
+    r = analyze_repository(tmp_path, "wt", "repo")
+    eps = {o.subject_key for o in r.observations if o.kind == "api-endpoint"}
+    assert {"endpoint:alpha/api/GET /x", "endpoint:beta/api/GET /x"} <= eps

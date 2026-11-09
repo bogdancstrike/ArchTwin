@@ -133,7 +133,7 @@ class RepoAnalyzer:
         self.root, self.repo = root.resolve(), repo_name
         self.r = ScanResult(revision=revision)
         self.files = list(walk(self.root))
-        self.services: dict[str, Service] = {}         # service name -> Service (latest compose wins per system)
+        self.services: dict[str, Service] = {}         # "system/name" -> Service (a repo may hold several compose projects)
         self.by_system: dict[str, dict[str, Service]] = defaultdict(dict)
 
     # ------------------------------------------------------------------ orchestrate
@@ -220,7 +220,7 @@ class RepoAnalyzer:
             self.r.node("static", key, "container", name, V_COMPOSE, attrs=attrs, ref=rel,
                         span={"path": rel, "line_start": ls, "line_end": le})
             self.r.edge("static", sys_key, "contains", key, V_COMPOSE, ref=rel, span={"path": rel, "line_start": ls})
-            self.services[name] = svc
+            self.services[f"{svc.system}/{name}"] = svc
             self.by_system[system][name] = svc
         # wiring (second pass: every service name of this system is known)
         self._conf_override = None
@@ -303,7 +303,11 @@ class RepoAnalyzer:
                         self._scan_config(s, f, confidence=0.4 if len(svcs) > 1 else None)
 
     def python(self, ctx: Path, files: list[Path], svcs: list[Service]) -> None:
-        mods = python_code.analyze(ctx, files)
+        errors: list[str] = []
+        mods = python_code.analyze(ctx, files, errors)
+        if errors:
+            self.r.complete = False          # unparsed modules: their evidence is UNKNOWN, so this scan must not tombstone
+            self.r.warnings += [f"python parse failed (module skipped): {e}" for e in errors[:20]]
         if not mods:
             return
         for s in svcs:
@@ -525,6 +529,19 @@ class RepoAnalyzer:
         return best
 
     # ------------------------------------------------------------------ ownership
+    def _service_named(self, name: str, near: Path) -> Service | None:
+        """Service by bare name; with several compose projects, the one whose compose file is closest to `near` wins."""
+        cands = [s for s in self.services.values() if s.name == name]
+        if len(cands) <= 1:
+            return cands[0] if cands else None
+        def depth(s: Service) -> int:
+            d = (self.root / s.compose_file).parent
+            try:
+                return -len(near.resolve().relative_to(d.resolve()).parts)
+            except ValueError:
+                return -10_000
+        return max(cands, key=depth)
+
     def catalog_and_owners(self) -> None:
         for f in self.files:
             if f.name in ("catalog-info.yaml", "catalog-info.yml"):
@@ -538,7 +555,7 @@ class RepoAnalyzer:
                         continue
                     md, spec = d.get("metadata") or {}, d.get("spec") or {}
                     name = str(md.get("name", ""))
-                    svc = self.services.get(name)
+                    svc = self._service_named(name, f)
                     key = svc.key if svc else f"component:catalog/{name}"
                     self.r.node("static", key, "container" if svc else "component", name, V_CATALOG,
                                 attrs={"owner": spec.get("owner", ""), "lifecycle": spec.get("lifecycle", ""),

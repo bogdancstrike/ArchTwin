@@ -20,3 +20,4 @@ migrate-check:     ; $(COMPOSE) run --rm migrate sh -c "alembic upgrade head && 
 
 fixtures-up:        ; docker compose -f fixtures/shop/compose.yaml up -d --build
 fixtures-down:      ; docker compose -f fixtures/shop/compose.yaml down -v
+fixtures-demo:      ; python3 scripts/demo-fixture.py

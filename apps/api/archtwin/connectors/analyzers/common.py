@@ -48,6 +48,7 @@ TECH = [  # (regex on image/name, node subtype, technology label)
     (r"neo4j|arangodb", "database", "Graph database"),
     (r"qdrant|weaviate|milvus", "database", "Vector database"),
     (r"redis|valkey|memcached|dragonfly", "cache", "Cache"),
+    (r"schema-registry|apicurio|karapace", "queue", "Schema registry"),
     (r"kafka|redpanda|rabbitmq|nats|pulsar", "queue", "Message broker"),
     (r"seaweedfs|minio|s3", "storage", "Object storage"),
     (r"keycloak|dex|authentik", "identity", "Identity provider"),

@@ -7,7 +7,7 @@ connectors:
   servicegraph:
     latency_histogram_buckets: [5ms, 20ms, 100ms, 500ms, 2s]
     dimensions: [messaging.system]
-    store: { ttl: 5s, max_items: 2000 }
+    store: { ttl: 30s, max_items: 5000 }
     virtual_node_peer_attributes: [db.name, db.system, messaging.destination.name, peer.service, server.address]
     metrics_flush_interval: 5s
 exporters:
