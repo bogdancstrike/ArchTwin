@@ -127,6 +127,10 @@ def _fake(messages: list[dict[str, str]], json_mode: bool, operation: str = "") 
         return f"General answer (fake LLM mode, no project evidence): {user[:120]}"
     if operation == "doc_drafting":
         ids = re.findall(r"^\[(E\d+)\]", user, re.MULTILINE)[:4]
+        sec = re.search(r"^Write section \d+\. (.+)$", user, re.MULTILINE)
+        if sec:                                   # one section of a sectioned document: body only, cited
+            return f"### Overview\n\nThis section ({sec.group(1)}) is drafted from the evidence " + " ".join(f"[{i}]" for i in ids) + \
+                " (fake LLM mode).\n\n" + "\n".join(f"- Item described by [{i}]." for i in ids) + "\n"
         return "# Draft (fake LLM mode)\n\n## Overview\n\nThe system is described by the evidence " + " ".join(f"[{i}]" for i in ids) + ".\n"
     if operation in ("page_ask", "flow_explain"):
         refs = list(dict.fromkeys(re.findall(r"^\[([FDP]\d+)\]", user, re.MULTILINE)))[:2]
