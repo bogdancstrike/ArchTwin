@@ -12,6 +12,7 @@ import type { Snapshot, View } from "@/lib/types";
 import { C4Edge, C4Node, ZoomContext, type EdgeData, type NodeData } from "@/diagram/elements";
 import { layoutView, NODE_H, NODE_W } from "@/diagram/layout";
 import { useTheme } from "@/lib/theme";
+import { BaselineBanner } from "@/components/BaselineBanner";
 import { ExportMenu } from "@/components/ExportMenu";
 
 const nodeTypes = { c4: C4Node };
@@ -257,5 +258,7 @@ export function ArchitecturePage({ projectId }: { projectId: string }) {
   if (snaps.isLoading) return <Spinner />;
   if (snaps.error) return <div className="p-6"><ErrorBox error={snaps.error} /></div>;
   if (!snaps.data?.length) return <div className="p-6"><Card><Empty title="No architecture yet">Add a datasource in <b>Datasources</b> and run a scan — the graph, C4 diagrams and docs are generated from the evidence.</Empty></Card></div>;
-  return <ReactFlowProvider><div className={cn("h-full")}><Canvas projectId={projectId} /></div></ReactFlowProvider>;
+  return <ReactFlowProvider><div className={cn("flex h-full flex-col")}>
+    <div className="px-3 pt-3"><BaselineBanner projectId={projectId} compact /></div>
+    <div className="min-h-0 flex-1"><Canvas projectId={projectId} /></div></div></ReactFlowProvider>;
 }

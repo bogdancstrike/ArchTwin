@@ -8,6 +8,7 @@ import type { Finding } from "@/lib/types";
 import { DataTable, type Column } from "@/components/DataTable";
 import { SplitLayout } from "@/components/SplitLayout";
 import { ExportMenu } from "@/components/ExportMenu";
+import { BaselineBanner } from "@/components/BaselineBanner";
 
 const SEV: Record<string, string> = { critical: "bad", high: "bad", medium: "warn", low: "muted" };
 const VERDICT: Record<string, string> = { drift: "accent", unknown: "muted", incomplete: "warn" };
@@ -92,13 +93,14 @@ export function DriftPage({ projectId }: { projectId: string }) {
   return <SplitLayout storageKey="drift" title="Drift findings" sideWidth="xl:w-[58%]" side={(toggle) =>
     <Card eyebrow="Deterministic rules · three-way" title="Drift findings" actions={<><ExportMenu projectId={projectId} resource="drift" params={driftFilters} label="Export" />
       <Button size="sm" onClick={() => ev.mutate(undefined as never)}><RefreshCw size={14} /> Evaluate now</Button>{toggle}</>}>
+      <div className="mb-3"><BaselineBanner projectId={projectId} /></div>
       <DataTable<Finding> queryKey={["drift", projectId]} endpoint={`/projects/${projectId}/drift`} columns={columns} rowKey={(f) => f.id}
         defaultSort="severity" defaultDir="asc" searchPlaceholder="Search findings, elements, rules" selected={findingId ?? null} onFiltersChange={setDriftFilters}
         onRowClick={(f) => nav({ to: "/projects/$projectId/drift/$findingId", params: { projectId, findingId: f.id } })}
         filters={[{ key: "status", label: "Status", options: [["open", "Open"], ["suppressed", "Suppressed"], ["resolved", "Resolved"], ["accepted", "Accepted"], ["dismissed", "Dismissed (deleted)"]] },
           { key: "verdict", label: "Verdict", options: [["drift", "Drift"], ["unknown", "Unknown"], ["incomplete", "Incomplete"]] },
           { key: "severity", label: "Severity", options: [["critical", "Critical"], ["high", "High"], ["medium", "Medium"], ["low", "Low"]] }]}
-        empty="No findings. Approve a baseline in Settings and connect a runtime source; drift appears when evidence disagrees with the baseline or the code." />
+        empty="No findings. Drift appears when the code or the running system departs from the approved baseline or from an accepted decision's conformance rules." />
       <DismissDialog projectId={projectId} findings={deleting} onClose={() => setDeleting([])}
         onDone={() => { if (deleting.some((f) => f.id === findingId)) closeDetail(); }} />
     </Card>}>

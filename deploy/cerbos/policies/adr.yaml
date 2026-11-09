@@ -27,3 +27,8 @@ resourcePolicy:
     condition:
       match:
         expr: request.resource.attr.author_id != request.principal.id
+  - actions:
+    - amend_constraints
+    effect: EFFECT_ALLOW
+    derivedRoles:
+    - project_approver

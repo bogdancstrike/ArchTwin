@@ -168,6 +168,35 @@ async def list_baselines(ctx: RequestContext) -> list[dict[str, Any]]:
                                        .where(baselines.c.project_id == ctx.project_id).order_by(baselines.c.proposed_at.desc())))
 
 
+async def baseline_status(ctx: RequestContext) -> dict[str, Any]:
+    """Everything the UI needs to guide a person through baselines: the approved one, what awaits review, and whether the
+    architecture moved on since the approved baseline (so updating it is one click)."""
+    async with uow(ctx) as conn:
+        latest = row((await conn.execute(select(snapshots.c.id, snapshots.c.version, snapshots.c.created_at, snapshots.c.node_count)
+                                         .where(snapshots.c.project_id == ctx.project_id).order_by(snapshots.c.version.desc()).limit(1))).first())
+        allb = rows(await conn.execute(select(baselines, snapshots.c.version).join(snapshots, snapshots.c.id == baselines.c.snapshot_id)
+                                       .where(baselines.c.project_id == ctx.project_id).order_by(baselines.c.proposed_at.desc()).limit(20)))
+    approved = next((b for b in allb if b["status"] == "approved"), None)
+    pending = [b for b in allb if b["status"] == "proposed"]
+    return {"latest_snapshot": latest, "approved": approved, "pending": pending,
+            "outdated": bool(approved and latest and latest["version"] > approved["version"]),
+            "state": "approved" if approved else ("pending" if pending else ("none" if latest else "no_snapshot"))}
+
+
+async def baseline_from_latest(ctx: RequestContext, note: str) -> dict[str, Any]:
+    """Propose the latest snapshot as the baseline (re-using a pending proposal of the same snapshot)."""
+    async with uow(ctx) as conn:
+        snap = await resolve_snapshot(conn, ctx)
+        if not snap:
+            raise problem(409, "AT-ARCH-004", "No architecture yet", "Scan a datasource first; the baseline is taken from the latest snapshot.")
+        existing = row((await conn.execute(select(baselines).where(and_(baselines.c.project_id == ctx.project_id,
+                                                                       baselines.c.snapshot_id == snap["id"],
+                                                                       baselines.c.status.in_(["proposed", "approved"]))))).first())
+    if existing:
+        return existing
+    return await propose_baseline(ctx, snap["id"], note or f"Architecture v{snap['version']} as baseline")
+
+
 async def current_baseline(conn, ctx: RequestContext) -> dict[str, Any] | None:
     return row((await conn.execute(select(baselines).where(and_(baselines.c.project_id == ctx.project_id, baselines.c.status == "approved"))
                                    .order_by(baselines.c.decided_at.desc()).limit(1))).first())

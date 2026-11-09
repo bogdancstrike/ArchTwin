@@ -1,4 +1,5 @@
 import { Bot, Check, Plus, Sparkles } from "lucide-react";
+import { ConformanceRules, type Constraint } from "@/components/ConformanceRules";
 import { useState } from "react";
 import { Badge, Button, Card, Dialog, ErrorBox, Field, Input, Spinner, Textarea, ago } from "@/components/ui";
 import { RichMarkdown } from "@/components/RichMarkdown";
@@ -66,10 +67,11 @@ function CompleteWithAi({ projectId, current, onApply }: { projectId: string; cu
 function AdrForm({ projectId, open, onClose }: { projectId: string; open: boolean; onClose: () => void }) {
   const [f, setF] = useState({ title: "", context: "", decision_drivers: "", options: "", decision_outcome: "", consequences: "" });
   const [details, setDetails] = useState<Record<string, AdrOption>>({});        // pros/cons per option name (from the AI draft)
+  const [rules, setRules] = useState<Constraint[]>([]);
   const lines = (t: string) => t.split("\n").map((x) => x.trim()).filter(Boolean);
   const create = useAction(() => api(`/projects/${projectId}/adrs`, { method: "POST", json: { title: f.title, context: f.context,
     decision_drivers: lines(f.decision_drivers), considered_options: lines(f.options).map((name) => details[name] ?? { name }),
-    decision_outcome: f.decision_outcome, consequences: f.consequences } }), [["adrs", projectId]], "ADR proposed");
+    decision_outcome: f.decision_outcome, consequences: f.consequences, constraints: rules } }), [["adrs", projectId]], "ADR proposed");
   const apply = (d: Partial<AdrDraft>) => {
     setF((x) => ({ ...x, ...(d.title !== undefined && { title: d.title }), ...(d.context !== undefined && { context: d.context }),
       ...(d.decision_outcome !== undefined && { decision_outcome: d.decision_outcome }), ...(d.consequences !== undefined && { consequences: d.consequences }),
@@ -88,6 +90,8 @@ function AdrForm({ projectId, open, onClose }: { projectId: string; open: boolea
           <Textarea rows={4} value={f.options} onChange={(e) => setF({ ...f, options: e.target.value })} /></Field></div>
       <Field label="Decision outcome"><Textarea rows={3} value={f.decision_outcome} onChange={(e) => setF({ ...f, decision_outcome: e.target.value })} /></Field>
       <Field label="Consequences"><Textarea rows={3} value={f.consequences} onChange={(e) => setF({ ...f, consequences: e.target.value })} /></Field>
+      <Field label="Conformance rules (optional)" hint="Checked automatically against the discovered architecture once the decision is accepted">
+        <ConformanceRules value={rules} onChange={setRules} /></Field>
       <ErrorBox error={create.error} /><div className="flex justify-end"><Button variant="primary">Propose</Button></div>
     </form></Dialog>;
 }
@@ -110,7 +114,26 @@ function AdrView({ projectId, id }: { projectId: string; id: string }) {
         <Button size="sm" onClick={() => download(`/projects/${projectId}/adrs/${id}/markdown`, `ADR-${String(d.number).padStart(4, "0")}.md`)}>Markdown</Button></div></div>
     {isAuthor && d.status === "proposed" && <p className="mb-2 text-xs text-soft">Separation of duties: another approver must accept this ADR.</p>}
     <RichMarkdown>{md.data ?? ""}</RichMarkdown>
+    <AdrRules projectId={projectId} adr={d} />
     {d.current?.content?.citations?.length > 0 && <div className="mt-3"><div className="eyebrow">Grounding</div><ul className="text-xs">{d.current!.content.citations.map((c: any) => <li key={c.id} className="font-mono">[{c.id}] {c.key} — {c.source}</li>)}</ul></div>}
+  </div>;
+}
+
+function AdrRules({ projectId, adr }: { projectId: string; adr: Adr }) {
+  const content = (adr.current?.content ?? {}) as Record<string, any>;
+  const saved: Constraint[] = content.constraints ?? [];
+  const [editing, setEditing] = useState<Constraint[] | null>(null);
+  const save = useAction((rules: Constraint[]) => api(`/projects/${projectId}/adrs/${adr.id}/constraints`, { method: "PUT", json: { constraints: rules } }),
+    [["adr", adr.id], ["adrs", projectId]], "Conformance rules saved");
+  if (editing) return <div className="mt-3 space-y-2"><div className="eyebrow">Conformance rules</div>
+    <ConformanceRules value={editing} onChange={setEditing} />
+    <ErrorBox error={save.error} />
+    <div className="flex gap-2"><Button size="sm" variant="primary" onClick={async () => { await save.mutateAsync(editing); setEditing(null); }}>Save (new version)</Button>
+      <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>Cancel</Button></div></div>;
+  return <div>
+    <ConformanceRules value={saved} readOnly />
+    {adr.status !== "superseded" && adr.status !== "rejected" && <Button size="sm" variant="ghost" className="mt-2" onClick={() => setEditing(saved)}>
+      {saved.length ? "Edit conformance rules" : "Add conformance rules"}</Button>}
   </div>;
 }
 

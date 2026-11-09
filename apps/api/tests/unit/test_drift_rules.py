@@ -56,8 +56,53 @@ def test_uncovered_element_is_unknown():
 
 def test_unplanned_element_and_edge():
     cur = base_graph([obs("container:s/cache", "container"), edge("container:s/api", "calls", "container:s/cache")])
-    r = rules_of(evaluate(base_graph(), cur, cov()), "drift")
-    assert ("DR-UNPLANNED-001", "container:s/cache") in r and ("DR-EDGE-ADDED-001", "container:s/api|calls|container:s/cache") in r
+    found = evaluate(base_graph(), cur, cov())
+    r = rules_of(found, "drift")
+    # one finding for the new element, carrying its connections — not one more finding per edge
+    assert ("DR-UNPLANNED-001", "container:s/cache") in r and ("DR-EDGE-ADDED-001", "container:s/api|calls|container:s/cache") not in r
+    f = next(x for x in found if x["rule_id"] == "DR-UNPLANNED-001")
+    assert f["actual"]["dependencies"] == ["container:s/api calls container:s/cache"]
+
+
+def test_new_edge_between_planned_elements_and_health_checks():
+    base = base_graph([obs("container:s/db", "container")])
+    cur = base_graph([obs("container:s/db", "container"), edge("container:s/api", "reads", "container:s/db"),
+                      edge("container:s/db", "calls", "container:s/api", attrs={"purpose": "health check"})])
+    r = rules_of(evaluate(base, cur, cov()), "drift")
+    assert ("DR-EDGE-ADDED-001", "container:s/api|reads|container:s/db") in r
+    assert not any(k.endswith("container:s/db|calls|container:s/api") for _, k in r)        # a liveness probe is not drift
+
+
+def test_adr_constraints_are_checked_deterministically():
+    g = base_graph([obs("container:s/gateway", "container"), obs("external:openai", "external-system", name="OpenAI API"),
+                    obs("container:s/worker", "container", attrs={"technology": "python"}),
+                    edge("container:s/api", "calls", "external:openai"), edge("container:s/worker", "calls", "container:s/gateway"),
+                    edge("container:s/gateway", "calls", "external:openai")])
+    adrs = [{"id": "a1", "number": 7, "title": "LLM only through the gateway", "constraints": [
+                {"type": "only-via", "to": "external:openai", "via": "container:s/gateway"},
+                {"type": "forbid", "from": "worker", "to": "OpenAI*"},
+                {"type": "require", "from": "container:s/worker", "to": "container:s/gateway", "relation": "calls"},
+                {"type": "require", "from": "container:s/api", "to": "container:s/gateway"},
+                {"type": "technology", "element": "container:s/worker", "technology": "Java"}]}]
+    found = evaluate(None, g, cov(), adrs)
+    keys = {(f["rule_id"], f["subject_key"]) for f in found}
+    assert ("DR-ADR-VIA-001", "ADR-007#0|container:s/api|calls|external:openai") in keys          # bypasses the gateway
+    assert not any(r == "DR-ADR-VIA-001" and "gateway|calls" in k for r, k in keys)              # the gateway itself may
+    assert not any(r == "DR-ADR-FORBID-001" for r, _ in keys)                                    # the worker does not call OpenAI
+    assert ("DR-ADR-REQUIRE-001", "ADR-007#3") in keys and ("DR-ADR-REQUIRE-001", "ADR-007#2") not in keys
+    assert ("DR-ADR-TECH-001", "ADR-007#4|container:s/worker") in keys
+    via = next(f for f in found if f["rule_id"] == "DR-ADR-VIA-001")
+    assert via["expected"]["adr"] == "ADR-007" and via["severity"] == "high"
+
+
+def test_module_boundary_and_cycle_findings():
+    g = base_graph([obs("component:s/api/orders", "component", name="Orders"), obs("component:s/api/billing", "component", name="Billing"),
+                    edge("component:s/api/orders", "depends-on", "component:s/api/billing",
+                         attrs={"boundary_violation": "internal types used: Ledger", "internal_access": ["x.billing.internal.Ledger"], "cycle": True}),
+                    edge("component:s/api/billing", "depends-on", "component:s/api/orders", attrs={"cycle": True})])
+    r = rules_of(evaluate(None, g, cov()), "drift")
+    assert ("DR-BOUNDARY-001", "component:s/api/orders|depends-on|component:s/api/billing") in r
+    assert ("DR-CYCLE-001", "component:s/api/billing|depends-on|component:s/api/orders") in r
 
 
 def test_protocol_changed():

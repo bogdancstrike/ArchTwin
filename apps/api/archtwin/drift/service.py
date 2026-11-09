@@ -16,6 +16,7 @@ from archtwin.common.errors import not_found, problem
 from archtwin.common.ids import new_id
 from archtwin.common.paging import PageQuery, paginate_select
 from archtwin.common.schema import drift_comments, drift_evaluations, drift_findings, users
+from archtwin.decisions import service as adr_service
 from archtwin.drift import rules
 from archtwin.kernel import outbox
 from archtwin.notifications import service as notify
@@ -36,7 +37,8 @@ async def evaluate(ctx: RequestContext) -> dict[str, Any]:
         base = await arch.current_baseline(conn, ctx)
         baseline_graph = await arch.load_graph(conn, base["snapshot_id"]) if base else None
         cov = rules.Coverage.from_inputs(snap["inputs"].get("scans", []))
-        results = await asyncio.to_thread(rules.evaluate, baseline_graph, current, cov)
+        decisions_ = await adr_service.accepted_constraints(conn, ctx)        # accepted ADRs' conformance rules
+        results = await asyncio.to_thread(rules.evaluate, baseline_graph, current, cov, decisions_)
         now = datetime.now(UTC)
         seen: set[uuid.UUID] = set()
         counts = {"drift": 0, "unknown": 0, "incomplete": 0, "new": 0, "reopened": 0}

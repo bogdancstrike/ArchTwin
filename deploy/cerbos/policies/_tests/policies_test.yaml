@@ -85,6 +85,15 @@ tests:
       - {principal: bob, resource: baseline_by_alice, actions: {accept: EFFECT_DENY, approve_baseline: EFFECT_ALLOW}}
       - {principal: vera, resource: adr_by_alice, actions: {accept: EFFECT_DENY, approve_baseline: EFFECT_DENY}}
       - {principal: vera, resource: baseline_by_alice, actions: {accept: EFFECT_DENY, approve_baseline: EFFECT_DENY}}
+  - name: conformance rules of a decision are amended by approvers only (viewers cannot; other orgs cannot)
+    input:
+      principals: [bob, vera, mallory]
+      resources: [adr_by_alice]
+      actions: [amend_constraints]
+    expected:
+      - {principal: bob, resource: adr_by_alice, actions: {amend_constraints: EFFECT_ALLOW}}
+      - {principal: vera, resource: adr_by_alice, actions: {amend_constraints: EFFECT_DENY}}
+      - {principal: mallory, resource: adr_by_alice, actions: {amend_constraints: EFFECT_DENY}}
   - name: flags editable only by org admins; external writes need writeback
     input:
       principals: [alice, owner]

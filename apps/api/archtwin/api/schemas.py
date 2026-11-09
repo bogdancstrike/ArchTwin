@@ -55,6 +55,11 @@ class BaselineIn(Strict):
     note: str = Field(default="", max_length=2000)
 
 
+class QuickBaselineIn(Strict):
+    note: str = Field(default="", max_length=2000)
+    approve_now: bool = False          # only honoured where the caller may self-approve (org admins; audited)
+
+
 class DecisionIn(Strict):
     note: str = Field(default="", max_length=2000)
 
@@ -87,6 +92,11 @@ class AdrIn(Strict):
     decision_outcome: str = ""
     consequences: str = ""
     links: list[str] = Field(default_factory=list)
+    constraints: list[dict[str, Any]] = Field(default_factory=list, max_length=30)   # machine-checkable conformance rules
+
+
+class AdrConstraintsIn(Strict):
+    constraints: list[dict[str, Any]] = Field(default_factory=list, max_length=30)
 
 
 class AdrDecideIn(Strict):
