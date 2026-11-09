@@ -13,6 +13,7 @@ from archtwin.audit import service as audit
 from archtwin.common.db import RequestContext, row, rows, uow
 from archtwin.common.errors import not_found, problem
 from archtwin.common.ids import new_id
+from archtwin.common.paging import PageQuery, paginate_select
 from archtwin.common.schema import drift_comments, drift_evaluations, drift_findings, users
 from archtwin.drift import rules
 from archtwin.kernel import outbox
@@ -83,17 +84,35 @@ async def evaluate(ctx: RequestContext) -> dict[str, Any]:
     return {"status": "evaluated", "snapshot": snap["version"], "baseline": bool(base), **counts}
 
 
+SEVERITY_RANK = func.array_position(["critical", "high", "medium", "low"], drift_findings.c.severity)
+FINDING_SORTS = {"severity": SEVERITY_RANK, "last_seen": drift_findings.c.last_seen, "first_seen": drift_findings.c.first_seen,
+                 "title": drift_findings.c.title, "status": drift_findings.c.status, "verdict": drift_findings.c.verdict,
+                 "occurrences": drift_findings.c.occurrences, "rule": drift_findings.c.rule_id}
+
+
+def _findings(ctx: RequestContext, status: str | None, verdict: str | None, severity: str | None = None):
+    q = select(drift_findings).where(drift_findings.c.project_id == ctx.project_id)
+    if status == "open":
+        q = q.where(drift_findings.c.status.in_(OPEN))
+    elif status:
+        q = q.where(drift_findings.c.status == status)
+    if verdict:
+        q = q.where(drift_findings.c.verdict == verdict)
+    if severity:
+        q = q.where(drift_findings.c.severity == severity)
+    return q
+
+
 async def list_findings(ctx: RequestContext, status: str | None = None, verdict: str | None = None) -> list[dict[str, Any]]:
     async with uow(ctx) as conn:
-        q = select(drift_findings).where(drift_findings.c.project_id == ctx.project_id)
-        if status == "open":
-            q = q.where(drift_findings.c.status.in_(OPEN))
-        elif status:
-            q = q.where(drift_findings.c.status == status)
-        if verdict:
-            q = q.where(drift_findings.c.verdict == verdict)
-        sev = func.array_position(["critical", "high", "medium", "low"], drift_findings.c.severity)
-        return rows(await conn.execute(q.order_by(sev, drift_findings.c.last_seen.desc()).limit(500)))
+        return rows(await conn.execute(_findings(ctx, status, verdict).order_by(SEVERITY_RANK, drift_findings.c.last_seen.desc()).limit(500)))
+
+
+async def page_findings(ctx: RequestContext, pq: PageQuery, status: str | None = None, verdict: str | None = None,
+                        severity: str | None = None) -> dict[str, Any]:
+    async with uow(ctx) as conn:
+        return await paginate_select(conn, _findings(ctx, status, verdict, severity), pq, sorts=FINDING_SORTS, default_sort="severity",
+                                     search=[drift_findings.c.title, drift_findings.c.subject_key, drift_findings.c.rule_id])
 
 
 async def get_finding(ctx: RequestContext, fid: uuid.UUID) -> dict[str, Any]:

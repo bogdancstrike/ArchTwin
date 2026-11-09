@@ -3,9 +3,10 @@ import { useRef, useState } from "react";
 import Markdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
-import { Badge, Button, Card, ErrorBox, Input, Select, Spinner, Table } from "@/components/ui";
+import { Badge, Button, Card, ErrorBox, Select, Spinner, Table } from "@/components/ui";
 import { api, download } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
+import { DataTable } from "@/components/DataTable";
 
 export function DocsPage({ projectId }: { projectId: string }) {
   const gen = useApi<any[]>(["gen", projectId], `/projects/${projectId}/generated-docs`);
@@ -13,8 +14,6 @@ export function DocsPage({ projectId }: { projectId: string }) {
   const [tpl, setTpl] = useState("system-overview");
   const [sel, setSel] = useState<string | null>(null);
   const [diff, setDiff] = useState("");
-  const [q, setQ] = useState("");
-  const docs = useApi<any[]>(["docs", projectId, q], `/projects/${projectId}/documents${q ? `?q=${encodeURIComponent(q)}` : ""}`);
   const [docSel, setDocSel] = useState<string | null>(null);
   const doc = useApi<any>(["doc", docSel], docSel ? `/projects/${projectId}/documents/${docSel}` : null);
   const cur = useApi<any>(["gendoc", sel], sel ? `/projects/${projectId}/generated-docs/${sel}` : null);
@@ -39,8 +38,10 @@ export function DocsPage({ projectId }: { projectId: string }) {
       </Card>
       <Card eyebrow="Ingested" title="Source documents" actions={<><input ref={fileRef} type="file" hidden accept=".md,.txt,.pdf,.docx" onChange={(e) => e.target.files?.[0] && upload.mutate(e.target.files[0])} />
         <Button size="sm" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload</Button></>}>
-        <Input placeholder="Filter by title or path" value={q} onChange={(e) => setQ(e.target.value)} />
-        <ul className="mt-2 max-h-96 overflow-auto text-xs">{docs.data?.map((d) => <li key={d.id}><button className={"block w-full truncate px-1 py-0.5 text-left hover:bg-paper-2 " + (docSel === d.id ? "bg-paper-2" : "")} onClick={() => { setDocSel(d.id); setSel(null); }} title={d.path}>{d.title} <span className="text-soft">{d.path}</span></button></li>)}</ul>
+        <DataTable<any> queryKey={["docs", projectId]} endpoint={`/projects/${projectId}/documents`} rowKey={(d) => d.id} selected={docSel}
+          onRowClick={(d) => { setDocSel(d.id); setSel(null); }} defaultSort="path" defaultDir="asc" searchPlaceholder="Search title or path"
+          columns={[{ key: "title", label: "Title", sortable: true, render: (d) => <span className="text-xs">{d.title}</span> },
+            { key: "path", label: "Path", sortable: true, render: (d) => <span className="font-mono text-[10px] text-soft" title={d.path}>{d.path}</span> }]} />
       </Card>
     </div>
     <Card title={docSel ? doc.data?.title : sel ? `${titleOf(cur.data?.template ?? "")} v${cur.data?.version ?? ""}` : "Preview"} actions={sel && cur.data && <Button size="sm" onClick={() => download(`/projects/${projectId}/generated-docs/${sel}/markdown`, `${cur.data.template}-v${cur.data.version}.md`)}>Export Markdown</Button>}>

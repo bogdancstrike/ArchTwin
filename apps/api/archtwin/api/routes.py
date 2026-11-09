@@ -20,6 +20,7 @@ from archtwin.common import authz
 from archtwin.common.db import Principal, RequestContext, rows, unscoped, uow
 from archtwin.common.errors import not_found, problem
 from archtwin.common.ids import new_id
+from archtwin.common.paging import PageQuery, page_query
 from archtwin.common.schema import audit_events, diagram_layouts, organizations, prompt_runs
 from archtwin.connectors import registry, webhooks
 from archtwin.connectors import service as connectors
@@ -320,8 +321,11 @@ async def scan_connector(cid: uuid.UUID, body: S.ScanIn, request: Request, c: Re
 
 
 @r.get("/projects/{project_id}/scans", tags=["connectors"])
-async def scans(connector_id: uuid.UUID | None = None, c: RequestContext = Depends(project_ctx)):
+async def scans(connector_id: uuid.UUID | None = None, status: str | None = None, pq: PageQuery = Depends(page_query),
+                c: RequestContext = Depends(project_ctx)):
     await require(c, "connector", "view")
+    if pq.requested:
+        return await connectors.page_scans(c, pq, connector_id, status)
     return await connectors.list_scans(c, connector_id)
 
 
@@ -520,9 +524,9 @@ async def _adr(c, action="view", rid="", **attr):
 
 
 @r.get("/projects/{project_id}/adrs", tags=["decisions"])
-async def adrs_list(c: RequestContext = Depends(project_ctx)):
+async def adrs_list(status: str | None = None, pq: PageQuery = Depends(page_query), c: RequestContext = Depends(project_ctx)):
     await _adr(c)
-    return await decisions.list_(c)
+    return await decisions.page(c, pq, status) if pq.requested else await decisions.list_(c)
 
 
 @r.post("/projects/{project_id}/adrs", status_code=201, tags=["decisions"])
@@ -561,10 +565,12 @@ async def adr_decide(aid: uuid.UUID, decision: str, body: S.AdrDecideIn, c: Requ
 
 # ------------------------------------------------------------------ documents
 @r.get("/projects/{project_id}/documents", tags=["documents"])
-async def documents_list(q: str | None = None, c: RequestContext = Depends(project_ctx)):
+async def documents_list(include_code: bool = False, pq: PageQuery = Depends(page_query), c: RequestContext = Depends(project_ctx)):
     await require(c, "document", "view")
     async with uow(c) as conn:
-        return await docs.list_documents(conn, c, q)
+        if pq.requested:
+            return await docs.page_documents(conn, c, pq, include_code)
+        return await docs.list_documents(conn, c, pq.q or None, include_code=include_code)
 
 
 @r.get("/projects/{project_id}/documents/search", tags=["documents"])
@@ -642,9 +648,12 @@ async def gen_manual(doc_id: uuid.UUID, body: S.ManualDocIn, c: RequestContext =
 
 # ------------------------------------------------------------------ drift
 @r.get("/projects/{project_id}/drift", tags=["drift"])
-async def drift_list(status: str | None = None, verdict: str | None = None, c: RequestContext = Depends(project_ctx)):
+async def drift_list(status: str | None = None, verdict: str | None = None, severity: str | None = None, pq: PageQuery = Depends(page_query),
+                     c: RequestContext = Depends(project_ctx)):
     await flags.require(c, "module.drift-engine")
     await require(c, "drift_finding", "view")
+    if pq.requested:
+        return await drift.page_findings(c, pq, status, verdict, severity)
     return await drift.list_findings(c, status, verdict)
 
 

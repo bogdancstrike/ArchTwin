@@ -14,6 +14,7 @@ from archtwin.common.db import RequestContext, row, rows, unscoped, uow
 from archtwin.common.errors import not_found, problem
 from archtwin.common.ids import new_id
 from archtwin.common.logging import log, redact
+from archtwin.common.paging import PageQuery, paginate_select
 from archtwin.common.schema import connectors, observations, org_settings, scan_runs, secrets, source_artifacts
 from archtwin.connectors import registry
 from archtwin.connectors.adapters.git_repo import ORG_ROOTS
@@ -144,6 +145,22 @@ async def request_scan(ctx: RequestContext, cid: uuid.UUID, ref: str | None) -> 
         await outbox.emit(conn, ctx.org_id, ctx.project_id, "scan", sid, "connector.scan_requested",
                           {"scan_id": str(sid), "connector_id": str(cid)})
         return row((await conn.execute(select(scan_runs).where(scan_runs.c.id == sid))).first())
+
+
+SCAN_SORTS = {"created_at": scan_runs.c.created_at, "status": scan_runs.c.status, "connector": connectors.c.name, "revision": scan_runs.c.revision,
+              "finished_at": scan_runs.c.finished_at}
+
+
+async def page_scans(ctx: RequestContext, pq: PageQuery, cid: uuid.UUID | None = None, status: str | None = None) -> dict[str, Any]:
+    q = (select(scan_runs, connectors.c.name.label("connector"), connectors.c.kind.label("connector_kind"))
+         .join(connectors, connectors.c.id == scan_runs.c.connector_id).where(scan_runs.c.project_id == ctx.project_id))
+    if cid:
+        q = q.where(scan_runs.c.connector_id == cid)
+    if status:
+        q = q.where(scan_runs.c.status == status)
+    async with uow(ctx) as conn:
+        return await paginate_select(conn, q, pq, search=[connectors.c.name, scan_runs.c.revision, scan_runs.c.ref, scan_runs.c.error],
+                                     sorts=SCAN_SORTS, default_sort="created_at")
 
 
 async def list_scans(ctx: RequestContext, cid: uuid.UUID | None = None, limit: int = 50) -> list[dict[str, Any]]:

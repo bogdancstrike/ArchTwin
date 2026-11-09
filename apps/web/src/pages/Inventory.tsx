@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import type { Connector, Scan } from "@/lib/types";
 import { FolderPicker } from "@/components/FolderPicker";
+import { DataTable } from "@/components/DataTable";
 import { credentialLinks, newSecret, type CredentialLink } from "@/lib/credentialLinks";
 
 interface Kind { kind: string; name: string; origin: string; category: string; scopes: string[]; enabled: boolean; flag: string; module_flag: string;
@@ -216,9 +217,17 @@ export function InventoryPage({ projectId }: { projectId: string }) {
           onWebhook={hookable.has(c.kind) ? () => setHook(c) : undefined} />)}</div></section>;
     })}
     <div className="grid gap-6 lg:grid-cols-2">
-      <Card eyebrow="Jobs" title="Recent scans"><Table head={["Datasource", "Status", "Revision", "Observations", "When"]}>{scans.data?.slice(0, 15).map((s) => <tr key={s.id} className="border-b border-rule">
-        <td className="px-2 py-1.5">{names[s.connector_id] ?? "—"}</td><td className="px-2"><Badge tone={{ complete: "ok", partial: "warn", failed: "bad", running: "link", queued: "muted", skipped: "warn" }[s.status]}>{s.status}</Badge>{s.error && <div className="max-w-56 truncate text-[10px] text-bad" title={s.error}>{s.error}</div>}</td>
-        <td className="px-2 font-mono text-xs">{(s.revision ?? "").slice(0, 10)}{s.ref ? ` (${s.ref.slice(0, 18)})` : ""}</td><td className="num px-2">{String(s.stats?.observations ?? "")}</td><td className="px-2 text-xs">{ago(s.finished_at ?? s.created_at)}</td></tr>)}</Table></Card>
+      <Card eyebrow="Jobs" title="Scans">
+        <DataTable<Scan & { connector?: string }> queryKey={["scans-page", projectId]} endpoint={`/projects/${projectId}/scans`} rowKey={(s) => s.id}
+          defaultSort="created_at" searchPlaceholder="Search datasource, revision, error"
+          filters={[{ key: "status", label: "Status", options: [["complete", "Complete"], ["partial", "Partial"], ["failed", "Failed"], ["running", "Running"], ["queued", "Queued"], ["skipped", "Skipped"]] }]}
+          columns={[{ key: "connector", label: "Datasource", sortable: true, render: (s) => s.connector ?? names[s.connector_id] ?? "—" },
+            { key: "status", label: "Status", sortable: true, render: (s) => <><Badge tone={({ complete: "ok", partial: "warn", failed: "bad", running: "link", queued: "muted", skipped: "warn" } as Record<string, string>)[s.status]}>{s.status}</Badge>
+              {s.error && <div className="max-w-56 truncate text-[10px] text-bad" title={s.error}>{s.error}</div>}</> },
+            { key: "revision", label: "Revision", sortable: true, render: (s) => <span className="font-mono text-xs">{(s.revision ?? "").slice(0, 10)}{s.ref ? ` (${s.ref.slice(0, 18)})` : ""}</span> },
+            { key: "observations", label: "Observations", render: (s) => <span className="num">{String(s.stats?.observations ?? "")}</span> },
+            { key: "created_at", label: "When", sortable: true, render: (s) => <span className="text-xs">{ago(s.finished_at ?? s.created_at)}</span> }]} />
+      </Card>
       <Card eyebrow="Normalized" title="Observations by origin and kind"><Table head={["Origin", "Kind", "Count"]}>
         {[...counts].sort((a, b) => b.n - a.n).slice(0, 18).map((r) => <tr key={r.origin + r.kind} className="border-b border-rule"><td className="px-2 py-1"><OriginBadges origins={[r.origin]} /></td><td className="px-2">{r.kind}</td>
           <td className="px-2"><div className="flex items-center gap-2"><div className="h-1.5 flex-1 rounded-full bg-paper-2"><div className="h-1.5 rounded-full bg-muted/50" style={{ width: `${(r.n / max) * 100}%` }} /></div><span className="num w-12 text-right">{r.n}</span></div></td></tr>)}</Table></Card>

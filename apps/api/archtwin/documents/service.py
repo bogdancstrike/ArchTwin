@@ -12,6 +12,7 @@ from sqlalchemy import and_, func, select, text
 from archtwin.common.db import RequestContext, row, rows
 from archtwin.common.errors import problem
 from archtwin.common.ids import new_id
+from archtwin.common.paging import PageQuery, paginate_select
 from archtwin.common.schema import documents, passages
 from archtwin.config import settings
 
@@ -132,6 +133,23 @@ async def parse_upload(data: bytes, filename: str) -> tuple[str, str, str]:
             md = (r.json().get("document") or {}).get("md_content") or ""
         return "text/markdown", md, "docling-serve/1"
     raise problem(415, "AT-DOC-003", "Unsupported file type", f"Detected {mime}; allowed: Markdown, text, PDF, DOCX.")
+
+
+DOCUMENT_SORTS = {"title": documents.c.title, "path": documents.c.path, "created_at": documents.c.created_at, "version": documents.c.version}
+
+
+def _latest_documents(ctx: RequestContext, include_code: bool):
+    latest = select(documents.c.path, func.max(documents.c.version).label("v")).where(
+        documents.c.project_id == ctx.project_id).group_by(documents.c.path).subquery()
+    stmt = (select(documents.c.id, documents.c.title, documents.c.path, documents.c.mime, documents.c.version, documents.c.source_kind,
+                   documents.c.revision, documents.c.parser_version, documents.c.created_at)
+            .join(latest, and_(latest.c.path == documents.c.path, latest.c.v == documents.c.version)))
+    return stmt if include_code else stmt.where(documents.c.mime != "text/x-code")
+
+
+async def page_documents(conn, ctx: RequestContext, pq: PageQuery, include_code: bool = False) -> dict[str, Any]:
+    return await paginate_select(conn, _latest_documents(ctx, include_code), pq, search=[documents.c.title, documents.c.path],
+                                 sorts=DOCUMENT_SORTS, default_sort="path")
 
 
 async def list_documents(conn, ctx: RequestContext, q: str | None = None, limit: int = 200, include_code: bool = False) -> list[dict[str, Any]]:

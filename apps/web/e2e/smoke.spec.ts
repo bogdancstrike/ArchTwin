@@ -77,10 +77,12 @@ test("datasources: tab order, folder picker, credential shortcuts, equal resizab
   await expect(page).toHaveURL(/\/datasources$/);
   await expect(page.getByRole("heading", { name: "Datasources", level: 2 })).toBeVisible();
 
-  // shared tables: columns start equal and can be resized
-  const firstTh = page.getByRole("columnheader").first();
+  // shared tables: columns start equal and can be resized (scope header and handle to the same, loaded table)
+  const scans = page.getByRole("table").filter({ has: page.getByRole("button", { name: "Sort by Datasource" }) });
+  await expect(scans).toBeVisible();
+  const firstTh = scans.getByRole("columnheader").first();
   const before = (await firstTh.boundingBox())!.width;
-  const handle = page.getByRole("separator", { name: "Resize column" }).first();
+  const handle = scans.getByRole("separator", { name: "Resize column" }).first();
   const hb = (await handle.boundingBox())!;
   await page.mouse.move(hb.x + 2, hb.y + hb.height / 2);
   await page.mouse.down();

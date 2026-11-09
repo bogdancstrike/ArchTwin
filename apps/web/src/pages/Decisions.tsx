@@ -3,11 +3,12 @@ import { useState } from "react";
 import Markdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
-import { Badge, Button, Card, Dialog, Empty, ErrorBox, Field, Input, Spinner, Table, ago } from "@/components/ui";
+import { Badge, Button, Card, Dialog, ErrorBox, Field, Input, Spinner, ago } from "@/components/ui";
 import { api, download } from "@/lib/api";
 import { useAction, useApi, useMe } from "@/lib/hooks";
 import type { Adr } from "@/lib/types";
 import { AiTextarea } from "@/components/AiTextarea";
+import { DataTable } from "@/components/DataTable";
 
 const TONE: Record<string, string> = { proposed: "warn", accepted: "ok", rejected: "bad", superseded: "muted" };
 
@@ -51,16 +52,17 @@ function AdrView({ projectId, id }: { projectId: string; id: string }) {
 }
 
 export function DecisionsPage({ projectId }: { projectId: string }) {
-  const list = useApi<Adr[]>(["adrs", projectId], `/projects/${projectId}/adrs`);
   const [sel, setSel] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   return <div className="grid gap-4 p-6 xl:grid-cols-[420px_1fr]">
     <Card eyebrow="MADR" title="Decision records" actions={<Button size="sm" variant="primary" onClick={() => setOpen(true)}><Plus size={14} /> New</Button>}>
-      {list.isLoading && <Spinner />}<ErrorBox error={list.error} />
-      {list.data?.length === 0 && <Empty title="No ADRs">Propose one, or ask the assistant to draft it from evidence.</Empty>}
-      {!!list.data?.length && <Table head={["#", "Title", "Status"]}>{list.data.map((a) => <tr key={a.id} onClick={() => setSel(a.id)} className={"cursor-pointer border-b border-rule hover:bg-paper-2 " + (sel === a.id ? "bg-paper-2" : "")}>
-        <td className="px-2 py-1.5 font-mono text-xs">{String(a.number).padStart(4, "0")}</td><td className="px-2 text-sm">{a.title}{a.ai_drafted && <Bot size={11} className="ml-1 inline text-link" />}<div className="text-[10px] text-soft">{ago(a.created_at)}</div></td>
-        <td className="px-2"><Badge tone={TONE[a.status]}>{a.status}</Badge></td></tr>)}</Table>}
+      <DataTable<Adr> queryKey={["adrs", projectId]} endpoint={`/projects/${projectId}/adrs`} rowKey={(a) => a.id} defaultSort="number" defaultDir="desc"
+        searchPlaceholder="Search decisions" selected={sel} onRowClick={(a) => setSel(a.id)}
+        filters={[{ key: "status", label: "Status", options: [["proposed", "Proposed"], ["accepted", "Accepted"], ["rejected", "Rejected"], ["superseded", "Superseded"]] }]}
+        empty="No ADRs. Propose one, or ask the assistant to draft it from evidence."
+        columns={[{ key: "number", label: "#", sortable: true, render: (a) => <span className="font-mono text-xs">{String(a.number).padStart(4, "0")}</span> },
+          { key: "title", label: "Title", sortable: true, render: (a) => <>{a.title}{a.ai_drafted && <Bot size={11} className="ml-1 inline text-link" />}<div className="text-[10px] text-soft">{ago(a.created_at)}</div></> },
+          { key: "status", label: "Status", sortable: true, render: (a) => <Badge tone={TONE[a.status]}>{a.status}</Badge> }]} />
     </Card>
     <Card title="Record">{sel ? <AdrView projectId={projectId} id={sel} /> : <p className="text-sm text-soft">Select an ADR.</p>}</Card>
     <AdrForm projectId={projectId} open={open} onClose={() => setOpen(false)} />

@@ -14,9 +14,9 @@ from sqlalchemy import and_, func, or_, select, text
 
 from archtwin.common.db import RequestContext, rows, unscoped, uow
 from archtwin.common.errors import problem
+from archtwin.common.paging import DEFAULT_PAGE_SIZE, PAGE_SIZES
 from archtwin.common.schema import audit_events, projects
 
-PAGE_SIZES = (10, 25, 50, 100)
 CATEGORIES: dict[str, tuple[str, ...]] = {          # category chip -> action prefixes
     "datasources": ("connector.", "document.", "source_roots."),
     "architecture": ("architecture.", "baseline.", "diagram.", "drift.", "suppression."),
@@ -42,7 +42,7 @@ VERBS: list[tuple[str, str]] = [
 @dataclass(frozen=True)
 class AuditQuery:
     page: int = 1
-    page_size: int = 25
+    page_size: int = DEFAULT_PAGE_SIZE
     sort: str = "when"
     direction: str = "desc"
     q: str | None = None

@@ -1,10 +1,11 @@
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { RefreshCw } from "lucide-react";
 import { useState } from "react";
-import { Badge, Button, Card, Empty, ErrorBox, Field, Input, OriginBadges, Select, Spinner, Table, Textarea, ago } from "@/components/ui";
+import { Badge, Button, Card, ErrorBox, Field, Input, OriginBadges, Spinner, Textarea, ago } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import type { Finding } from "@/lib/types";
+import { DataTable, type Column } from "@/components/DataTable";
 
 const SEV: Record<string, string> = { critical: "bad", high: "bad", medium: "warn", low: "muted" };
 const VERDICT: Record<string, string> = { drift: "accent", unknown: "muted", incomplete: "warn" };
@@ -42,19 +43,23 @@ function FindingDetail({ projectId, fid }: { projectId: string; fid: string }) {
 export function DriftPage({ projectId }: { projectId: string }) {
   const { findingId } = useParams({ strict: false }) as { findingId?: string };
   const nav = useNavigate();
-  const [status, setStatus] = useState("open");
-  const fs = useApi<Finding[]>(["drift", projectId, status], `/projects/${projectId}/drift${status ? `?status=${status}` : ""}`, { refetchInterval: 8000 });
   const ev = useAction(() => api<any>(`/projects/${projectId}/drift/evaluate`, { method: "POST" }), [["drift", projectId]], "Evaluation complete");
+  const columns: Column<Finding>[] = [
+    { key: "verdict", label: "Verdict", sortable: true, render: (f) => <Badge tone={VERDICT[f.verdict]}>{f.verdict}</Badge> },
+    { key: "severity", label: "Severity", sortable: true, render: (f) => <Badge tone={SEV[f.severity]}>{f.severity}</Badge> },
+    { key: "title", label: "Finding", sortable: true, render: (f) => <><div>{f.title}</div><div className="font-mono text-[10px] text-soft">{f.rule_id}</div></> },
+    { key: "status", label: "Status", sortable: true, render: (f) => <span className="text-xs">{f.status}</span> },
+    { key: "last_seen", label: "Seen", sortable: true, render: (f) => <span className="text-xs">{ago(f.last_seen)}</span> },
+  ];
   return <div className="grid gap-4 p-6 xl:grid-cols-[1fr_480px]">
-    <Card eyebrow="Deterministic rules · three-way" title="Drift findings" actions={<>
-      <Select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value)}><option value="open">Open</option><option value="">All</option><option value="suppressed">Suppressed</option><option value="resolved">Resolved</option><option value="accepted">Accepted</option></Select>
-      <Button size="sm" onClick={() => ev.mutate(undefined as never)}><RefreshCw size={14} /> Evaluate now</Button></>}>
-      {fs.isLoading && <Spinner />}<ErrorBox error={fs.error} />
-      {fs.data?.length === 0 && <Empty title="No findings">Approve a baseline in Settings and connect a runtime source; drift appears when evidence disagrees with the baseline or the code.</Empty>}
-      {!!fs.data?.length && <Table head={["Verdict", "Severity", "Finding", "Status", "Seen"]}>{fs.data.map((f) => <tr key={f.id} onClick={() => nav({ to: "/projects/$projectId/drift/$findingId", params: { projectId, findingId: f.id } })}
-        className={"cursor-pointer border-b border-rule hover:bg-paper-2 " + (f.id === findingId ? "bg-paper-2" : "")}>
-        <td className="px-2 py-1.5"><Badge tone={VERDICT[f.verdict]}>{f.verdict}</Badge></td><td className="px-2"><Badge tone={SEV[f.severity]}>{f.severity}</Badge></td>
-        <td className="px-2"><div className="text-sm">{f.title}</div><div className="font-mono text-[10px] text-soft">{f.rule_id}</div></td><td className="px-2 text-xs">{f.status}</td><td className="px-2 text-xs">{ago(f.last_seen)}</td></tr>)}</Table>}
+    <Card eyebrow="Deterministic rules · three-way" title="Drift findings" actions={<Button size="sm" onClick={() => ev.mutate(undefined as never)}><RefreshCw size={14} /> Evaluate now</Button>}>
+      <DataTable<Finding> queryKey={["drift", projectId]} endpoint={`/projects/${projectId}/drift`} columns={columns} rowKey={(f) => f.id}
+        defaultSort="severity" defaultDir="asc" searchPlaceholder="Search findings, elements, rules" selected={findingId ?? null}
+        onRowClick={(f) => nav({ to: "/projects/$projectId/drift/$findingId", params: { projectId, findingId: f.id } })}
+        filters={[{ key: "status", label: "Status", options: [["open", "Open"], ["suppressed", "Suppressed"], ["resolved", "Resolved"], ["accepted", "Accepted"]] },
+          { key: "verdict", label: "Verdict", options: [["drift", "Drift"], ["unknown", "Unknown"], ["incomplete", "Incomplete"]] },
+          { key: "severity", label: "Severity", options: [["critical", "Critical"], ["high", "High"], ["medium", "Medium"], ["low", "Low"]] }]}
+        empty="No findings. Approve a baseline in Settings and connect a runtime source; drift appears when evidence disagrees with the baseline or the code." />
     </Card>
     <Card title="Details">{findingId ? <FindingDetail projectId={projectId} fid={findingId} /> : <p className="text-sm text-soft">Select a finding.</p>}</Card>
   </div>;

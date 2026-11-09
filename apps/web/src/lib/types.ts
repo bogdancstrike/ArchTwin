@@ -15,7 +15,7 @@ export interface GEdge { key: string; kind: string; source: string; target: stri
   confidence: number; evidence: Evidence[]; inferred_only: boolean }
 export interface Snapshot { id: string; version: number; manifest_hash: string; node_count: number; edge_count: number; created_at: string; trigger: string;
   inputs?: any }
-export interface ViewNode { id: string; kind: string; name: string; technology: string; subtype: string; description: string; owner: string;
+export interface ViewNode { element_kind?: string; id: string; kind: string; name: string; technology: string; subtype: string; description: string; owner: string;
   origins: string[]; confidence: number; inferred_only: boolean; primary: boolean; zoom: string | null; evidence_count: number; focal: boolean;
   focal_reason?: string; state?: string; member_keys?: string[]; components?: number; children?: number }
 export interface ViewEdge { id: string; source: string; target: string; kind: string; label: string; protocols: string[]; count: number;

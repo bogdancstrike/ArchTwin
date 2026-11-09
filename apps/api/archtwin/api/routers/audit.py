@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/v1", tags=["audit"])
 
 
 @router.get("/audit/search")
-async def search(page: int = Query(1, ge=1), page_size: int = Query(25), sort: str = "when", dir: str = Query("desc", pattern="^(asc|desc)$"),
+async def search(page: int = Query(1, ge=1), page_size: int = Query(15), sort: str = "when", dir: str = Query("desc", pattern="^(asc|desc)$"),
                  q: str | None = Query(None, max_length=200), actor: str | None = None, result: str | None = Query(None, pattern="^(allow|deny)$"),
                  category: str | None = None, since: datetime | None = None, until: datetime | None = None,
                  project_id: uuid.UUID | None = None, c: RequestContext = Depends(get_ctx)):

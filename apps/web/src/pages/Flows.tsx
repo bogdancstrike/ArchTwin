@@ -1,7 +1,7 @@
-import { Database, GitFork, Globe, Network, Radio, Search, Workflow } from "lucide-react";
+import { Database, GitFork, Globe, Network, Radio, Workflow } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Badge, Card, Empty, ErrorBox, Input, OriginBadges, Skeleton, Table, cn } from "@/components/ui";
-import { useApi } from "@/lib/hooks";
+import { Badge, Card, Empty, OriginBadges, Table, cn } from "@/components/ui";
+import { DataTable } from "@/components/DataTable";
 
 interface Step { from: string; to: string; kind: string; edge: string; label: string; protocol: string; origins: string[]; confidence: number;
   inferred_only: boolean; documented: boolean; evidence: number }
@@ -64,47 +64,36 @@ function Sequence({ flow, active, onStep }: { flow: Flow; active: number | null;
 }
 
 export function FlowsPage({ projectId }: { projectId: string }) {
-  const f = useApi<{ flows: Flow[]; total: number; counts: Record<string, number> }>(["flows", projectId], `/projects/${projectId}/flows`);
-  const [kind, setKind] = useState<string>("");
-  const [q, setQ] = useState("");
-  const [onlyDist, setOnlyDist] = useState(false);
-  const [sel, setSel] = useState<string | null>(null);
+  const [cur, setCur] = useState<Flow | null>(null);
   const [step, setStep] = useState<number | null>(null);
-  const flows = (f.data?.flows ?? []).filter((x) => (!kind || x.kind === kind) && (!onlyDist || x.distributed)
-    && (!q || `${x.name} ${x.participants.map((p) => p.name).join(" ")}`.toLowerCase().includes(q.toLowerCase())));
-  const cur = flows.find((x) => x.id === sel) ?? flows[0];
   useEffect(() => setStep(null), [cur?.id]);
-  if (f.error) return <div className="p-6"><ErrorBox error={f.error} /></div>;
-  return <div className="grid h-full gap-4 p-6 xl:grid-cols-[340px_minmax(0,1fr)]">
-    <Card eyebrow={f.data ? `${f.data.total} recognized automatically` : "Recognizing…"} title={<span className="flex items-center gap-2"><Workflow size={16} /> Flows</span>}>
-      <div className="relative mb-2"><Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-soft" />
-        <Input aria-label="Search flows" placeholder="Search flows or participants" className="!pl-7" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-      <div role="radiogroup" aria-label="Flow kind" className="mb-2 flex flex-wrap gap-1">{[["", "All"], ["endpoint", "Endpoint"], ["request", "Request"], ["event", "Event"], ["data", "Data"]].map(([k, l]) =>
-        <button key={k} role="radio" aria-checked={kind === k} onClick={() => setKind(k)}
-          className={cn("rounded-full border px-2.5 py-0.5 text-xs", kind === k ? "border-ink bg-ink text-paper" : "border-rule hover:border-muted")}>
-          {l}{k && f.data ? ` ${f.data.counts[k] ?? 0}` : ""}</button>)}</div>
-      <label className="mb-2 flex items-center gap-1.5 text-xs text-muted"><input type="checkbox" checked={onlyDist} onChange={(e) => setOnlyDist(e.target.checked)} /> Only distributed (spanning systems)</label>
-      {!f.data ? <Skeleton className="h-64" /> : flows.length === 0 ? <p className="py-6 text-center text-sm text-soft">No flow matches. Flows appear once datasources show calls, topics or data access.</p> :
-        <ul className="max-h-[65vh] space-y-1 overflow-auto">{flows.map((x) => { const K = kindOf(x.kind);
-          return <li key={x.id}><button onClick={() => setSel(x.id)} className={cn("w-full rounded-lg px-2.5 py-2 text-left", cur?.id === x.id ? "bg-paper-2" : "hover:bg-paper-2")}>
-            <span className="flex items-center gap-1.5 text-sm"><K.icon size={13} className="shrink-0 text-soft" /><span className="truncate">{x.name}</span></span>
-            <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-soft">{x.length} steps · {x.participants.length} participants
-              {x.distributed && <Badge tone="link"><GitFork size={9} /> {x.systems.length} systems</Badge>}{x.documented && <Badge tone="muted">documented</Badge>}
-              {x.inferred && <Badge tone="warn">inferred</Badge>}</span></button></li>; })}</ul>}
+  return <div className="grid h-full gap-4 p-6 xl:grid-cols-[minmax(380px,1fr)_minmax(0,2fr)]">
+    <Card eyebrow="Recognized automatically" title={<span className="flex items-center gap-2"><Workflow size={16} /> Flows</span>}>
+      <DataTable<Flow> queryKey={["flows", projectId]} endpoint={`/projects/${projectId}/flows`} rowKey={(x) => x.id} selected={cur?.id ?? null}
+        onRowClick={setCur} searchPlaceholder="Search flows or participants" defaultSort="" defaultDir="desc"
+        empty="No flows yet. Add datasources and scan them: flows come from endpoints, calls between services, topics and data access."
+        filters={[{ key: "kind", label: "Kind", options: [["endpoint", "Endpoint"], ["request", "Request"], ["event", "Event"], ["data", "Data"]] },
+          { key: "distributed", label: "Distributed", options: [["true", "Across systems"]] }]}
+        columns={[{ key: "name", label: "Flow", sortable: true, render: (x) => { const K = kindOf(x.kind);
+            return <><span className="flex items-center gap-1.5"><K.icon size={13} className="shrink-0 text-soft" /><span className="truncate">{x.name}</span></span>
+              <span className="mt-0.5 flex flex-wrap gap-1">{x.distributed && <Badge tone="link"><GitFork size={9} /> {x.systems.length} systems</Badge>}
+                {x.documented && <Badge tone="muted">documented</Badge>}{x.inferred && <Badge tone="warn">inferred</Badge>}</span></>; } },
+          { key: "length", label: "Steps", sortable: true, render: (x) => <span className="num">{x.length}</span> },
+          { key: "participants", label: "Participants", sortable: true, render: (x) => <span className="num">{x.participants.length}</span> }]} />
     </Card>
     <div className="min-w-0 space-y-4">
-      {!cur ? (f.data ? <Empty title="No flows yet">Add datasources and scan them: request flows come from calls between services, event flows from topics, data flows from database access.</Empty> : <Skeleton className="h-96 !rounded-xl" />) : <>
+      {!cur ? <Empty title="Select a flow">Pick a flow to see it as a diagram with the evidence for every step.</Empty> : <>
         <Card eyebrow={`${kindOf(cur.kind).label} flow · confidence ${cur.confidence.toFixed(2)}${cur.distributed ? ` · across ${cur.systems.join(", ")}` : ""}`} title={cur.name}>
           <Sequence flow={cur} active={step} onStep={setStep} />
           <p className="mt-2 text-xs text-soft">Solid = observed in code or runtime; dashed = documented in a diagram, inferred, or low confidence. Click a step for its evidence.</p>
         </Card>
         <Card eyebrow="Steps" title="Evidence per step">
-          <Table head={["#", "From", "Relation", "To", "Origins", "Confidence", "Evidence"]}>{cur.steps.map((s, i) => {
-            const n = (k: string) => cur.participants.find((p) => p.key === k)?.name ?? k;
+          <Table head={["#", "From", "Relation", "To", "Origins", "Confidence", "Evidence"]}>{cur.steps.map((st, i) => {
+            const n = (k: string) => cur.participants.find((pp) => pp.key === k)?.name ?? k;
             return <tr key={i} onClick={() => setStep(i)} className={cn("cursor-pointer border-b border-rule", step === i && "bg-accent-tint")}>
-              <td className="px-2 py-1.5 font-mono text-xs">{i + 1}</td><td className="px-2 text-sm">{n(s.from)}</td>
-              <td className="px-2 text-xs">{s.kind}{s.protocol ? ` · ${s.protocol}` : ""}{s.documented && <Badge tone="muted">doc</Badge>}</td><td className="px-2 text-sm">{n(s.to)}</td>
-              <td className="px-2"><OriginBadges origins={s.origins} /></td><td className="num px-2">{s.confidence.toFixed(2)}</td><td className="num px-2">{s.evidence}</td></tr>; })}</Table>
+              <td className="px-2 py-1.5 font-mono text-xs">{i + 1}</td><td className="px-2 text-sm">{n(st.from)}</td>
+              <td className="px-2 text-xs">{st.kind}{st.protocol ? ` · ${st.protocol}` : ""}{st.documented && <Badge tone="muted">doc</Badge>}</td><td className="px-2 text-sm">{n(st.to)}</td>
+              <td className="px-2"><OriginBadges origins={st.origins} /></td><td className="num px-2">{st.confidence.toFixed(2)}</td><td className="num px-2">{st.evidence}</td></tr>; })}</Table>
           {step !== null && <p className="mt-2 break-all font-mono text-[11px] text-soft">relation key: {cur.steps[step].edge}</p>}
         </Card></>}
     </div>

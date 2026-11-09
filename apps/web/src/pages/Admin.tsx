@@ -30,7 +30,7 @@ const CATS: [string, string][] = [["", "All"], ["datasources", "Datasources"], [
   ["ai", "AI & spend"], ["access", "Members & access"], ["exports", "Exports"]];
 
 export function AuditPage() {
-  const [f, setF] = useState({ q: "", actor: "", result: "", category: "", since: "", until: "", sort: "when", dir: "desc", page: 1, size: 25 });
+  const [f, setF] = useState({ q: "", actor: "", result: "", category: "", since: "", until: "", sort: "when", dir: "desc", page: 1, size: 15 });
   const [open, setOpen] = useState<string | null>(null);
   const set = (patch: Partial<typeof f>) => setF((x) => ({ ...x, page: 1, ...patch }));
   const qs = new URLSearchParams(Object.entries({ q: f.q, actor: f.actor, result: f.result, category: f.category, since: f.since, until: f.until,
@@ -74,7 +74,7 @@ export function AuditPage() {
       {ev.data?.items.length === 0 && <p className="py-6 text-center text-sm text-soft">No activity matches these filters.</p>}
       {ev.data && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">
         <span className="text-muted">{ev.data.total.toLocaleString()} events · page {ev.data.page} of {ev.data.pages}</span>
-        <div className="flex items-center gap-2"><Select aria-label="Page size" value={f.size} onChange={(e) => set({ size: Number(e.target.value) })}>{[10, 25, 50, 100].map((n) => <option key={n} value={n}>{n} / page</option>)}</Select>
+        <div className="flex items-center gap-2"><Select aria-label="Page size" value={f.size} onChange={(e) => set({ size: Number(e.target.value) })}>{[5, 15, 25, 50, 100].map((n) => <option key={n} value={n}>{n} / page</option>)}</Select>
           <Button size="sm" disabled={f.page <= 1} onClick={() => setF((x) => ({ ...x, page: x.page - 1 }))}>Previous</Button>
           <Button size="sm" disabled={f.page >= ev.data.pages} onClick={() => setF((x) => ({ ...x, page: x.page + 1 }))}>Next</Button></div></div>}
     </Card>

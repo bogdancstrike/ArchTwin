@@ -38,7 +38,7 @@ export function ProjectHealthCard({ p }: { p: HomeProject }) {
       <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
         <div className="rounded-lg bg-paper/70 py-2"><dt className="eyebrow !text-[9px]">elements</dt><dd className="num text-lg font-semibold">{p.snapshot?.nodes ?? "—"}</dd></div>
         <div className="rounded-lg bg-paper/70 py-2"><dt className="eyebrow !text-[9px]">drift</dt>
-          <dd className={`num text-lg font-semibold ${p.drift?.open ? "text-accent" : ""}`}>{p.drift ? p.drift.open : "—"}</dd></div>
+          <dd className={`num text-lg font-semibold ${p.drift?.open ? "text-accent-ink" : ""}`}>{p.drift ? p.drift.open : "—"}</dd></div>
         <div className="rounded-lg bg-paper/70 py-2"><dt className="eyebrow !text-[9px]">ADRs</dt><dd className="num text-lg font-semibold">{p.adrs?.total ?? "—"}</dd></div>
       </dl>
       <div className="mt-3"><SeverityBar counts={p.drift?.by_severity ?? {}} /></div>

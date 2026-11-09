@@ -18,7 +18,8 @@ const EYEBROW: Record<string, string> = { person: "Person", external: "External 
 export function C4Node({ data, selected }: NodeProps) {
   const n = data as unknown as NodeData;
   const zoom = useContext(ZoomContext);
-  const eyebrow = EYEBROW[n.kind] ?? (n.subtype || "container");
+  const eyebrow = n.element_kind === "code" ? `${n.subtype || "code"}${n.kind === "external" ? " · other component" : ""}`
+    : EYEBROW[n.kind] ?? (n.subtype || "container");
   const Icon = n.kind === "person" ? User : n.kind === "external" ? Globe : n.subtype === "database" ? Database : n.kind === "group" ? Layers : null;
   return <div style={{ width: NODE_W, height: NODE_H }}
     className={cn("group relative rounded-md border px-3 py-2 text-left transition-shadow",
