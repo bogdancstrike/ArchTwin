@@ -20,11 +20,14 @@ RULES = {
     "DR-PROTOCOL-001": {"version": "1.0", "severity": "high", "title": "Protocol changed", "requires": []},
     "DR-RUNTIME-NOT-RUNNING-001": {"version": "1.0", "severity": "high", "title": "Declared but not running", "requires": ["runtime"]},
     "DR-RUNTIME-UNDECLARED-001": {"version": "1.0", "severity": "medium", "title": "Running but not declared", "requires": ["static"]},
+    "DR-ACTION-UNROUTED-001": {"version": "1.0", "severity": "high", "title": "Action not routed by the gateway", "requires": ["static"]},
+    "DR-ROUTE-NO-ENDPOINT-001": {"version": "1.0", "severity": "high", "title": "Route to a missing backend endpoint", "requires": ["static"]},
 }
 ARCH_NODE_KINDS = {"software-system", "container", "external-system", "database", "kafka-topic", "api-contract"}
 ARCH_EDGE_KINDS = {"calls", "writes", "reads", "publishes", "consumes"}
 OWNED_NODE_KINDS = {"software-system", "container", "api-contract"}   # what a team plans; externals are inferred dependencies
 NOISY_WHEN_STALE = {"DR-MISSING-001", "DR-EDGE-REMOVED-001"}           # deleted (not resolved) once no longer produced
+PROBE_PATH = re.compile(r"^/(?:health|healthz|livez|readyz|ready|live|metrics|ping|status)(?:/|$)")   # usually framework-provided
 MIN_CONFIDENCE = 0.6          # inferred / low-confidence evidence alone never raises drift
 
 
@@ -129,6 +132,24 @@ def evaluate(baseline: dict[str, Any] | None, current: dict[str, Any], cov: Cove
                 if pb and pc and pb != pc:
                     add("DR-PROTOCOL-001", k, f"Protocol of {e['source']} → {e['target']} changed from {pb} to {pc}", "drift",
                         expected={"protocol": pb}, actual={"protocol": pc}, evidence=e.get("evidence", [])[:3])
+    # cross-service contracts in code (independent of the baseline): a caller and the service it calls disagree
+    for k, n in cn.items():
+        for u in n["attributes"].get("unrouted_actions") or []:
+            gw = cn.get(u["gateway"], {}).get("name", u["gateway"])
+            add("DR-ACTION-UNROUTED-001", f"{k}#action:{u['action']}",
+                f"{n['name']} sends action {u['action']} but {gw} does not route it", "drift",
+                expected={"routed_by": gw}, actual={"action": u["action"], "sent_from": f"{u.get('path', '')}:{u.get('line') or ''}"},
+                evidence=[u["evidence"]] if u.get("evidence") else [])
+    exposes = {e["source"] for e in ce.values() if e["kind"] == "exposes"}
+    for k, e in ce.items():
+        src, tgt = cn.get(e["source"], {}), cn.get(e["target"], {})
+        a = e["attributes"]
+        if (e["kind"] == "calls" and src.get("kind") == "api-endpoint" and tgt.get("kind") == "container" and a.get("path")
+                and e["target"] in exposes and _strong(e) and not PROBE_PATH.search(str(a["path"]))):
+            add("DR-ROUTE-NO-ENDPOINT-001", k,
+                f"{src['name']} is routed to {a.get('method', '')} {a['path']}, which {tgt['name']} does not expose".replace("  ", " "),
+                "drift", expected={"endpoint": f"{a.get('method', '')} {a['path']}".strip(), "service": tgt["name"]},
+                actual={"exposed_by_service": "no matching endpoint"}, evidence=e.get("evidence", [])[:3])
     # static vs runtime (independent of the baseline)
     for k, n in cn.items():
         if n["kind"] != "container":

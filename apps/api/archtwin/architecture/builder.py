@@ -148,6 +148,29 @@ def _ref(key: str, idx: dict[str, dict[str, set[str]]], exclude: str, nodes: dic
     return key
 
 
+MAX_UNROUTED = 50
+
+
+def _note_unrouted(nodes: dict[str, dict[str, Any]], actions: dict[str, list[str]], idx: dict[str, dict[str, set[str]]],
+                   src: str, e: dict[str, Any]) -> None:
+    """An action the caller sends that its gateway does not route — recorded on the caller (for the drift rule) only when
+    the gateway is known and routes other actions of the same namespace ('dissemination_*'), so stray literals stay out."""
+    name, _, service = e["target"][7:].partition("@")
+    gw = _resolve(service, idx, src, nodes) if service else None
+    if not gw or "_" not in name:
+        return
+    prefix = f"endpoint:{gw.split(':', 1)[1]}/"
+    namespace = name.split("_", 1)[0] + "_"
+    if not any(a.startswith(namespace) and any(k.startswith(prefix) for k in ks) for a, ks in actions.items()):
+        return
+    ev = (e.get("evidence") or [{}])[0]
+    lst = nodes[src]["attributes"].setdefault("unrouted_actions", [])
+    if len(lst) < MAX_UNROUTED and all(x["action"] != name for x in lst):
+        span = ev.get("span") or {}
+        lst.append({"action": name, "gateway": gw, "path": span.get("path") or ev.get("source_ref", ""), "line": span.get("line_start"),
+                    "evidence": ev})
+
+
 def resolve_names(nodes: dict[str, dict[str, Any]], edges: dict[str, dict[str, Any]]) -> list[str]:
     """Edges whose endpoint is `name:<x>` (cross-repository config URLs, diagrams in docs) are re-pointed to the unique element
     with that name in ANY datasource; ambiguous or unknown names are dropped (and reported), never invented."""
@@ -169,6 +192,8 @@ def resolve_names(nodes: dict[str, dict[str, Any]], edges: dict[str, dict[str, A
         dst = _ref(e["target"], idx, src or "", nodes, actions)
         if not src or not dst or src == dst:
             unresolved.update(x.split(":", 1)[1] for x, r in ((e["source"], src), (e["target"], dst)) if x.startswith(("name:", "action:")) and not r)
+            if src in nodes and not dst and e["target"].startswith("action:"):
+                _note_unrouted(nodes, actions, idx, src, e)
             continue
         nk = f"{src}|{e['kind']}|{dst}"
         cur = edges.get(nk)
@@ -214,8 +239,33 @@ def link_mentions(nodes: dict[str, dict[str, Any]], edges: dict[str, dict[str, A
                          "evidence": [{**ev[0], "origin": "inferred", "parser_version": "mention-link/1.0", "confidence": 0.5}] if ev else []}
 
 
+def sibling_build_aliases(obs: list[dict[str, Any]]) -> dict[str, str]:
+    """A Compose service built from a sibling repository (`build: ../service-qsint-presenter`) IS that repository's own
+    container when the sibling is a datasource of the project too: alias it there, so a service has one element."""
+    own: dict[str, list[str]] = defaultdict(list)          # system -> its containers built from its own root
+    outside: dict[str, str] = {}                           # container key -> basename of an out-of-repo build context
+    for o in obs:
+        if o["subject_kind"] != "node" or o["kind"] != "container":
+            continue
+        a = o.get("attributes") or {}
+        ctx = str(a.get("build_context") or "")
+        system = o["subject_key"].split(":", 1)[1].split("/", 1)[0]
+        if ctx in (".", "./"):
+            if o["subject_key"] not in own[system]:
+                own[system].append(o["subject_key"])
+        elif ctx.startswith(("/", "..")):
+            outside[o["subject_key"]] = ctx.rstrip("/").rsplit("/", 1)[-1]
+    out = {}
+    for key, base in outside.items():
+        cands = own.get(base, [])
+        if len(cands) == 1 and cands[0] != key:
+            out[key] = cands[0]
+    return out
+
+
 def build(obs: list[dict[str, Any]], aliases: dict[str, str] | None = None) -> dict[str, Any]:
-    aliases = aliases or {}
+    auto = sibling_build_aliases(obs)
+    aliases = {**auto, **(aliases or {})}                   # explicit identity merges win
     nodes: dict[str, dict[str, Any]] = {}
     edges: dict[str, dict[str, Any]] = {}
     retracted: set[str] = set()
@@ -254,6 +304,10 @@ def build(obs: list[dict[str, Any]], aliases: dict[str, str] | None = None) -> d
                 e["evidence"].append(_evidence(o))
     for k in retracted:
         nodes.pop(k, None)
+    for alias, canon in auto.items():                       # the sibling's container belongs to its own system only
+        edges.pop(f"system:{alias.split(':', 1)[1].split('/', 1)[0]}|contains|{canon}", None)
+        if canon in nodes:
+            nodes[canon]["attributes"].setdefault("also_built_by", []).append(alias)
     unresolved = resolve_names(nodes, edges)
     link_mentions(nodes, edges)
     dropped = []
