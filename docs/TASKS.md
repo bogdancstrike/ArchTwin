@@ -6,16 +6,21 @@ Legend: ✅ done and verified (automated tests + live run) · 🟡 done, partial
 Rule (AGENTS.md): checkboxes in the OpenSpec `tasks.md` files are ticked only once code is **merged with green CI**. Work lives on
 branch `feat/walking-skeleton-m1` (CI: python, integration, policies, web, spec, secrets).
 
-## Verification evidence (2026-11-08, local Compose stack)
+## Verification evidence (2026-11-09, local Compose stack + shop fixture)
 | Suite | Command | Result |
 |---|---|---|
-| Unit | `make test` | 81 passed |
+| Unit (incl. fixture ground truth, webhook HMAC, Kafka detection, OTel/GitHub with mocked HTTP) | `make test` | 99 passed |
 | RLS isolation (as `archtwin_app`) | `make test-integration` | 8 passed |
-| API journeys on the live stack | `make test-e2e` | 15 passed |
-| Browser (PKCE login, C4 zoom, evidence, axe WCAG AA) | `make test-ui` | 2 passed |
+| API journeys on the live stack (+ `/home`, live fixture connectors, signed webhooks, live GitHub) | `make test-e2e` | 24 passed (GitHub live test skips when unauthenticated rate limit is exhausted) |
+| Browser (PKCE login, home, C4 zoom, evidence, axe WCAG AA on home + projects) | `make test-ui` | 2 passed |
 | Cerbos policy tests | `make policy-test` | 44 passed |
 | OpenSpec | `make spec-validate` | 7/7 valid (strict) |
 | Migrations | up → down → up | ok (CI job `integration`) |
+
+**Live run against the shop fixture** (`make fixtures-up && make fixtures-demo`): 6 connectors (git, Docker, OTel service graph,
+PostgreSQL, MySQL, Kafka) → one model where `kafka-topic:archtwin-fixtures/kafka/orders.created` carries both static (code) and runtime
+(cluster) origins, `shop-web → shop-orders` is confirmed by OTel traffic, tables from both engines with sensitive columns flagged, and the
+L2 view reads `shop-orders —publishes · orders.created→ kafka`, `shop-billing —consumes · orders.created→ kafka`.
 
 **Live run against Horizon** (`/sources/horizon`, commit `f6a42fe`): 1,242 files → 1,493 observations, 98 documents; snapshot 442
 elements / 1,034 relationships; 48/48 generated views lint clean. With Horizon stopped, the Docker connector produced exactly 18
@@ -52,22 +57,22 @@ against the approved baseline produced 12 findings (unplanned `backup`/`demo-see
 ## Phase 02 — connectors
 | Task | Status | Notes |
 |---|---|---|
-| 0.1–0.2 reference fixture | 🚧 | Labelled sample repo + ground truth in `apps/api/tests/fixtures` (100% recall); Horizon used as real-world subject; OTel Demo on kind ⏳ |
-| 1.1 SDK, manifest, registry, conformance | 🟡 | git, docker, postgresql, http_openapi; conformance kit ⏳ |
+| 0.1–0.2 reference fixture | ✅ | `fixtures/shop` (separate Compose project `archtwin-fixtures`, containers `archtwin-fixture-*`): OTel-instrumented web/orders/inventory/billing + Kafka, Schema Registry, PostgreSQL, MySQL, collector servicegraph → Prometheus; `ground-truth.yaml`; `make fixtures-up/-demo/-down`. OTel Demo on kind ⏭ (Docker-only for now) |
+| 1.1 SDK, manifest, registry, conformance | 🟡 | 8 kinds: git, github, docker, otel_servicegraph, postgresql, mysql, kafka, http_openapi; manifests carry category/scopes/webhooks; conformance kit ⏳ |
 | 1.2 sealed credentials, test endpoint with scopes/warnings | ✅ | |
 | 1.3 egress guard + SSRF suite | ✅ | DNS pinning ⏳ (resolve-and-check only) |
 | 1.4 Temporal workflows, flags re-checked | ✅ | scheduled reconcile loop (flag `connectors.full_reconciliation`) |
-| 1.5 webhook ingress | ⏳ | |
+| 1.5 webhook ingress | ✅ | `POST /api/v1/webhooks/{org}/{project}/{connector}`: GitHub `X-Hub-Signature-256` / generic HMAC + 5-min replay window, `webhook_deliveries` dedupe (migration 0003, RLS), one scan per commit, issue/PR events update the single work item; rejections opaque, metered, nothing stored (unit + live e2e). Prometheus export of the counters ⏳ |
 | 1.6 partial scans never tombstone | ✅ | |
 | 2.1–2.3 observations, freshness, conflicts | ✅ | monthly partitions ⏳ |
-| 3.1 GitHub App / GitLab adapters | 🚧 | generic Git (mounted path or HTTPS clone, any ref via `git archive`); provider APIs ⏳ |
-| 3.2–3.4 declared artifacts, tree-sitter detectors, precision/recall | ✅ | Syft SBOM ⏳ (manifest parsing instead) |
-| 4.1–4.2 Kubernetes adapter, RBAC templates | ⏳ | Docker Engine runtime adapter instead (Compose hosts) |
-| 4.3 OTel service-graph adapter | ⏳ | |
-| 5.1 PostgreSQL catalog | ✅ | |
-| 5.2 Kafka | ⏳ | |
+| 3.1 GitHub App / GitLab adapters | 🟡 | GitHub REST adapter: repo metadata, branches, code via the git analyzers at any ref, webhooks; verified live on `bogdancstrike/ArchTwin`. GitHub App auth + GitLab ⏳ |
+| 3.2–3.4 declared artifacts, tree-sitter detectors, precision/recall | ✅ | + Kafka producer/consumer detection (confluent-kafka, kafka-python, aiokafka; literal topics only) keyed to the configured broker; recall 100% / no invented app edges on the fixture ground truth (CI); grammar from the official `tree-sitter-python` wheel (the language pack downloaded grammars at runtime — intermittent 504s silently dropped modules; now parse failures mark the scan partial). Syft SBOM ⏳ |
+| 4.1–4.2 Kubernetes adapter, RBAC templates | ⏭ | deferred by the product owner (Docker-only for now); Docker Engine runtime adapter covers Compose hosts |
+| 4.3 OTel service-graph adapter | ✅ | Prometheus HTTP API → runtime `calls`/`writes`/`publishes` edges with window, requests, errors, p95; `service_map`/`peer_map`; unknown peers reported, never invented; absence in traces is not coverage (live e2e on the fixture) |
+| 5.1 PostgreSQL catalog | ✅ | + MySQL on the same SQLAlchemy reflection path (`sql_catalog`), READ ONLY transaction, privilege warnings (REFERENCES-only account passes) |
+| 5.2 Kafka | ✅ | confluent-kafka AdminClient: topics/partitions/RF, consumer groups + members, lag from committed offsets vs watermarks (never joins a group, no payloads), Schema Registry subjects → `implements`; group→service only via `group_services` (or exact name, 0.7); static + runtime topic identities merge |
 | 5.3 sensitive-column classifier | ✅ | |
-| 6.1, 6.3 work connectors read-only | ⏳ / ✅ | no write path exists |
+| 6.1, 6.3 work connectors read-only | ✅ | GitHub issues + PRs as `work-item` (origin `issue`), closing keywords → `implements`; no write call exists (source test); write/admin scopes and push permissions warned at test time |
 | 7.1–7.2 uploads + parsing | ✅ | magic bytes (binary rejected), docling-serve profile for PDF/DOCX |
 
 ## Phase 03 — architecture
@@ -81,7 +86,7 @@ against the approved baseline produced 12 findings (unplanned `backup`/`demo-see
 | 2.5 Mermaid + Structurizr DSL export, XSS corpus | ✅ | |
 | 2.8 accessible table view, keyboard | ✅ | 2k-element performance check ⏳ |
 | 2.9–2.11 design-system tokens, ≤ 9 primary nodes, ≤ 2 focal, orthogonal router, 6-rule linter, SVG/HTML export | ✅ | PNG export ⏳ |
-| 2.13 C4 zoom L1→L2 (+ L3 from import graphs) | ✅ | Playwright covers dblclick / Enter / Backspace |
+| 2.13 C4 zoom L1→L2 (+ L3 from import graphs) | ✅ | Playwright covers dblclick / Enter / Backspace; L2 rolls container→topic edges up to the broker labelled with the topic; one-shot jobs grouped and shown as completed |
 | 3.1–3.2 MADR ADRs | ✅ | |
 | 4.1–4.3 documentation engine | ✅ | PDF/DOCX ⏭ |
 | 5.x architecture reviews | ⏭ | |
@@ -115,5 +120,6 @@ against the approved baseline produced 12 findings (unplanned `backup`/`demo-see
 Specified, not started.
 
 ## Changelog
+- 2026-11-09 — M1 data-source connectors (GitHub, MySQL, Kafka + Schema Registry, OTel service graph), webhook ingress, shop fixture with ground truth; analyzer fixes (services keyed by system/name, deterministic grammar loading).
 - 2026-11-09 — `/home` dashboard + UI refresh (fonts, shell, overview, projects); axe AA clean.
 - 2026-11-08 — walking skeleton + M1/M2 slice, web UI, full test pyramid, CI; live verification against Horizon (see above).

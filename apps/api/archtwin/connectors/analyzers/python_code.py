@@ -5,7 +5,8 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from tree_sitter_language_pack import get_parser
+import tree_sitter_python
+from tree_sitter import Language, Parser
 
 PARSER_VERSION = "py-treesitter/1.1"
 KAFKA_PRODUCE = {"produce", "send", "send_and_wait"}
@@ -14,6 +15,8 @@ KAFKA_CLIENTS = {"Producer", "Consumer", "KafkaProducer", "KafkaConsumer", "AIOK
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "websocket", "api_route", "route"}
 
 
+# Grammar ships compiled inside the official `tree-sitter-python` wheel: nothing is downloaded at runtime.
+PY_LANGUAGE = Language(tree_sitter_python.language())
 _local = threading.local()
 
 
@@ -21,7 +24,7 @@ def _parser():
     """One parser per thread: tree-sitter parsers are not thread-safe and scans run concurrently in worker threads."""
     p = getattr(_local, "parser", None)
     if p is None:
-        p = _local.parser = get_parser("python")
+        p = _local.parser = Parser(PY_LANGUAGE)
     return p
 
 

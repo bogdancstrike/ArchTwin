@@ -23,7 +23,7 @@ Selection criteria: (1) broad adoption and active maintainers (CNCF/LF/Apache/ma
 | LLM observability / evals | **Langfuse** (+ optional **promptfoo** red-team) | traces, datasets, experiments | — |
 | Models (v1) | OpenAI via LiteLLM: `gpt-6-luna` (default), `gpt-6-terra`, `gpt-6-sol` (user-selectable), `gpt-5.6-luna` (fallback), `text-embedding-3-large` | Horizon-aligned | — |
 | Document parsing | **Docling** (+ python-magic, optional **ClamAV**) | LF AI & Data, layout/table aware | custom PDF parsing |
-| Code analysis | **tree-sitter** (+ language pack), **Syft** (CycloneDX SBOM), OpenAPI/AsyncAPI parsers, Backstage `catalog-info.yaml` | multi-language, battle-tested | writing language parsers; full program analysis |
+| Code analysis | **tree-sitter** + official grammar wheels (`tree-sitter-python`; no runtime grammar downloads), **Syft** (CycloneDX SBOM), OpenAPI/AsyncAPI parsers, Backstage `catalog-info.yaml` | multi-language, battle-tested | writing language parsers; full program analysis |
 | Git providers | **githubkit**, **python-gitlab**, git CLI | typed / official-ish clients | — |
 | Kubernetes | **kubernetes_asyncio** (list/watch) | official API model | — |
 | Runtime call graph | **OpenTelemetry** Collector *servicegraph* connector → Prometheus; Jaeger/Tempo dependencies | reuse existing telemetry | own agents / eBPF |

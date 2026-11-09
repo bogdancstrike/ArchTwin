@@ -24,7 +24,7 @@ Know what was designed, what was planned, what the code says and what is actuall
 
 > [!NOTE]
 > **Status:** the walking skeleton and the M1/M2 vertical slice are implemented and tested end to end (phases 01–04 MVP scope plus the
-> grounded assistant from phase 06) on branch `feat/walking-skeleton-m1`. Live progress per task: [`docs/TASKS.md`](docs/TASKS.md).
+> grounded assistant from phase 06, M1 data-source connectors and a personal home dashboard) on branch `feat/walking-skeleton-m1`. Live progress per task: [`docs/TASKS.md`](docs/TASKS.md).
 > OpenSpec task checkboxes are ticked only after merge with green CI. Phases 05 and 07 are specified, not implemented.
 
 ## 🚀 Quick start
@@ -35,8 +35,15 @@ make up                                     # docker compose up -d --build (firs
 open http://localhost:3200                  # admin/admin · alice, bob, vera, mallory / archtwin
 ```
 
-Then: **New project → Inventory → Add connector** (`git` with path `/sources/horizon` or `/sources/archtwin`, `docker` for runtime,
-`postgresql` for a catalog) → **Scan** → **Architecture** (C4 zoom: double-click / Enter, Backspace to go up) → **Settings → Propose
+The fastest way to see every connector working is the reference fixture (a separate Compose project):
+
+```bash
+make fixtures-up      # OTel-instrumented shop: web, orders, inventory, billing + Kafka, Schema Registry, PostgreSQL, MySQL, Prometheus
+make fixtures-demo    # creates "Shop (reference fixture)" with git, Docker, OTel, PostgreSQL, MySQL and Kafka connectors and scans them
+```
+
+Or by hand: **New project → Inventory → Add connector** (`git` with path `/sources/horizon` or `/sources/archtwin`, `github`, `docker`,
+`otel_servicegraph`, `postgresql`, `mysql`, `kafka`, `http_openapi`) → **Scan** → **Architecture** (C4 zoom: double-click / Enter, Backspace to go up) → **Settings → Propose
 baseline** (a different user approves) → **Drift** → **Assistant**.
 
 | Container | Role | Port |
@@ -142,7 +149,7 @@ Full adopt-vs-build reasoning: [`docs/TECHNOLOGIES.md`](docs/TECHNOLOGIES.md).
 | Phase | Increment | Milestone | Status |
 |---|---|---|---|
 | [01](openspec/changes/phase-01-foundation/) | Secure multi-project foundations (walking skeleton) | M1 | ✅ MVP implemented (OTel tracing, OpenBao, org deletion, break-glass: later) |
-| [02](openspec/changes/phase-02-connectors/) | Discovery and connected evidence | M1 | 🚧 partial: git (local/HTTPS), Docker runtime, PostgreSQL catalog, live OpenAPI, uploads implemented; Kubernetes, Kafka, OTel service graph, GitHub/GitLab APIs and webhooks still open |
+| [02](openspec/changes/phase-02-connectors/) | Discovery and connected evidence | M1 | 🚧 mostly: git (local/HTTPS) + GitHub, Docker runtime, OTel service graph, PostgreSQL/MySQL catalogs, Kafka + Schema Registry, live OpenAPI, uploads, signed webhooks; Kubernetes (deferred: Docker-only for now), GitLab, Syft SBOM open |
 | [03](openspec/changes/phase-03-architecture/) | Living diagrams, C4 zoom, docs and ADRs | M1 | ✅ MVP implemented: graph, snapshots, baselines, C4 L1–L3 zoom, linter, exports, ADRs, docs (PDF/DOCX, reviews: later) |
 | [04](openspec/changes/phase-04-drift/) | Continuous drift and alerts | M2 | ✅ MVP implemented: three-way drift, triage, suppressions, in-app/SSE notifications (Apprise, metrics: later) |
 | [05](openspec/changes/phase-05-delivery/) | Plans, traceability and CI checks | M2 | 📝 specified |

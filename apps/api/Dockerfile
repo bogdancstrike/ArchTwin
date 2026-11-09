@@ -11,5 +11,7 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-ins
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 USER archtwin
+# Fail the build if the tree-sitter grammar (compiled into the tree-sitter-python wheel) cannot load.
+RUN python -c "from archtwin.connectors.analyzers.python_code import _parser; assert _parser().parse(b'x = 1').root_node.type == 'module'"
 EXPOSE 8000
 CMD ["uvicorn", "archtwin.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

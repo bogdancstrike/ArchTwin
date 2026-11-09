@@ -93,6 +93,48 @@ paths:
                   job_id: {type: string}
                   state: {type: string, enum: [queued]}
         '403': {$ref: '#/components/responses/Forbidden'}
+  /home:
+    get:
+      summary: Personal cross-project overview (only projects the caller may view; each read under its own RLS context)
+      operationId: personalHome
+      responses:
+        '200':
+          description: Totals, needs-attention items, recent activity and project health
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totals: {type: object, additionalProperties: {type: integer}}
+                  projects: {type: array, items: {type: object, additionalProperties: true}}
+                  attention: {type: array, items: {type: object, additionalProperties: true}}
+                  activity: {type: array, items: {type: object, additionalProperties: true}}
+  /webhooks/{orgId}/{projectId}/{connectorId}:
+    post:
+      summary: Provider webhook ingress — authenticated by HMAC signature, not by a user token
+      description: >
+        GitHub: X-Hub-Signature-256 + X-GitHub-Delivery. Generic: X-ArchTwin-Signature = sha256=HMAC(secret, "{ts}.{body}"),
+        X-ArchTwin-Timestamp within 300 s, X-ArchTwin-Delivery. Deliveries are de-duplicated; a commit is extracted once.
+        Every rejection returns the same opaque problem (AT-WEBHOOK-001) and stores nothing. Requires flag connectors.webhooks.
+      operationId: receiveWebhook
+      security: []
+      parameters:
+        - {in: path, name: orgId, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/ProjectId'}
+        - {in: path, name: connectorId, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+      responses:
+        '200':
+          description: Accepted (or acknowledged duplicate)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  duplicate: {type: boolean}
+                  outcome: {type: string, enum: [scan_queued, duplicate_commit, work_item_updated, ignored_untracked_ref, ignored_event, pong]}
+        '401': {description: Signature or timestamp invalid (opaque)}
+        '404': {description: Unknown connector, webhooks not configured or flag off (opaque)}
 components:
   securitySchemes:
     oidc:
