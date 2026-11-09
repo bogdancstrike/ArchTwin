@@ -1,0 +1,166 @@
+# ArchTwin reference fixture — a small OTel-instrumented shop. A SEPARATE Compose project (never part of the app Compose).
+#   make fixtures-up / make fixtures-down
+# Topology (ground truth: ../ground-truth.yaml):
+#   shop-loadgen -> shop-web -> shop-orders -> orders-db (PostgreSQL)
+#                            -> shop-inventory -> inventory-db (MySQL)
+#   shop-orders --publishes--> kafka topic orders.created --consumed by--> shop-billing (group billing)
+#   all services --OTLP--> otel-collector (servicegraph connector) --> prometheus
+# Readable by ArchTwin through the shared `archtwin_app` network (read-only connectors only).
+name: archtwin-fixtures
+
+x-shop: &shop
+  build: ./services
+  image: archtwin-fixture-shop:local
+  restart: unless-stopped
+  environment: &shop-env
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+    OTEL_TRACES_EXPORTER: otlp
+    OTEL_METRICS_EXPORTER: none
+    OTEL_LOGS_EXPORTER: none
+    OTEL_PYTHON_LOG_CORRELATION: "false"
+
+services:
+  shop-web:
+    <<: *shop
+    container_name: archtwin-fixture-shop-web
+    command: ["opentelemetry-instrument", "uvicorn", "web:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      <<: *shop-env
+      OTEL_SERVICE_NAME: shop-web
+      ORDERS_URL: http://shop-orders:8000
+      INVENTORY_URL: http://shop-inventory:8000
+    ports: ["127.0.0.1:8390:8000"]
+    depends_on: [shop-orders, shop-inventory]
+
+  shop-orders:
+    <<: *shop
+    container_name: archtwin-fixture-shop-orders
+    command: ["opentelemetry-instrument", "uvicorn", "orders:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      <<: *shop-env
+      OTEL_SERVICE_NAME: shop-orders
+      DATABASE_URL: postgresql://orders:orders@orders-db:5432/orders
+      KAFKA_BOOTSTRAP: kafka:9092
+    depends_on:
+      orders-db: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+
+  shop-inventory:
+    <<: *shop
+    container_name: archtwin-fixture-shop-inventory
+    command: ["opentelemetry-instrument", "uvicorn", "inventory:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      <<: *shop-env
+      OTEL_SERVICE_NAME: shop-inventory
+      DATABASE_URL: mysql://inventory:inventory@inventory-db:3306/inventory
+    depends_on:
+      inventory-db: { condition: service_healthy }
+
+  shop-billing:
+    <<: *shop
+    container_name: archtwin-fixture-shop-billing
+    command: ["opentelemetry-instrument", "python", "billing.py"]
+    environment:
+      <<: *shop-env
+      OTEL_SERVICE_NAME: shop-billing
+      KAFKA_BOOTSTRAP: kafka:9092
+    depends_on:
+      kafka: { condition: service_healthy }
+
+  shop-loadgen:
+    <<: *shop
+    container_name: archtwin-fixture-shop-loadgen
+    command: ["opentelemetry-instrument", "python", "loadgen.py"]
+    environment:
+      <<: *shop-env
+      OTEL_SERVICE_NAME: shop-loadgen
+      WEB_URL: http://shop-web:8000
+    depends_on: [shop-web]
+
+  orders-db:
+    image: pgvector/pgvector:pg17
+    container_name: archtwin-fixture-orders-db
+    environment: { POSTGRES_USER: orders, POSTGRES_PASSWORD: orders, POSTGRES_DB: orders }
+    volumes: ["./deploy/orders-db.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U orders"], interval: 5s, retries: 20 }
+    networks: [default, archtwin]
+
+  inventory-db:
+    image: mysql:8.4
+    container_name: archtwin-fixture-inventory-db
+    environment: { MYSQL_ROOT_PASSWORD: fixture-root, MYSQL_DATABASE: inventory, MYSQL_USER: inventory, MYSQL_PASSWORD: inventory }
+    volumes: ["./deploy/inventory-db.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro"]
+    healthcheck: { test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pfixture-root"], interval: 5s, retries: 30 }
+    networks: [default, archtwin]
+
+  kafka:
+    image: apache/kafka:3.9.1
+    container_name: archtwin-fixture-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 5s
+      retries: 30
+    networks: [default, archtwin]
+
+  kafka-init:
+    image: apache/kafka:3.9.1
+    container_name: archtwin-fixture-kafka-init
+    restart: "no"
+    depends_on: { kafka: { condition: service_healthy } }
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.created --partitions 3 --replication-factor 1 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic inventory.audit --partitions 1 --replication-factor 1
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.1
+    container_name: archtwin-fixture-schema-registry
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    depends_on: { kafka: { condition: service_healthy } }
+    healthcheck: { test: ["CMD", "curl", "-sf", "http://localhost:8081/subjects"], interval: 5s, retries: 30 }
+    networks: [default, archtwin]
+
+  schema-init:
+    image: archtwin-fixture-shop:local
+    container_name: archtwin-fixture-schema-init
+    restart: "no"
+    depends_on: { schema-registry: { condition: service_healthy } }
+    command: ["python", "register_schemas.py"]
+    environment: { SCHEMA_REGISTRY_URL: "http://schema-registry:8081" }
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.159.0
+    container_name: archtwin-fixture-otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes: ["./deploy/otel-collector.yaml:/etc/otelcol/config.yaml:ro"]
+
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    container_name: archtwin-fixture-prometheus
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=2d"]
+    volumes: ["./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["127.0.0.1:9390:9090"]
+    networks: [default, archtwin]
+
+networks:
+  archtwin:
+    name: archtwin_app
+    external: true

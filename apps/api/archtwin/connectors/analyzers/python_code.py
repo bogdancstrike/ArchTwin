@@ -7,7 +7,10 @@ from pathlib import Path
 
 from tree_sitter_language_pack import get_parser
 
-PARSER_VERSION = "py-treesitter/1.0"
+PARSER_VERSION = "py-treesitter/1.1"
+KAFKA_PRODUCE = {"produce", "send", "send_and_wait"}
+KAFKA_CLIENTS = {"Producer", "Consumer", "KafkaProducer", "KafkaConsumer", "AIOKafkaProducer", "AIOKafkaConsumer",
+                 "SerializingProducer", "DeserializingConsumer"}
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "websocket", "api_route", "route"}
 
 
@@ -26,11 +29,21 @@ class Route:
 
 
 @dataclass
+class KafkaUse:
+    direction: str          # "publishes" | "consumes"
+    topic: str
+    line: int
+    group: str = ""
+
+
+@dataclass
 class PyModule:
     name: str
     path: Path
     imports: set[str] = field(default_factory=set)
     routes: list[Route] = field(default_factory=list)
+    kafka: list[KafkaUse] = field(default_factory=list)
+    uses_kafka_client: bool = False
 
 
 def module_index(context_dir: Path, files: list[Path]) -> dict[str, Path]:
@@ -65,6 +78,59 @@ def _string_value(n) -> str | None:
     if n.type != "string":
         return None
     return "".join(_text(c) for c in n.children if c.type == "string_content")
+
+
+def _strings(n) -> list[str]:
+    """String literals of a node that is a string or a list/tuple of strings."""
+    if n is None:
+        return []
+    if n.type == "string":
+        v = _string_value(n)
+        return [v] if v else []
+    if n.type in ("list", "tuple"):
+        return [v for c in n.children if c.type == "string" and (v := _string_value(c))]
+    return []
+
+
+def _kafka_call(n, mod: PyModule) -> None:
+    """Deterministic Kafka producer/consumer detection (confluent-kafka, kafka-python, aiokafka): literal topic names only.
+
+    produce("t") / send("t") / send_and_wait("t") on a Kafka client -> publishes; subscribe(["t"]) or KafkaConsumer("t") ->
+    consumes; `group.id` / group_id literals give the consumer group. Dynamic topic names are not guessed.
+    """
+    fn = n.child_by_field_name("function")
+    args = n.child_by_field_name("arguments")
+    if fn is None or args is None:
+        return
+    argv = [c for c in args.children if c.type not in ("(", ")", ",")]
+    line = n.start_point[0] + 1
+    name = _text(fn).rsplit(".", 1)[-1]
+    if name in KAFKA_CLIENTS:
+        mod.uses_kafka_client = True
+        for a in argv:      # group id from config dict or keyword
+            if a.type == "dictionary":
+                for pair in a.children:
+                    if pair.type == "pair" and _string_value(pair.child_by_field_name("key")) == "group.id":
+                        mod.kafka.append(KafkaUse("group", _string_value(pair.child_by_field_name("value")) or "", line))
+            elif a.type == "keyword_argument" and _text(a.child_by_field_name("name")) == "group_id":
+                v = _string_value(a.child_by_field_name("value"))
+                if v:
+                    mod.kafka.append(KafkaUse("group", v, line))
+        if name.endswith("Consumer"):
+            for a in argv:
+                if a.type == "string" and (v := _string_value(a)):
+                    mod.kafka.append(KafkaUse("consumes", v, line))
+        return
+    if fn.type != "attribute" or not argv:
+        return
+    if name in KAFKA_PRODUCE:
+        first = argv[0] if argv[0].type == "string" else next((a.child_by_field_name("value") for a in argv if a.type == "keyword_argument"
+                                                               and _text(a.child_by_field_name("name")) == "topic"), None)
+        for v in _strings(first):
+            mod.kafka.append(KafkaUse("publishes", v, line))
+    elif name == "subscribe":
+        for v in _strings(argv[0]):
+            mod.kafka.append(KafkaUse("consumes", v, line))
 
 
 def parse_module(name: str, path: Path, is_pkg: bool) -> PyModule:
@@ -116,6 +182,8 @@ def parse_module(name: str, path: Path, is_pkg: bool) -> PyModule:
                             v = _string_value(a.child_by_field_name("value"))
                             if v is not None:
                                 prefixes[_text(left)] = v
+        elif t == "call":
+            _kafka_call(n, mod)
         elif t == "decorator":
             call = next((c for c in n.children if c.type == "call"), None)
             if call is not None:

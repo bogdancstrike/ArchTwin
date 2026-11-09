@@ -5,7 +5,13 @@ Revises: 0001
 """
 from alembic import op
 
-from archtwin.common.schema import APPEND_ONLY, ORG_RLS, PROJECT_RLS
+# Frozen at the time of this revision (migrations are immutable; later tables get their RLS in their own revision).
+ORG_RLS = ["projects", "environments", "project_members", "audit_events", "notifications"]
+PROJECT_RLS = ["secrets", "connectors", "scan_runs", "source_artifacts", "observations", "identity_aliases",
+               "identity_suggestions", "snapshots", "snapshot_elements", "baselines", "diagram_layouts", "adrs",
+               "adr_versions", "documents", "passages", "generated_docs", "drift_findings", "drift_comments",
+               "drift_evaluations", "prompt_runs"]
+APPEND_ONLY = ["audit_events", "observations", "snapshot_elements", "adr_versions", "source_artifacts"]
 
 revision = "0002"
 down_revision = "0001"

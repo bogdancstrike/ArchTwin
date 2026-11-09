@@ -17,3 +17,6 @@ test-all: test test-integration test-e2e test-ui
 policy-test:       ; docker run --rm -v "$$PWD/deploy/cerbos/policies":/policies ghcr.io/cerbos/cerbos:0.39.0 compile /policies
 spec-validate:     ; npx -y @fission-ai/openspec@latest validate --all --strict
 migrate-check:     ; $(COMPOSE) run --rm migrate sh -c "alembic upgrade head && alembic downgrade base && alembic upgrade head"
+
+fixtures-up:        ; docker compose -f fixtures/shop/compose.yaml up -d --build
+fixtures-down:      ; docker compose -f fixtures/shop/compose.yaml down -v

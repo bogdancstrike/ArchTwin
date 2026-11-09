@@ -28,7 +28,7 @@ x-app-env: &app-env
   ARCHTWIN_S3_BUCKET: archtwin
   ARCHTWIN_LOG_LEVEL: ${ARCHTWIN_LOG_LEVEL:-info}
   ARCHTWIN_LOCAL_SOURCE_ROOTS: /sources
-  ARCHTWIN_EGRESS_ALLOW_PRIVATE_HOSTS: ${ARCHTWIN_EGRESS_ALLOW_PRIVATE_HOSTS:-docker-proxy,api,postgres}
+  ARCHTWIN_EGRESS_ALLOW_PRIVATE_HOSTS: ${ARCHTWIN_EGRESS_ALLOW_PRIVATE_HOSTS:-docker-proxy,api,postgres,kafka,schema-registry,prometheus,orders-db,inventory-db}
   ARCHTWIN_DOCLING_URL: ${ARCHTWIN_DOCLING_URL:-}
 
 services:

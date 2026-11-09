@@ -52,10 +52,12 @@ def _safe_extract(tar_bytes_path: Path, dest: Path) -> None:
 class GitRepoConnector:
     kind = "git"
     flag = "connector.git"
-    manifest = {"name": "Git repository", "origin": "static", "scopes": ["contents:read"], "freshness_sla_s": 86400,
+    manifest = {"name": "Git repository", "category": "code", "origin": "static", "scopes": ["contents:read"], "freshness_sla_s": 86400,
+                "webhooks": ["push"],
                 "config": {"path": "mounted repository path under /sources (local)", "url": "https HTTPS clone URL (remote)",
                            "ref": "branch, tag or commit (default HEAD)", "name": "system name override"},
-                "secret": {"token": "optional read-only token for private HTTPS repositories"}}
+                "secret": {"token": "optional read-only token for private HTTPS repositories",
+                           "webhook_secret": "optional — enables signed push webhooks (X-ArchTwin-Signature)"}}
 
     async def test(self, cfg: dict[str, Any], secret: dict[str, Any]) -> TestResult:
         try:

@@ -21,7 +21,7 @@ from archtwin.common.db import Principal, RequestContext, rows, unscoped, uow
 from archtwin.common.errors import not_found, problem
 from archtwin.common.ids import new_id
 from archtwin.common.schema import audit_events, diagram_layouts, organizations, prompt_runs
-from archtwin.connectors import registry
+from archtwin.connectors import registry, webhooks
 from archtwin.connectors import service as connectors
 from archtwin.decisions import service as decisions
 from archtwin.diagrams import export as dexport
@@ -88,6 +88,29 @@ async def _org_tokens(org_id: uuid.UUID) -> dict[str, str]:
     async with unscoped() as conn:
         s = (await conn.execute(select(organizations.c.settings).where(organizations.c.id == org_id))).scalar_one() or {}
     return s.get("diagram_tokens") or {}
+
+
+# ------------------------------------------------------------------ webhook ingress (provider-signed, no user token)
+@r.post("/webhooks/{org_id}/{project_id}/{connector_id}", tags=["connectors"], include_in_schema=True)
+async def webhook(org_id: uuid.UUID, project_id: uuid.UUID, connector_id: uuid.UUID, request: Request):
+    body = await request.body()
+    try:
+        return await webhooks.receive(org_id, project_id, connector_id, {k.lower(): v for k, v in request.headers.items()}, body)
+    except webhooks.Rejected as e:
+        # identical body for every rejection reason (no oracle); the reason is only in logs/metrics
+        raise problem(e.status, "AT-WEBHOOK-001", "Webhook rejected") from None
+
+
+@r.get("/projects/{project_id}/connectors/{cid}/webhook", tags=["connectors"])
+async def webhook_info(cid: uuid.UUID, request: Request, c: RequestContext = Depends(project_ctx)):
+    await require(c, "connector", "view")
+    conn_row = await connectors.get(c, cid)
+    base = str(request.base_url).rstrip("/")
+    return {"url": f"{base}/api/v1/webhooks/{c.org_id}/{c.project_id}/{cid}", "kind": conn_row["kind"],
+            "enabled": await flags.enabled("connectors.webhooks", c.org_id, c.project_id),
+            "signature": "X-Hub-Signature-256" if conn_row["kind"] == "github" else "X-ArchTwin-Signature + X-ArchTwin-Timestamp",
+            "events": registry.get(conn_row["kind"]).manifest.get("webhooks", ["push"]),
+            "recent": await connectors.recent_deliveries(c, cid)}
 
 
 # ------------------------------------------------------------------ home

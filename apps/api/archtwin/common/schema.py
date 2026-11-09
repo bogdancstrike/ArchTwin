@@ -247,9 +247,16 @@ prompt_runs = Table("prompt_runs", metadata,
     Column("latency_ms", Integer, nullable=False, server_default="0"), Column("trace_id", Text, nullable=False, server_default=""),
     Column("status", Text, nullable=False, server_default="ok"), ts(), proj_fk())
 
+# ------------------------------------------------------------------ webhook ingress (RLS; dedupe of provider deliveries)
+webhook_deliveries = Table("webhook_deliveries", metadata,
+    uid("id", primary_key=True), *scoped(), uid("connector_id"), Column("delivery_id", Text, nullable=False),
+    Column("event", Text, nullable=False), Column("outcome", Text, nullable=False), uid("scan_id", nullable=True),
+    J("summary"), ts("received_at"), proj_fk(), UniqueConstraint("connector_id", "delivery_id"),
+    Index("ix_webhook_deliveries_time", "project_id", "received_at"))
+
 ORG_RLS = ["projects", "environments", "project_members", "audit_events", "notifications"]
 PROJECT_RLS = ["secrets", "connectors", "scan_runs", "source_artifacts", "observations", "identity_aliases",
                "identity_suggestions", "snapshots", "snapshot_elements", "baselines", "diagram_layouts", "adrs",
                "adr_versions", "documents", "passages", "generated_docs", "drift_findings", "drift_comments",
-               "drift_evaluations", "prompt_runs"]
+               "drift_evaluations", "prompt_runs", "webhook_deliveries"]
 APPEND_ONLY = ["audit_events", "observations", "snapshot_elements", "adr_versions", "source_artifacts"]

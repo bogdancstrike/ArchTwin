@@ -105,6 +105,8 @@ def _entry_modules(spec: dict[str, Any], dockerfile_cmd: list[str]) -> list[str]
     for i, c in enumerate(cmd):
         if c == "-m" and i + 1 < len(cmd):
             mods += [cmd[i + 1], f"{cmd[i + 1]}.__main__"]   # `python -m pkg` runs pkg/__main__.py
+        if c.endswith(".py") and i > 0 and re.search(r"python(3(\.\d+)?)?$", cmd[i - 1]):   # python path/to/script.py
+            mods.append(c.removesuffix(".py").lstrip("./").replace("/", "."))
         m = re.match(r"^([A-Za-z_][\w.]*):[A-Za-z_]\w*$", c)       # uvicorn pkg.mod:app
         if m and i > 0:
             mods.append(m.group(1))
@@ -150,6 +152,7 @@ class RepoAnalyzer:
         self.r.coverage = {"origin": "static", "systems": systems,
                            "prefixes": [f"container:{s}/" for s in systems] + [f"system:{s}" for s in systems] +
                                        [f"component:{s}/" for s in systems] + [f"endpoint:{s}/" for s in systems]}
+        # kafka topics are only covered where the code was analyzed: declared topics absent in code are UNKNOWN, not drift
         self.r.stats = {"files": len(self.files), "compose_files": len(compose_files), "services": len(self.services),
                         "observations": len(self.r.observations), "documents": len(self.r.documents)}
         return self.r
@@ -334,6 +337,7 @@ class RepoAnalyzer:
                 self.r.edge("static", f"component:{s.system}/{s.name}/{a}", "depends-on", f"component:{s.system}/{s.name}/{b}",
                             python_code.PARSER_VERSION, attrs={"imports": n, "protocol": "in-process"},
                             ref=_rel(self.root, mods[a].path) if a in mods else "", confidence=1.0)
+            self._kafka(s, mods, reach)
             cmdline = " ".join(map(str, s.spec.get("command") or s.spec.get("_df", {}).get("cmd", []) or []))
             serves_http = bool(re.search(r"uvicorn|gunicorn|hypercorn|granian|flask\s+run|daphne", cmdline))
             for m in sorted(reach) if serves_http else []:
@@ -345,6 +349,44 @@ class RepoAnalyzer:
                                 ref=rel, span={"path": rel, "line_start": rt.line, "line_end": rt.line})
                     self.r.edge("static", s.key, "exposes", ek, python_code.PARSER_VERSION, ref=rel,
                                 span={"path": rel, "line_start": rt.line})
+
+    def _broker_for(self, s: Service) -> Service | None:
+        """The Kafka broker this service is configured to use (bootstrap host in its environment)."""
+        names = self.by_system[s.system]
+        for _, v in _env_items(s.spec):
+            hosts = [m.group("host") for m in URL_RX.finditer(v)]
+            for part in v.split(","):
+                hm = HOSTPORT_RX.match(part.strip())
+                if hm:
+                    hosts.append(hm.group("host"))
+            for h in hosts:
+                b = names.get(h)
+                if b and b is not s and re.search(r"kafka|redpanda", f"{b.name} {b.spec.get('image', '')}", re.IGNORECASE):
+                    return b
+        return None
+
+    def _kafka(self, s: Service, mods: dict, reach: set[str]) -> None:
+        uses = [(m, u) for m in sorted(reach) for u in mods[m].kafka]
+        if not uses:
+            return
+        broker = self._broker_for(s)
+        if broker is None:
+            self.r.warnings.append(f"{s.name}: Kafka usage found but no broker in its configuration; topics left UNKNOWN")
+            return
+        groups = sorted({u.topic for _, u in uses if u.direction == "group"})
+        base = f"{s.system}/{broker.name}"
+        for m, u in uses:
+            if u.direction == "group":
+                continue
+            rel = _rel(self.root, mods[m].path)
+            tk = f"kafka-topic:{base}/{u.topic}"
+            span = {"path": rel, "line_start": u.line, "line_end": u.line}
+            self.r.node("static", tk, "kafka-topic", u.topic, python_code.PARSER_VERSION, attrs={"technology": "Kafka topic"}, ref=rel, span=span)
+            self.r.edge("static", broker.key, "contains", tk, python_code.PARSER_VERSION, ref=rel, span=span)
+            attrs = {"protocols": ["kafka"], "module": m}
+            if u.direction == "consumes" and groups:
+                attrs["group"] = groups[0] if len(groups) == 1 else groups
+            self.r.edge("static", s.key, u.direction, tk, python_code.PARSER_VERSION, attrs=attrs, ref=rel, span=span, confidence=0.95)
 
     def typescript(self, ctx: Path, files: list[Path], svcs: list[Service]) -> None:
         src = ctx / "src"

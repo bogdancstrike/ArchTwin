@@ -208,3 +208,12 @@ async def recent_scans(ctx: RequestContext, limit: int = 10) -> list[dict[str, A
                    scan_runs.c.finished_at, scan_runs.c.stats, connectors.c.name.label("connector"), connectors.c.kind)
             .join(connectors, connectors.c.id == scan_runs.c.connector_id)
             .where(scan_runs.c.project_id == ctx.project_id).order_by(scan_runs.c.created_at.desc()).limit(limit)))
+
+
+async def recent_deliveries(ctx: RequestContext, cid: uuid.UUID, limit: int = 20) -> list[dict[str, Any]]:
+    from archtwin.common.schema import webhook_deliveries
+    async with uow(ctx) as conn:
+        return rows(await conn.execute(select(webhook_deliveries.c.delivery_id, webhook_deliveries.c.event, webhook_deliveries.c.outcome,
+                                              webhook_deliveries.c.scan_id, webhook_deliveries.c.received_at, webhook_deliveries.c.summary)
+                                       .where(webhook_deliveries.c.connector_id == cid)
+                                       .order_by(webhook_deliveries.c.received_at.desc()).limit(limit)))

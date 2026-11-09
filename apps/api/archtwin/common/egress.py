@@ -37,7 +37,7 @@ def resolve(host: str) -> list[ipaddress._BaseAddress]:
     return [ipaddress.ip_address(i[4][0].split("%")[0]) for i in infos]
 
 
-def check_url(url: str, allow_hosts: set[str] | None = None, resolver=resolve) -> None:
+def check_url(url: str, allow_hosts: set[str] | None = None, resolver=None) -> None:
     parts = urlsplit(url)
     if parts.scheme not in ("http", "https"):
         raise EgressDenied(f"scheme {parts.scheme!r} not allowed")
@@ -51,7 +51,7 @@ def check_url(url: str, allow_hosts: set[str] | None = None, resolver=resolve) -
         return
     if host in METADATA_HOSTS:
         raise EgressDenied("metadata endpoints are blocked")
-    for ip in resolver(host):
+    for ip in (resolver or resolve)(host):
         if _ip_blocked(ip):
             raise EgressDenied(f"{host} resolves to a blocked address range")
 

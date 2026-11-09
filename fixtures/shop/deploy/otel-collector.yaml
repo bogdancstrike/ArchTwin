@@ -1,0 +1,23 @@
+receivers:
+  otlp:
+    protocols:
+      http: { endpoint: 0.0.0.0:4318 }
+      grpc: { endpoint: 0.0.0.0:4317 }
+connectors:
+  servicegraph:
+    latency_histogram_buckets: [5ms, 20ms, 100ms, 500ms, 2s]
+    dimensions: [messaging.system]
+    store: { ttl: 5s, max_items: 2000 }
+    virtual_node_peer_attributes: [db.name, db.system, messaging.destination.name, peer.service, server.address]
+    metrics_flush_interval: 5s
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion: { enabled: false }
+  debug: { verbosity: basic }
+processors:
+  batch: { timeout: 2s }
+service:
+  pipelines:
+    traces: { receivers: [otlp], processors: [batch], exporters: [servicegraph] }
+    metrics: { receivers: [servicegraph], exporters: [prometheus] }
