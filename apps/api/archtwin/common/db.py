@@ -32,6 +32,14 @@ def engine() -> AsyncEngine:
     return _engine
 
 
+async def project_lock(conn: AsyncConnection, project_id: uuid.UUID | None, name: str) -> None:
+    """Serialize one kind of work per project for the rest of the transaction (snapshot build, drift evaluation).
+
+    Two concurrent snapshot builds would otherwise both compute version N+1 and one would fail on the unique constraint;
+    two drift evaluations would race on inserting the same deterministic finding id."""
+    await conn.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": f"{name}:{project_id}"})
+
+
 async def dispose() -> None:
     global _engine
     if _engine is not None:

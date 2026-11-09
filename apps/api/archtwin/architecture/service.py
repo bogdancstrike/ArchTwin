@@ -1,6 +1,7 @@
 """Snapshots, time travel, diff, baselines and curation (AT-ARCHITECTURE_GRAPH-001..003)."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import uuid
@@ -12,7 +13,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from archtwin.architecture import builder
 from archtwin.audit import service as audit
-from archtwin.common.db import RequestContext, row, rows, uow
+from archtwin.common.db import RequestContext, project_lock, row, rows, uow
 from archtwin.common.errors import not_found, problem
 from archtwin.common.ids import new_id
 from archtwin.common.schema import baselines, identity_aliases, identity_suggestions, observations, snapshot_elements, snapshots
@@ -23,6 +24,7 @@ from archtwin.kernel import outbox
 async def build_snapshot(ctx: RequestContext, trigger: str = "scan") -> dict[str, Any]:
     """Materialize a new immutable snapshot if the manifest changed (idempotent for unchanged inputs)."""
     async with uow(ctx) as conn:
+        await project_lock(conn, ctx.project_id, "snapshot")
         inputs = [i for i in await latest_inputs(conn, ctx) if i["connector"]["enabled"]]
         scan_ids = [s["id"] for i in inputs for s in i["scans"]]
         obs = rows(await conn.execute(select(observations).where(and_(observations.c.project_id == ctx.project_id,
@@ -31,7 +33,7 @@ async def build_snapshot(ctx: RequestContext, trigger: str = "scan") -> dict[str
                                                                          observations.c.origin == "manual"))))
         aliases = {a.alias_key: a.canonical_key for a in (await conn.execute(select(identity_aliases)
                                                                              .where(identity_aliases.c.project_id == ctx.project_id))).all()}
-        g = builder.build(obs + manual, aliases)
+        g = await asyncio.to_thread(builder.build, obs + manual, aliases)   # CPU-bound: keep the event loop responsive
         last = row((await conn.execute(select(snapshots).where(snapshots.c.project_id == ctx.project_id)
                                        .order_by(snapshots.c.version.desc()).limit(1))).first())
         # coverage is an input to drift (absence vs UNKNOWN): a coverage change is a new snapshot even if the graph is equal
@@ -107,7 +109,8 @@ async def diff_snapshots(ctx: RequestContext, a: uuid.UUID, b: uuid.UUID) -> dic
         if not sa or not sb:
             raise not_found("snapshot")
         ga, gb = await load_graph(conn, a), await load_graph(conn, b)
-    return {"from": {"id": sa["id"], "version": sa["version"]}, "to": {"id": sb["id"], "version": sb["version"]}, **builder.diff(ga, gb)}
+    d = await asyncio.to_thread(builder.diff, ga, gb)
+    return {"from": {"id": sa["id"], "version": sa["version"]}, "to": {"id": sb["id"], "version": sb["version"]}, **d}
 
 
 # ------------------------------------------------------------------ baselines (desired state, curated + approved)

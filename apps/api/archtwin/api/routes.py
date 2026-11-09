@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile
 from fastapi.responses import PlainTextResponse
@@ -475,7 +475,7 @@ async def put_layout(view_key: str, body: S.LayoutIn, c: RequestContext = Depend
         ov = {k: {"x": float(v["x"]), "y": float(v["y"])} for k, v in body.overrides.items() if "x" in v and "y" in v}
         if cur:
             await conn.execute(diagram_layouts.update().where(diagram_layouts.c.id == cur.id).values(
-                overrides={**cur.overrides, **ov}, revision=cur.revision + 1, updated_by=c.actor_id, updated_at=datetime.now()))
+                overrides={**cur.overrides, **ov}, revision=cur.revision + 1, updated_by=c.actor_id, updated_at=datetime.now(UTC)))
             rev = cur.revision + 1
         else:
             await conn.execute(diagram_layouts.insert().values(id=new_id(), org_id=c.org_id, project_id=c.project_id, view_key=view_key,
