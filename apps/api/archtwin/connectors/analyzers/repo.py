@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 
-from archtwin.connectors.analyzers import python_code
+from archtwin.connectors.analyzers import db_schema, python_code
 from archtwin.connectors.analyzers.common import HOSTPORT_RX, SCHEME_REL, URL_RX, classify, read, safe_url, scheme_base, walk
 from archtwin.connectors.sdk import DocumentOut, ScanResult
 
@@ -251,12 +251,15 @@ class RepoAnalyzer:
             self.config_mounts()
         self.openapi_specs()
         self.catalog_and_owners()
+        self.tables()
         self.docs()
+        if self.content != "docs":
+            self.code_index()
         systems = sorted(self.by_system)
         self.r.coverage = {"origin": "static", "systems": systems,
                            "prefixes": [f"container:{s}/" for s in systems] + [f"system:{s}" for s in systems] +
                                        [f"component:{s}/" for s in systems] + [f"endpoint:{s}/" for s in systems] +
-                                       [f"code:{s}/" for s in systems]}
+                                       [f"code:{s}/" for s in systems] + [f"table:{s}/code/" for s in systems]}
         # kafka topics are only covered where the code was analyzed: declared topics absent in code are UNKNOWN, not drift
         self.r.stats = {"files": len(self.files), "compose_files": len(compose_files), "services": len(self.services),
                         "observations": len(self.r.observations), "documents": len(self.r.documents)}
@@ -739,6 +742,64 @@ class RepoAnalyzer:
                                         ref=rel, span={"path": rel, "line_start": i, "line_end": i})
 
     # ------------------------------------------------------------------ documents
+    def tables(self) -> None:
+        """Tables and columns declared in code (SQL, Alembic, SQLAlchemy, Django) -> `table` elements with full column lists."""
+        decl = db_schema.extract(self.root, self.files, read)
+        for name, t in sorted(decl.items()):
+            first = t.sources[0]
+            owner = self._owner_service(self.root / first["path"])
+            system = owner.system if owner else self.repo
+            self.by_system.setdefault(system, {})
+            tk = f"table:{system}/code/{name}"
+            cols = [{"name": c.name, "type": c.type, "nullable": c.nullable, "primary_key": c.primary_key, "references": c.references}
+                    for c in t.columns.values()]
+            self.r.node("static", tk, "table", name, db_schema.V_SCHEMA, ref=first["path"],
+                        span={"path": first["path"], "line_start": first["line"]},
+                        attrs={"columns": cols, "column_count": len(cols), "declared_in": t.sources[:12], "declared_by": sorted({x["kind"] for x in t.sources}),
+                               "owner": owner.name if owner else "", "description": f"{len(cols)} columns · declared in {first['path']}"})
+            src = owner.key if owner else f"system:{system}"
+            self.r.edge("static", src, "references", tk, db_schema.V_SCHEMA, attrs={"relation": "declares schema"}, ref=first["path"],
+                        span={"path": first["path"], "line_start": first["line"]})
+            for c in t.columns.values():
+                if c.references:
+                    target = c.references.split(".")[-2] if c.references.count(".") >= 1 else c.references
+                    if target in decl and target != name:
+                        self.r.edge("static", tk, "references", f"table:{system}/code/{target}", db_schema.V_SCHEMA,
+                                    attrs={"relation": "foreign key", "column": c.name, "target_column": c.references}, ref=first["path"])
+        if decl:
+            self.r.stats["tables"] = len(decl)
+
+    CODE_EXT = {".py": "python", ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".jsx": "javascript", ".java": "java",
+                ".kt": "kotlin", ".go": "go", ".cs": "csharp", ".rb": "ruby", ".php": "php", ".rs": "rust", ".sql": "sql",
+                ".proto": "protobuf", ".graphql": "graphql", ".prisma": "prisma"}
+    CODE_PRIORITY = re.compile(r"(model|schema|migration|alembic|entity|entities|repository|repositories|dao|table|sql|route|router|api|"
+                               r"controller|handler|endpoint|service|consumer|producer|config|settings|main|app)", re.IGNORECASE)
+    MAX_CODE_FILES = 1500
+
+    def code_index(self) -> None:
+        """Source files as searchable documents (tag `code`) so the assistant can answer from the code itself.
+        Prioritizes models, schemas, migrations, APIs and services; tests, generated and vendored files are skipped."""
+        cands = []
+        for f in self.files:
+            lang = self.CODE_EXT.get(f.suffix.lower())
+            if not lang or f.stat().st_size > 150_000 or f.name.endswith((".min.js", ".d.ts", ".pyi")):
+                continue
+            rel = _rel(self.root, f)
+            parts = set(Path(rel).parts)
+            if parts & {"tests", "test", "__tests__", "spec", "generated", "vendor", "third_party", "migrations_old"} or ".test." in f.name or f.name.startswith("test_"):
+                continue
+            score = (0 if self.CODE_PRIORITY.search(rel) else 1, len(Path(rel).parts), rel)
+            cands.append((score, f, rel, lang))
+        cands.sort(key=lambda x: x[0])
+        if len(cands) > self.MAX_CODE_FILES:
+            self.r.warnings.append(f"code index limited to {self.MAX_CODE_FILES} of {len(cands)} source files (models, schemas, APIs first)")
+        for _, f, rel, lang in cands[: self.MAX_CODE_FILES]:
+            text = read(f)
+            if not text.strip() or "\x00" in text[:2000]:
+                continue
+            self.r.documents.append(DocumentOut(path=rel, title=rel, text=text, mime="text/x-code", tags=["code", lang]))
+        self.r.stats["code_files_indexed"] = min(len(cands), self.MAX_CODE_FILES)
+
     def _documented(self, rel: str, blocks: list[tuple[str, str]]) -> None:
         """Relations drawn in architecture diagrams inside the docs: `inferred` (documented intent, not observed),
         between names the builder resolves to real elements across every datasource."""

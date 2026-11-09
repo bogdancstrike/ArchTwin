@@ -430,6 +430,15 @@ async def architecture(snapshot_id: uuid.UUID | None = None, at: datetime | None
     return g
 
 
+@r.get("/projects/{project_id}/flows", tags=["architecture"])
+async def project_flows(snapshot_id: uuid.UUID | None = None, c: RequestContext = Depends(project_ctx)):
+    """Automatically recognized request, event and data flows (deterministic, from every datasource's evidence)."""
+    await _arch(c)
+    from archtwin.architecture import flows as flows_mod
+    g = await arch.graph(c, snapshot_id)
+    return {"snapshot_id": str(g["snapshot"]["id"]) if g.get("snapshot") else None, **flows_mod.recognize(g)}
+
+
 @r.get("/projects/{project_id}/snapshots", tags=["architecture"])
 async def snapshots(c: RequestContext = Depends(project_ctx)):
     await _arch(c)
