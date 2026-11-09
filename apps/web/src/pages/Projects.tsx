@@ -56,8 +56,8 @@ export function ProjectsPage() {
     {h.data?.projects.length === 0 && <Empty title="No projects yet">Create one, connect a repository and the platform builds the architecture from evidence.</Empty>}
     {h.data && h.data.projects.length > 0 && list.length === 0 && <Empty title="No match">Nothing matches “{q}”.</Empty>}
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-      {!h.data ? [0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-48 !rounded-xl" />) : list.map((p) => <div key={p.id} className="relative"><ProjectHealthCard p={p} />
-        <FavoriteStar projectId={p.id} title={p.title} className="absolute bottom-3 right-3" /></div>)}
+      {!h.data ? [0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-48 !rounded-xl" />) : list.map((p) => <ProjectHealthCard key={p.id} p={p}
+        titleAddon={<FavoriteStar projectId={p.id} title={p.title} size={15} className="shrink-0 !p-0.5" />} />)}
     </div>
     {rest.length > 0 && <section aria-label="Other projects" className="space-y-2">
       <h2 className="text-sm font-semibold text-soft">Other projects <span className="font-normal">(no recent activity)</span></h2>

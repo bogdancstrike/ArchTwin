@@ -10,13 +10,32 @@ selectable_models:
     - alias: gpt-6-terra
       label: "Terra"
       reasoning_effort: medium
-    - alias: gpt-6-sol
-      label: "Sol"
-      reasoning_effort: medium
-  # Capabilities, context limits and prices MUST be verified at deployment for terra and sol;
+  # Sol is deliberately not offered (cost policy): blocked below, never routed to, ignored as a stored preference.
+  # Capabilities, context limits and prices MUST be verified at deployment for terra;
   # a model failing capability validation (tool calling, structured output) is hidden, not degraded.
   selection_scope: [org_allowlist, project_allowlist, user_preference, per_request]
   precedence: "per_request > user_preference > project_default > org_default > gpt-6-luna"
+blocked_models: [gpt-6-sol]
+
+# Task routing: every AI operation runs on the cheapest model and reasoning effort that does the job well.
+# Deep, multi-hop reasoning over the whole system (architecture, flows, drift, integration design) uses Terra with high
+# effort; grounded answers and ADR completion use Luna/medium; rewriting and page search use Luna/low.
+# `max_output_tokens` caps visible + reasoning tokens (reasoning tokens are billed as output).
+# `expected_output_tokens` and `evidence_tokens` seed cost estimates until the ledger has history for the task.
+# `user_selectable`: the model picker in the UI may override the model (never into a blocked one); effort stays per task.
+tasks:
+  architecture_draft:  {model: gpt-6-terra, reasoning_effort: high,    max_output_tokens: 16000, expected_output_tokens: 6000, evidence_tokens: 9000, purpose: "Draft an architecture view from docs and code"}
+  architecture_review: {model: gpt-6-terra, reasoning_effort: high,    max_output_tokens: 12000, expected_output_tokens: 4000, evidence_tokens: 8000, purpose: "Review the architecture against decisions"}
+  flow_explain:        {model: gpt-6-terra, reasoning_effort: high,    max_output_tokens: 8000,  expected_output_tokens: 2500, evidence_tokens: 4000, purpose: "Find and explain end-to-end flows"}
+  drift_review:        {model: gpt-6-terra, reasoning_effort: high,    max_output_tokens: 8000,  expected_output_tokens: 2500, evidence_tokens: 5000, purpose: "Judge ADR/docs/code non-conformities"}
+  integration_design:  {model: gpt-6-terra, reasoning_effort: high,    max_output_tokens: 12000, expected_output_tokens: 4500, evidence_tokens: 7000, purpose: "Design an integration (Assistant, design mode)", user_selectable: true}
+  doc_drafting:        {model: gpt-6-terra, reasoning_effort: medium,  max_output_tokens: 12000, expected_output_tokens: 5000, evidence_tokens: 7000, purpose: "Write AI documents (user guide, PRD, ARF, dev guide)"}
+  question_answering:  {model: gpt-6-luna,  reasoning_effort: medium,  max_output_tokens: 10000, expected_output_tokens: 2800, evidence_tokens: 9000, purpose: "Assistant, Data scope (grounded RAG)", user_selectable: true}
+  adrs:                {model: gpt-6-luna,  reasoning_effort: medium,  max_output_tokens: 5000,  expected_output_tokens: 1800, evidence_tokens: 3000, purpose: "Draft or complete an ADR (MADR)"}
+  general_chat:        {model: gpt-6-luna,  reasoning_effort: medium,  max_output_tokens: 6000,  expected_output_tokens: 1500,  evidence_tokens: 0,    purpose: "Assistant, General scope (no project data)", user_selectable: true}
+  text_extend:         {model: gpt-6-luna,  reasoning_effort: low,     max_output_tokens: 2000,  expected_output_tokens: 500,  evidence_tokens: 1500, purpose: "Extend or rewrite a text field"}
+  page_ask:            {model: gpt-6-luna,  reasoning_effort: low,     max_output_tokens: 1500,  expected_output_tokens: 350,  evidence_tokens: 1800, purpose: "Ask the Flows, Decisions or Docs page (search first, AI only to explain)"}
+  summarization:       {model: gpt-6-luna,  reasoning_effort: minimal, max_output_tokens: 1500,  expected_output_tokens: 400,  evidence_tokens: 2000, purpose: "Summaries and extraction"}
 profiles:
   architecture-reasoning:
     model_alias: "${selected_model}"     # user choice, default gpt-6-luna

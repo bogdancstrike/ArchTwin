@@ -35,11 +35,12 @@ def test_missing_with_fresh_complete_coverage_is_drift():
     assert ("DR-MISSING-001", "container:s/db") in rules_of(fs, "drift")
 
 
-def test_missing_with_stale_coverage_is_unknown_not_drift():
+def test_missing_with_stale_coverage_raises_nothing():
+    """Not observed by a stale/absent source says nothing: no drift and no 'no longer observed' finding at all."""
     cur = build([obs("system:s", "software-system"), obs("container:s/api", "container")])
     fs = evaluate(base_graph(), cur, cov("stale"))
-    assert ("DR-MISSING-001", "container:s/db") in rules_of(fs, "unknown")
-    assert not rules_of(fs, "drift") - {r for r in rules_of(fs) if r[0] != "DR-MISSING-001" and r[0] != "DR-EDGE-REMOVED-001"}
+    assert ("DR-MISSING-001", "container:s/db") not in rules_of(fs)
+    assert not rules_of(fs, "drift")
 
 
 def test_missing_with_partial_coverage_is_incomplete():
@@ -102,3 +103,19 @@ def test_reevaluation_is_idempotent_and_ids_are_stable():
     assert strip(a) == strip(b)                       # same facts => same findings (evidence ids differ per build)
     assert finding_id(P, "DR-MISSING-001", "container:s/db") == finding_id(P, "DR-MISSING-001", "container:s/db")
     assert finding_id(P, "DR-MISSING-001", "container:s/db") != finding_id(uuid.uuid4(), "DR-MISSING-001", "container:s/db")
+
+
+
+def test_external_dependency_no_longer_inferred_is_not_drift():
+    """'external:elasticsearch is no longer observed' after an analyzer change is noise, not a missing element."""
+    base = base_graph([obs("external:elasticsearch", "external-system")])
+    fs = evaluate(base, base_graph(), cov())
+    assert not any(f["subject_key"] == "external:elasticsearch" for f in fs)
+
+
+def test_rekeyed_element_with_the_same_name_is_not_missing_and_its_edges_are_not_removed():
+    base = base_graph()
+    cur = build([obs("system:s", "software-system"), obs("container:s/api", "container"), obs("container:s/x-db", "container", name="db"),
+                 edge("container:s/api", "writes", "container:s/x-db", attrs={"protocol": "postgresql"})])
+    fs = evaluate(base, cur, cov())
+    assert not [f for f in fs if f["rule_id"] in ("DR-MISSING-001", "DR-EDGE-REMOVED-001")]

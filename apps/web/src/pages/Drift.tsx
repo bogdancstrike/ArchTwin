@@ -14,13 +14,19 @@ const VERDICT: Record<string, string> = { drift: "accent", unknown: "muted", inc
 /** "Delete" a finding the user considers untrue: it is dismissed as a false positive (kept so re-evaluation does not recreate it). */
 function DismissDialog({ projectId, findings, onClose, onDone }: { projectId: string; findings: Finding[]; onClose: () => void; onDone?: () => void }) {
   const [note, setNote] = useState("");
-  const del = useAction(() => api(`/projects/${projectId}/drift/dismiss`, { method: "POST", json: { ids: findings.map((f) => f.id), note } }),
-    [["drift", projectId], ...findings.map((f) => ["finding", f.id])], findings.length === 1 ? "Finding deleted" : `${findings.length} findings deleted`);
+  const [allOfRule, setAllOfRule] = useState(false);
+  const one = findings.length === 1 ? findings[0] : null;
+  const del = useAction(() => api<{ dismissed: number }>(`/projects/${projectId}/drift/dismiss`, { method: "POST",
+      json: allOfRule && one ? { rule_id: one.rule_id, note } : { ids: findings.map((f) => f.id), note } }),
+    [["drift", projectId], ...findings.map((f) => ["finding", f.id])], (r) => `${r.dismissed} finding${r.dismissed === 1 ? "" : "s"} deleted`);
   return <Dialog open={findings.length > 0} onClose={onClose} title={findings.length === 1 ? "Delete drift finding" : `Delete ${findings.length} drift findings`}>
     <div className="space-y-3 text-sm">
       {findings.length === 1 && <p className="rounded bg-paper-2 p-2"><b>{findings[0].title}</b><br /><span className="font-mono text-xs text-soft">{findings[0].subject_key}</span></p>}
       <p className="text-muted">The finding is dismissed as <b>not true</b>: it disappears from the list, the counts and the diagrams, and the next evaluation will not bring it back.
         You can still see it under <i>Status: Dismissed</i> and restore it.</p>
+      {one && <label className="flex items-start gap-2 rounded border border-rule p-2 text-xs">
+        <input type="checkbox" className="mt-0.5" checked={allOfRule} onChange={(e) => setAllOfRule(e.target.checked)} />
+        <span>Delete <b>every open finding of this type</b> ({one.rule?.title ?? one.rule_id}, e.g. all “… is no longer observed”) in this project.</span></label>}
       <Field label="Why is it not true? (optional, kept in the audit log)"><Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)}
         placeholder="e.g. the endpoint is served by the gateway, the ADR was superseded…" /></Field>
       <div className="flex justify-end gap-2"><Button onClick={onClose}>Cancel</Button>

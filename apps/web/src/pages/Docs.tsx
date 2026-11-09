@@ -7,6 +7,7 @@ import { useAction, useApi } from "@/lib/hooks";
 import { DataTable } from "@/components/DataTable";
 import { SplitLayout } from "@/components/SplitLayout";
 import { CostEstimate } from "@/components/CostEstimate";
+import { PageAsk } from "@/components/PageAsk";
 
 export function DocsPage({ projectId }: { projectId: string }) {
   const gen = useApi<any[]>(["gen", projectId], `/projects/${projectId}/generated-docs`);
@@ -23,6 +24,7 @@ export function DocsPage({ projectId }: { projectId: string }) {
   const generate = useAction(() => api<any>(`/projects/${projectId}/generated-docs`, { method: "POST", json: { template: tpl } }), [["gen", projectId]], "Documentation generated");
   const upload = useAction((f: File) => { const fd = new FormData(); fd.append("file", f); return api(`/projects/${projectId}/documents`, { method: "POST", body: fd }); }, [["docs", projectId]], "Document ingested");
   return <SplitLayout storageKey="docs" title="Documentation" sideWidth="xl:w-[420px]" side={(toggle) => <div className="space-y-4">
+      <PageAsk projectId={projectId} page="docs" selected={docSel} onPick={(m) => { setDocSel(m.id); setSel(null); }} />
       <Card eyebrow="Generated from evidence" title="Documentation" actions={toggle}>
         <div className="flex gap-2"><Select aria-label="Document type" className="flex-1" value={tpl} onChange={(e) => setTpl(e.target.value)}>
           {(["evidence", "ai"] as const).map((m) => <optgroup key={m} label={m === "evidence" ? "Cited from evidence (deterministic)" : "AI drafts (cited, review required)"}>

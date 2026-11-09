@@ -30,9 +30,9 @@ tasks:
   drift_review:        {model: gpt-6-terra, reasoning_effort: high,    max_output_tokens: 8000,  expected_output_tokens: 2500, evidence_tokens: 5000, purpose: "Judge ADR/docs/code non-conformities"}
   integration_design:  {model: gpt-6-terra, reasoning_effort: high,    max_output_tokens: 12000, expected_output_tokens: 4500, evidence_tokens: 7000, purpose: "Design an integration (Assistant, design mode)", user_selectable: true}
   doc_drafting:        {model: gpt-6-terra, reasoning_effort: medium,  max_output_tokens: 12000, expected_output_tokens: 5000, evidence_tokens: 7000, purpose: "Write AI documents (user guide, PRD, ARF, dev guide)"}
-  question_answering:  {model: gpt-6-luna,  reasoning_effort: medium,  max_output_tokens: 5000,  expected_output_tokens: 1400, evidence_tokens: 5000, purpose: "Assistant, Data scope (grounded RAG)", user_selectable: true}
+  question_answering:  {model: gpt-6-luna,  reasoning_effort: medium,  max_output_tokens: 10000, expected_output_tokens: 2800, evidence_tokens: 9000, purpose: "Assistant, Data scope (grounded RAG)", user_selectable: true}
   adrs:                {model: gpt-6-luna,  reasoning_effort: medium,  max_output_tokens: 5000,  expected_output_tokens: 1800, evidence_tokens: 3000, purpose: "Draft or complete an ADR (MADR)"}
-  general_chat:        {model: gpt-6-luna,  reasoning_effort: low,     max_output_tokens: 3000,  expected_output_tokens: 700,  evidence_tokens: 0,    purpose: "Assistant, General scope (no project data)", user_selectable: true}
+  general_chat:        {model: gpt-6-luna,  reasoning_effort: medium,  max_output_tokens: 6000,  expected_output_tokens: 1500,  evidence_tokens: 0,    purpose: "Assistant, General scope (no project data)", user_selectable: true}
   text_extend:         {model: gpt-6-luna,  reasoning_effort: low,     max_output_tokens: 2000,  expected_output_tokens: 500,  evidence_tokens: 1500, purpose: "Extend or rewrite a text field"}
   page_ask:            {model: gpt-6-luna,  reasoning_effort: low,     max_output_tokens: 1500,  expected_output_tokens: 350,  evidence_tokens: 1800, purpose: "Ask the Flows, Decisions or Docs page (search first, AI only to explain)"}
   summarization:       {model: gpt-6-luna,  reasoning_effort: minimal, max_output_tokens: 1500,  expected_output_tokens: 400,  evidence_tokens: 2000, purpose: "Summaries and extraction"}

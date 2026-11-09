@@ -34,7 +34,7 @@ from archtwin.drift import service as drift
 from archtwin.flags import service as flags
 from archtwin.home import service as home_svc
 from archtwin.iam import service as iam
-from archtwin.intelligence import assistant, gateway, routing
+from archtwin.intelligence import assistant, gateway, page_ask, routing
 from archtwin.inventory import service as inventory
 from archtwin.kernel.idempotency import idempotent
 from archtwin.notifications import service as notify
@@ -698,9 +698,9 @@ async def drift_transition(fid: uuid.UUID, body: S.TransitionIn, c: RequestConte
 async def drift_dismiss(body: S.DismissIn, c: RequestContext = Depends(project_ctx)):
     """Delete findings that are not true (false positives). They stay dismissed across re-evaluations; restore = transition to new."""
     await flags.require(c, "module.drift-engine", "module.drift-triage")
-    for fid in body.ids:
-        await require(c, "drift_finding", "dismiss", str(fid))
-    return await drift.dismiss_many(c, body.ids, body.note)
+    for fid in body.ids or [None]:
+        await require(c, "drift_finding", "dismiss", str(fid) if fid else "")
+    return await drift.dismiss_many(c, body.ids, body.note, body.rule_id)
 
 
 @r.post("/projects/{project_id}/drift/{fid}/comments", tags=["drift"])
@@ -728,6 +728,21 @@ async def ai_ask(body: S.AskIn, c: RequestContext = Depends(project_ctx)):
     model = routing.route(assistant.operation_for(body.scope, body.mode), body.model, (await iam.get_preferences(c.actor_id)).get("preferred_model")).model
     return await assistant.ask(c, body.question, model, body.mode, body.history, scope=body.scope, sources=body.sources,
                                conversation_id=body.conversation_id)
+
+
+@r.post("/projects/{project_id}/ask", tags=["ai"])
+async def ask_page(body: S.PageAskIn, c: RequestContext = Depends(project_ctx)):
+    """Ask the Flows, Decisions or Docs page. Deterministic search always runs; a short cited AI answer is added when the
+    AI flag is on (cached for identical questions over the same matches)."""
+    page_flag, (resource, action) = {"flows": ("module.architecture-graph", ("architecture", "view")),
+                                     "decisions": ("module.adr-workflow", ("adr", "view")),
+                                     "docs": ("module.documentation-engine", ("document", "view"))}[body.page]
+    await flags.require(c, page_flag)
+    await require(c, resource, action)
+    use_ai = body.ai and all([await flags.enabled(k, c.org_id, c.project_id) for k in ("ai.answers", "module.architecture-assistant")])
+    if use_ai:
+        await require(c, "assistant", "ask")
+    return await page_ask.ask(c, body.page, body.question, use_ai=use_ai)
 
 
 @r.post("/projects/{project_id}/assistant/complete-adr", tags=["ai"])

@@ -128,6 +128,9 @@ def _fake(messages: list[dict[str, str]], json_mode: bool, operation: str = "") 
     if operation == "doc_drafting":
         ids = re.findall(r"^\[(E\d+)\]", user, re.MULTILINE)[:4]
         return "# Draft (fake LLM mode)\n\n## Overview\n\nThe system is described by the evidence " + " ".join(f"[{i}]" for i in ids) + ".\n"
+    if operation in ("page_ask", "flow_explain"):
+        refs = list(dict.fromkeys(re.findall(r"^\[([FDP]\d+)\]", user, re.MULTILINE)))[:2]
+        return "The closest matches are " + " and ".join(f"[{r}]" for r in refs) + " (fake LLM mode)." if refs else "No item answers this."
     if operation == "text_extend":
         src = re.search(r"<text>\n?(.*?)\n?</text>", user, re.DOTALL)
         base = (src.group(1) if src else user).strip()

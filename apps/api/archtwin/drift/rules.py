@@ -7,21 +7,24 @@ origin covers the element (missing evidence is never proof of absence).
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
 RULES = {
-    "DR-MISSING-001": {"version": "1.1", "severity": "high", "title": "Missing element", "requires": ["static|runtime"]},
+    "DR-MISSING-001": {"version": "1.3", "severity": "high", "title": "Missing element", "requires": ["static|runtime"]},
     "DR-UNPLANNED-001": {"version": "1.0", "severity": "medium", "title": "Unplanned element", "requires": []},
     "DR-EDGE-ADDED-001": {"version": "1.0", "severity": "medium", "title": "Unplanned dependency", "requires": []},
-    "DR-EDGE-REMOVED-001": {"version": "1.0", "severity": "high", "title": "Planned dependency missing", "requires": ["static|runtime"]},
+    "DR-EDGE-REMOVED-001": {"version": "1.2", "severity": "high", "title": "Planned dependency missing", "requires": ["static|runtime"]},
     "DR-PROTOCOL-001": {"version": "1.0", "severity": "high", "title": "Protocol changed", "requires": []},
     "DR-RUNTIME-NOT-RUNNING-001": {"version": "1.0", "severity": "high", "title": "Declared but not running", "requires": ["runtime"]},
     "DR-RUNTIME-UNDECLARED-001": {"version": "1.0", "severity": "medium", "title": "Running but not declared", "requires": ["static"]},
 }
 ARCH_NODE_KINDS = {"software-system", "container", "external-system", "database", "kafka-topic", "api-contract"}
 ARCH_EDGE_KINDS = {"calls", "writes", "reads", "publishes", "consumes"}
+OWNED_NODE_KINDS = {"software-system", "container", "api-contract"}   # what a team plans; externals are inferred dependencies
+NOISY_WHEN_STALE = {"DR-MISSING-001", "DR-EDGE-REMOVED-001"}           # deleted (not resolved) once no longer produced
 MIN_CONFIDENCE = 0.6          # inferred / low-confidence evidence alone never raises drift
 
 
@@ -61,6 +64,10 @@ def finding_id(project_id: uuid.UUID, rule_id: str, subject: str) -> uuid.UUID:
     return uuid.UUID(hashlib.sha256(f"{project_id}|{rule_id}|{subject}".encode()).hexdigest()[:32])
 
 
+def _norm(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+
+
 def _verdict(cov_status: str) -> str:
     return {"current": "drift", "incomplete": "incomplete", "stale": "unknown", "unknown": "unknown"}[cov_status]
 
@@ -83,19 +90,32 @@ def evaluate(baseline: dict[str, Any] | None, current: dict[str, Any], cov: Cove
     cn, ce = current["nodes"], current["edges"]
     if baseline is not None:
         bn, be = baseline["nodes"], baseline["edges"]
+        names = {_norm(n["name"]) for n in cn.values()}
         for k, n in bn.items():
             if n["kind"] not in ARCH_NODE_KINDS or k in cn:
                 continue
+            if n["kind"] not in OWNED_NODE_KINDS or _norm(n["name"]) in names:
+                continue                 # an external dependency stopped being inferred, or the element was re-keyed: not drift
             st = max((cov.status(o, k) for o in ("static", "runtime")), key=lambda s: ["unknown", "stale", "incomplete", "current"].index(s))
+            if _verdict(st) == "unknown":
+                continue                 # no current source covers it any more: "not observed" says nothing (no finding)
             add("DR-MISSING-001", k, f"{n['name']} is in the approved baseline but no longer observed", _verdict(st),
                 expected={"kind": n["kind"], "name": n["name"]}, actual=None, evidence=n.get("evidence", [])[:3])
         for k, n in cn.items():
             if n["kind"] in ARCH_NODE_KINDS and k not in bn and _strong(n):
                 add("DR-UNPLANNED-001", k, f"{n['name']} exists but is not in the approved baseline", "drift",
                     expected=None, actual={"kind": n["kind"], "origins": n["origins"]}, evidence=n.get("evidence", [])[:3])
+        current_pairs = {(e["kind"], _norm(cn[e["source"]]["name"]), _norm(cn[e["target"]]["name"])) for e in ce.values()
+                         if e["source"] in cn and e["target"] in cn}
         for k, e in be.items():
             if e["kind"] not in ARCH_EDGE_KINDS or k in ce:
                 continue
+            if e["source"] not in cn or e["target"] not in cn:
+                continue                 # an end disappeared or was re-keyed: reported (if at all) on the element, not per edge
+            if (e["kind"], _norm(cn[e["source"]]["name"]), _norm(cn[e["target"]]["name"])) in current_pairs:
+                continue
+            if cn[e["source"]]["kind"] not in OWNED_NODE_KINDS or cn[e["target"]]["kind"] not in OWNED_NODE_KINDS:
+                continue                 # dependencies on externals are inferred from library use: their absence is not drift
             st = max((cov.for_edge(o, e) for o in ("static", "runtime")), key=lambda s: ["unknown", "stale", "incomplete", "current"].index(s))
             add("DR-EDGE-REMOVED-001", k, f"Planned {e['kind']} {e['source']} → {e['target']} is no longer observed", _verdict(st),
                 expected={"kind": e["kind"], "protocol": e["attributes"].get("protocol")}, evidence=e.get("evidence", [])[:3])

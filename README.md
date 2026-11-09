@@ -122,13 +122,16 @@ Design → ADR → plan → issues / commits → runtime observation → drift �
 
 ### Drift and delivery
 - **Three-way drift**: desired (baseline/ADR) vs code vs runtime, with `unknown` / `incomplete` states, grace windows and an observe-only rollout to keep false positives down.
-- Triage workflow, scoped and expiring suppressions, notifications to email, Slack, Teams or webhooks (Apprise).
+- Triage workflow, scoped and expiring suppressions (reasons optional), **delete** a finding you consider untrue (dismissed as a false positive, never resurrected by re-evaluation, restorable) — one at a time or every open finding of a rule. Re-keyed elements and inferred external dependencies never raise "X is no longer observed".
+- Notifications to email, Slack, Teams or webhooks (Apprise).
 - **Traceability** from initiative → issue → PR → commit → build → image digest → running workload: *Done in Jira* is never confused with *deployed*.
 - Architecture checks for CI as signed **SARIF** reports — report-only first, blocking only with deterministic rules and owner approval.
 
 ### Grounded AI
 - Architecture assistant over **scoped evidence only**, with citations validated against an evidence pack; unsupported claims are marked.
-- **Choose your model**: `gpt-6-luna` (default), `gpt-6-terra` or `gpt-6-sol`, through LiteLLM; every answer shows which model produced it. Langfuse traces, budgets and evaluations per model.
+- **Per-task model routing** through LiteLLM ([`MODEL_PROFILES.yaml`](docs/ai/MODEL_PROFILES.yaml)): architecture drafts, flow search, drift review and integration design run on `gpt-6-terra` with **high** reasoning; grounded answers and ADRs on `gpt-6-luna`/medium; rewriting and page search on `gpt-6-luna`/low. `gpt-6-sol` is blocked. A model the provider rejects is hidden and its tasks fall back to Luna with the same reasoning effort. Evidence is trimmed to each task's token budget.
+- **Cost estimates before every AI call** (tokens and USD expected / high / worst case, learned from the last 30 days of the usage ledger) and a *Model routing per task* table on the Usage page; every answer shows the model and its cost.
+- **Ask a page**: chat-like search on Flows ("what is the flow of dissemination documents?"), Decisions ("is caching part of any decision?") and Docs. Search runs first and costs nothing; a short cited AI answer is added on top and cached for identical questions.
 - **Integration designer** for "connect A and B": at least two options, a trade-off matrix, C4 and sequence diagrams, ADR and task drafts.
 - **Blast-radius analysis** and what-if scenarios on isolated branches of the model.
 - Proposals only: nothing is applied, written to a tracker or deployed without explicit, authorized approval.

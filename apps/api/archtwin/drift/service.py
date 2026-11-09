@@ -65,15 +65,21 @@ async def evaluate(ctx: RequestContext) -> dict[str, Any]:
                     counts["reopened"] += 1
                 await conn.execute(drift_findings.update().where(drift_findings.c.id == fid).values(**upd, updated_at=now))
         # findings no longer produced: auto-resolve open ones (only drift ones — UNKNOWN never resolves into "fixed")
-        stale = rows(await conn.execute(select(drift_findings.c.id, drift_findings.c.status).where(and_(
+        stale = rows(await conn.execute(select(drift_findings.c.id, drift_findings.c.status, drift_findings.c.rule_id).where(and_(
             drift_findings.c.project_id == ctx.project_id, drift_findings.c.status.in_(OPEN)))))
-        resolved = 0
+        resolved = deleted = 0
         for s in stale:
-            if s["id"] not in seen:
+            if s["id"] not in seen and s["rule_id"] in rules.NOISY_WHEN_STALE:
+                # "X is no longer observed" that the refined rule no longer raises (re-keyed element, external dependency):
+                # it was never a real change, so it is deleted instead of being shown as resolved.
+                await conn.execute(drift_findings.delete().where(drift_findings.c.id == s["id"]))
+                deleted += 1
+            elif s["id"] not in seen:
                 await conn.execute(drift_findings.update().where(drift_findings.c.id == s["id"]).values(
                     status="resolved", resolution_note="no longer observed in the latest evaluation", updated_at=now))
                 resolved += 1
         counts["auto_resolved"] = resolved
+        counts["deleted_noise"] = deleted
         await conn.execute(drift_evaluations.insert().values(id=new_id(), org_id=ctx.org_id, project_id=ctx.project_id,
                                                              baseline_id=base["id"] if base else None, snapshot_id=snap["id"],
                                                              rule_versions={k: v["version"] for k, v in rules.RULES.items()}, counts=counts))
@@ -157,12 +163,14 @@ async def transition(ctx: RequestContext, fid: uuid.UUID, status: str, note: str
     return await get_finding(ctx, fid)
 
 
-async def dismiss_many(ctx: RequestContext, ids: list[uuid.UUID], note: str = "") -> dict[str, Any]:
-    """Delete findings the user considers untrue (bulk). Audited one by one; restorable by transitioning back to `new`."""
+async def dismiss_many(ctx: RequestContext, ids: list[uuid.UUID], note: str = "", rule_id: str | None = None) -> dict[str, Any]:
+    """Delete findings the user considers untrue (bulk: by ids, or every open finding of one rule). Audited one by one;
+    restorable by transitioning back to `new`."""
     now = datetime.now(UTC)
     async with uow(ctx) as conn:
+        which = drift_findings.c.id.in_(ids) if ids else and_(drift_findings.c.rule_id == rule_id, drift_findings.c.status.in_(OPEN))
         found = [r.id for r in await conn.execute(select(drift_findings.c.id).where(
-            drift_findings.c.project_id == ctx.project_id, drift_findings.c.id.in_(ids), drift_findings.c.status != "dismissed"))]
+            drift_findings.c.project_id == ctx.project_id, which, drift_findings.c.status != "dismissed"))]
         if found:
             await conn.execute(drift_findings.update().where(drift_findings.c.id.in_(found)).values(
                 status="dismissed", resolution_note=note or "dismissed as not true", updated_at=now))
