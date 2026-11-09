@@ -121,6 +121,7 @@ against the approved baseline produced 12 findings (unplanned `backup`/`demo-see
 Specified, not started.
 
 ## Changelog
+- 2026-11-09 — First full-stack CI run on `main`: fixed `--wait` on one-shot jobs, fixture `schema-init` build, and made the UI smoke test self-contained (global setup creates "ArchTwin (self)"). It exposed two UI bugs, now fixed: project cards were links without an accessible name, and the Projects page crashed (search state read before declaration). Local gate: 93.5 %.
 - 2026-11-09 — Test coverage: `make coverage` measures the API/worker inside the containers (coverage.py, `concurrency = thread, greenlet` for SQLAlchemy async) and combines it with unit/integration/e2e → 93.4 %, gated at 90 % in the nightly workflow. New `test_api_surface.py` (21 e2e: every route's negative branches, every webhook outcome) and `test_guards_and_adapters.py` (21 unit). Bugs found: Kafka bootstrap server without a port crashed; `/home` dropped the newest projects once more than 60 were visible (now keeps the most recent 60, reports `visible_projects`/`truncated`, Projects page lists the rest).
 - 2026-11-09 — M1 data-source connectors (GitHub, MySQL, Kafka + Schema Registry, OTel service graph), webhook ingress, shop fixture with ground truth; analyzer fixes (services keyed by system/name, deterministic grammar loading).
 - 2026-11-09 — `/home` dashboard + UI refresh (fonts, shell, overview, projects); axe AA clean.

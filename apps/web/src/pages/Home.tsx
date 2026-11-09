@@ -25,7 +25,7 @@ function greeting() {
 }
 
 export function ProjectHealthCard({ p }: { p: HomeProject }) {
-  return <Link to="/projects/$projectId" params={{ projectId: p.id }} className="group block h-full">
+  return <Link to="/projects/$projectId" params={{ projectId: p.id }} aria-label={`${p.title} — open project`} className="group block h-full">
     <article className="flex h-full flex-col rounded-xl border border-rule bg-card p-4 shadow-card transition group-hover:-translate-y-0.5 group-hover:shadow-lift">
       <div className="flex items-start gap-3">
         <Avatar name={p.title} size={36} />

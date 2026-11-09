@@ -11,7 +11,7 @@ DC="docker compose -f compose.yaml -f compose.coverage.yaml"
 # Fresh, world-writable data dir: the containers run as uid 10001.
 find "$DATA" -mindepth 1 -delete 2>/dev/null || true
 mkdir -p "$DATA" && chmod 777 "$DATA"
-restore() { docker compose up -d --wait api worker >/dev/null 2>&1 || true; }
+restore() { docker compose up -d --build --wait api worker >/dev/null 2>&1 || true; }   # back to the normal (rebuilt) images
 trap restore EXIT
 
 echo "==> instrumented api + worker"
