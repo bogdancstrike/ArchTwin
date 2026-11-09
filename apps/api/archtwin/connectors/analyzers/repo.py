@@ -718,9 +718,11 @@ class RepoAnalyzer:
             if o.kind == "api-endpoint" and o.subject_key.startswith(f"endpoint:{s.system}/{s.name}/") and o.subject_key not in endpoints[webui.normalize(o.attributes["path"])]:
                 endpoints[webui.normalize(o.attributes["path"])].append(o.subject_key)
         for ui in webui.find_uis(ctx, files):
-            if ui.root.resolve() == ctx.resolve():
-                continue                                  # the container IS the UI (already a webapp container): no duplicate
+            if ui.root.resolve() == ctx.resolve():        # the container IS the UI (already a webapp container): no extra component
+                self._rpc_calls(s, webui.scan_rpc(ui, files), None)
+                continue
             webui.scan_calls(ui, files)
+            webui.scan_rpc(ui, files)
             key = f"component:{s.system}/{s.name}/web-ui"
             rel = _rel(self.root, ui.root / "package.json")
             self.r.node("static", key, "component", f"Web UI ({ui.framework})", webui.V_WEBUI, ref=rel, span={"path": rel},
@@ -735,6 +737,40 @@ class RepoAnalyzer:
                 for ek in targets:
                     self.r.edge("static", key, "calls", ek, webui.V_WEBUI, attrs={"protocol": "https", "path": call, "call_sites": len(where)},
                                 ref=frel, span={"path": frel, "line_start": line}, confidence=0.85 if len(targets) == 1 else 0.7)
+            self._rpc_calls(s, ui, key)
+
+    def _rpc_calls(self, s: Service, ui: webui.WebUi, ui_key: str | None) -> None:
+        """RPC actions the UI sends to a backend named by its env var: the feature module that sends each action calls
+        `action:<name>@<service>` (resolved by the graph builder to the gateway's ACTION endpoint in any datasource)."""
+        t = webui.primary_transport(ui)
+        if not t:
+            return
+        src = ui.root / "src"
+        trel = _rel(self.root, Path(t.file))
+        hop = f"name:{t.service}#POST {t.path}" if t.path else f"name:{t.service}"
+        self.r.node("inferred", "person:user", "person", "User", V_INFER, attrs={"description": "Person using the system"}, confidence=0.6)
+        self.r.edge("inferred", "person:user", "calls", s.key, V_INFER, attrs={"protocol": "https"}, ref=trel, confidence=0.6)
+        self.r.edge("static", s.key, "calls", hop, webui.V_WEBUI, ref=trel, span={"path": trel, "line_start": t.line},
+                    attrs={"protocol": "https", "via_env": t.env, "transport": "rpc", "resolved_by": "name"}, confidence=0.8)
+        seen: set[tuple[str, str]] = set()
+        for a in ui.actions:
+            f = Path(a.file)
+            if ui_key:
+                comp = ui_key
+            else:
+                try:
+                    parts = f.relative_to(src).parts
+                    comp = f"component:{s.system}/{s.name}/{parts[0] if len(parts) > 1 else 'app'}"
+                except ValueError:
+                    comp = s.key
+            if (comp, a.action) in seen:
+                continue
+            seen.add((comp, a.action))
+            frel = _rel(self.root, f)
+            self.r.edge("static", comp, "calls", f"action:{a.action}@{t.service}", webui.V_WEBUI, ref=frel,
+                        span={"path": frel, "line_start": a.line},
+                        attrs={"protocol": "https", "method": "ACTION", "path": a.action, "action": a.action, "via_env": t.env,
+                               "resolved_by": "name"}, confidence=0.8)
 
     MAX_CODE_PER_COMPONENT = 60
     MAX_CODE_PER_SERVICE = 1500

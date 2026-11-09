@@ -170,9 +170,12 @@ def _endpoint_flows(g: dict[str, Any], system_of: dict[str, str]) -> list[dict[s
     calls: dict[str, list[dict[str, Any]]] = defaultdict(list)         # endpoint -> endpoints/services it calls
     entry_of: dict[str, list[dict[str, Any]]] = defaultdict(list)      # UI component <- the user
     owner: dict[str, str] = {}                                         # endpoint -> container exposing it
+    parent: dict[str, str] = {}                                        # component -> container containing it
     comp_out: dict[str, list[dict[str, Any]]] = defaultdict(list)      # component -> resources
     for e in edges.values():
         sk, tk = nodes.get(e["source"], {}).get("kind"), nodes.get(e["target"], {}).get("kind")
+        if e["kind"] == "contains" and tk == "component":
+            parent[e["target"]] = e["source"]
         if e["kind"] == "exposes" and tk == "api-endpoint":
             owner[e["target"]] = e["source"]
         elif e["kind"] == "calls" and tk == "api-endpoint" and sk != "api-endpoint":
@@ -228,8 +231,13 @@ def _endpoint_flows(g: dict[str, Any], system_of: dict[str, str]) -> list[dict[s
         a = nodes[ek]["attributes"]
         label = f"{a.get('method', '')} {a.get('path', '')}".strip()
         head: list[dict[str, Any]] = []
-        for c in callers.get(ek, [])[:1]:
-            head += [_step(g, pe) for pe in entry_of.get(c["source"], [])[:1]]
+        for c in sorted(callers.get(ek, []), key=lambda c: (nodes[c["source"]]["kind"] != "component", c["source"]))[:1]:
+            src = c["source"]
+            if entry_of.get(src):
+                head += [_step(g, pe) for pe in entry_of[src][:1]]
+            elif entry_of.get(parent.get(src, "")):        # the user reaches a UI feature module through its web app
+                pe = entry_of[parent[src]][0]
+                head += [_step(g, pe), _synthetic(parent[src], src, "uses", "UI module")]
             head.append({**_step(g, c, src=c["source"], dst=handler_of(ek)), "label": label, "kind": "calls"})
         if not head:
             head.append(_synthetic(ek, handler_of(ek), "handles", label))

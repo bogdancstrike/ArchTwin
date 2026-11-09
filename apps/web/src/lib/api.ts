@@ -45,6 +45,7 @@ export async function download(path: string, filename: string) {
   if (!r.ok) { let p: Problem; try { p = await r.json(); } catch { p = { title: r.statusText, status: r.status, code: "AT-HTTP" }; } throw new ApiError(p); }
   const blob = await r.blob();
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  const named = /filename="([^"]+)"/.exec(r.headers.get("content-disposition") ?? "")?.[1];       // the server's name wins
+  a.href = URL.createObjectURL(blob); a.download = named ?? filename; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }

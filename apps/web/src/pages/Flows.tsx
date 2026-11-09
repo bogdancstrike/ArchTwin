@@ -1,10 +1,14 @@
-import { Database, GitFork, Globe, Network, Radio, Workflow, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, Database, GitFork, Globe, Network, Radio, Workflow, X } from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Button, Card, Empty, OriginBadges, Table, cn } from "@/components/ui";
 import { DataTable } from "@/components/DataTable";
 import { ElementDetail, EvidenceList } from "@/components/ElementInspector";
 import { SplitLayout } from "@/components/SplitLayout";
 import { PageAsk } from "@/components/PageAsk";
+import { StepCode } from "@/components/StepCode";
+import { api } from "@/lib/api";
+import { takeParam } from "@/lib/deeplink";
+import { ExportMenu } from "@/components/ExportMenu";
 
 interface Step { from: string; to: string; kind: string; edge: string; label: string; protocol: string; origins: string[]; confidence: number;
   inferred_only: boolean; documented: boolean; evidence: number }
@@ -71,15 +75,21 @@ function Sequence({ flow, active, onStep, onParticipant, selected }: { flow: Flo
 
 export function FlowsPage({ projectId }: { projectId: string }) {
   const [cur, setCur] = useState<Flow | null>(null);
+  useEffect(() => {                      // ?flow=<id>&q=<name> (command palette): open that flow
+    const id = takeParam("flow"), name = takeParam("q");
+    if (!id) return;
+    void api<{ items: Flow[] }>(`/projects/${projectId}/flows?page=1&page_size=25&q=${encodeURIComponent(name ?? "")}`)
+      .then((r) => { const f = r.items.find((x) => x.id === id); if (f) setCur(f); }).catch(() => undefined);
+  }, [projectId]);
   const [step, setStep] = useState<number | null>(null);
   const [inspect, setInspect] = useState<{ kind: "element" | "relation"; key: string; title: string } | null>(null);
   useEffect(() => { setStep(null); setInspect(null); }, [cur?.id]);
   const name = (k: string) => cur?.participants.find((pp) => pp.key === k)?.name ?? k;
-  const pickStep = (i: number) => { setStep(i); const st = cur!.steps[i];
+  const pickStep = (i: number) => { if (i < 0) { setStep(null); return; } setStep(i); const st = cur!.steps[i];
     setInspect({ kind: "relation", key: st.edge, title: `${name(st.from)} ${st.kind} ${name(st.to)}` }); };
   return <SplitLayout storageKey="flows" title="Flows" sideWidth="xl:w-[440px]" side={(toggle) => <div className="space-y-4">
     <PageAsk projectId={projectId} page="flows" selected={cur?.id ?? null} onPick={(m) => m.flow && setCur(m.flow as Flow)} />
-    <Card eyebrow="Recognized automatically" title={<span className="flex items-center gap-2"><Workflow size={16} /> Flows</span>} actions={toggle}>
+    <Card eyebrow="Recognized automatically" title={<span className="flex items-center gap-2"><Workflow size={16} /> Flows</span>} actions={<><ExportMenu projectId={projectId} resource="flows" label="All" />{toggle}</>}>
       <DataTable<Flow> queryKey={["flows", projectId]} endpoint={`/projects/${projectId}/flows`} rowKey={(x) => x.id} selected={cur?.id ?? null}
         onRowClick={setCur} searchPlaceholder="Search flows or participants" defaultSort="" defaultDir="desc"
         empty="No flows yet. Add datasources and scan them: flows come from endpoints, calls between services, topics and data access."
@@ -94,7 +104,8 @@ export function FlowsPage({ projectId }: { projectId: string }) {
     </Card>
   </div>}>
       {!cur ? <Empty title="Select a flow">Pick a flow to see it as a diagram with the evidence for every step.</Empty> : <>
-        <Card eyebrow={`${kindOf(cur.kind).label} flow · confidence ${cur.confidence.toFixed(2)}${cur.distributed ? ` · across ${cur.systems.join(", ")}` : ""}`} title={cur.name}>
+        <Card eyebrow={`${kindOf(cur.kind).label} flow · confidence ${cur.confidence.toFixed(2)}${cur.distributed ? ` · across ${cur.systems.join(", ")}` : ""}`} title={cur.name}
+          actions={<ExportMenu projectId={projectId} resource="flows" id={cur.id} label="Export flow" />}>
           <Sequence flow={cur} active={step} onStep={pickStep} selected={inspect?.kind === "element" ? inspect.key : null}
             onParticipant={(pp) => { setStep(null); setInspect({ kind: "element", key: pp.key, title: pp.name }); }} />
           <p className="mt-2 text-xs text-soft">Solid = observed in code or runtime; dashed = documented in a diagram, inferred, or low confidence.
@@ -108,12 +119,17 @@ export function FlowsPage({ projectId }: { projectId: string }) {
               <p className="text-xs text-soft">Steps marked “uses” or “handles” come from the endpoint's route module (its imports); inspect the participants for their source.</p></div>}
         </Card>}
         <Card eyebrow="Steps" title="Evidence per step">
+          <p className="mb-2 text-xs text-soft">Click a step to follow the code: the call site, or the handler/component source for steps derived from imports.</p>
           <Table head={["#", "From", "Relation", "To", "Origins", "Confidence", "Evidence"]}>{cur.steps.map((st, i) => {
             const n = name;
-            return <tr key={i} onClick={() => pickStep(i)} className={cn("cursor-pointer border-b border-rule", step === i && "bg-accent-tint")}>
-              <td className="px-2 py-1.5 font-mono text-xs">{i + 1}</td><td className="px-2 text-sm">{n(st.from)}</td>
-              <td className="px-2 text-xs">{st.kind}{st.protocol ? ` · ${st.protocol}` : ""}{st.documented && <Badge tone="muted">doc</Badge>}</td><td className="px-2 text-sm">{n(st.to)}</td>
-              <td className="px-2"><OriginBadges origins={st.origins} /></td><td className="num px-2">{st.confidence.toFixed(2)}</td><td className="num px-2">{st.evidence}</td></tr>; })}</Table>
+            return <Fragment key={i}><tr onClick={() => pickStep(step === i ? -1 : i)} aria-expanded={step === i}
+              className={cn("cursor-pointer border-b border-rule", step === i && "bg-accent-tint")}>
+              <td className="px-2 py-1.5 font-mono text-xs"><ChevronRight size={11} className={cn("mr-0.5 inline transition", step === i && "rotate-90")} />{i + 1}</td><td className="px-2 text-sm">{n(st.from)}</td>
+              <td className="px-2 text-xs">{st.kind}{st.protocol ? ` · ${st.protocol}` : ""}{st.label && st.label !== st.kind ? <div className="truncate font-mono text-[10px] text-soft" title={st.label}>{st.label}</div> : null}
+                {st.documented && <Badge tone="muted">doc</Badge>}</td><td className="px-2 text-sm">{n(st.to)}</td>
+              <td className="px-2"><OriginBadges origins={st.origins} /></td><td className="num px-2">{st.confidence.toFixed(2)}</td><td className="num px-2">{st.evidence}</td></tr>
+              {step === i && <tr className="border-b border-rule"><td colSpan={7} className="bg-paper/60 px-2 py-2"><StepCode projectId={projectId} step={st} /></td></tr>}
+            </Fragment>; })}</Table>
           {step !== null && <p className="mt-2 break-all font-mono text-[11px] text-soft">relation key: {cur.steps[step].edge}</p>}
         </Card></>}
   </SplitLayout>;

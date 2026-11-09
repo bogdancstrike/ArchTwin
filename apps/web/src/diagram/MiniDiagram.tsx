@@ -3,6 +3,7 @@ import { Background, Controls, MarkerType, ReactFlow, ReactFlowProvider, useReac
 import { ExternalLink, Maximize2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button, Dialog } from "@/components/ui";
+import { useTheme } from "@/lib/theme";
 import type { View } from "@/lib/types";
 import { C4Edge, C4Node, ZoomContext, type EdgeData, type NodeData } from "./elements";
 import { NODE_H, NODE_W, layoutView } from "./layout";
@@ -15,13 +16,14 @@ function Canvas({ view, projectId, height }: { view: View; projectId: string; he
   const [edges, setEdges] = useState<Edge[]>([]);
   const rf = useReactFlow();
   const nav = useNavigate();
+  const theme = useTheme();
   useEffect(() => {
     let alive = true;
     void layoutView(view).then((laid) => {
       if (!alive) return;
       setNodes(view.nodes.map((n) => ({ id: n.id, type: "c4", position: laid.pos[n.id] ?? { x: 0, y: 0 }, data: n as unknown as NodeData as never, width: NODE_W, height: NODE_H })));
       setEdges(view.edges.map((e) => ({ id: e.id, source: e.source, target: e.target, type: "c4", data: { ...e, route: laid.routes[e.id] } as EdgeData as never,
-        markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: e.kind === "calls" ? "#2e5aa8" : "#4f5d75" } })));
+        markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: e.kind === "calls" ? "var(--color-link)" : "var(--color-muted)" } })));
       requestAnimationFrame(() => rf.fitView({ padding: 0.15 }));
     });
     return () => { alive = false; };
@@ -30,7 +32,7 @@ function Canvas({ view, projectId, height }: { view: View; projectId: string; he
   return <ZoomContext.Provider value={(target) => open(target)}>
     <div style={{ height }} className="overflow-hidden rounded-lg border border-rule bg-paper/60">
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={0.2} maxZoom={2.5} fitView nodesConnectable={false}
-        proOptions={{ hideAttribution: true }} zoomOnDoubleClick={false}
+        proOptions={{ hideAttribution: true }} zoomOnDoubleClick={false} colorMode={theme}
         onNodeDoubleClick={(_, n) => { const d = n.data as unknown as NodeData & { parent_view?: string }; open(d.zoom ?? d.parent_view ?? "context"); }}>
         <Background gap={18} size={1} color="var(--color-rule)" /><Controls showInteractive={false} position="bottom-right" />
       </ReactFlow>

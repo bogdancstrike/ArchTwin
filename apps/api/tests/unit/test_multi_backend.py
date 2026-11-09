@@ -51,6 +51,17 @@ BFF = {      # a presenter/BFF: its own action table, but every request is forwa
     "maps/action_map.json": '{"list_files": {"service": "acme-backend-query:8080", "endpoint": "/api/cases/{case_id}/files", "method": "get"},'
                             ' "other": {"service": "acme-backend-query:8080", "endpoint": "/api/other", "method": "get"}}',
 }
+UI = {       # an RPC-style SPA: one presenter URL from the env, the action named in the body
+    "Dockerfile": "FROM nginx\nCOPY dist /usr/share/nginx/html\n",
+    "package.json": '{"name": "acme-ui", "dependencies": {"react": "18.3.1"}}',
+    ".env": "VITE_APP_ACME_BFF=https://acme.example/bff/do\n",
+    "src/service/presenter.ts": "export async function sendToPresenter(action: string, data: unknown) {\n"
+                                "  return fetch(import.meta.env.VITE_APP_ACME_BFF, {method: 'POST', body: JSON.stringify({action, payload: data})});\n}\n",
+    "src/cases/actions.ts": 'export const CASE_ACTIONS = {\n  files: "list_files",\n  ghost: "list_ghosts",\n};\n',
+    "src/cases/Files.tsx": "import { sendToPresenter } from '../service/presenter';\nimport { CASE_ACTIONS } from './actions';\n"
+                           "export const load = () => sendToPresenter(CASE_ACTIONS.files, {});\n",
+    "src/other/Thing.tsx": "export const x = { action: 'other' };\n",
+}
 
 
 def _write(root: Path, files: dict[str, str]) -> Path:
@@ -63,7 +74,7 @@ def _write(root: Path, files: dict[str, str]) -> Path:
 @pytest.fixture(scope="module")
 def graph(tmp_path_factory):
     obs = []
-    for name, files in (("acme-backend", BACKEND), ("acme-gateway", GATEWAY), ("acme-bff", BFF)):
+    for name, files in (("acme-backend", BACKEND), ("acme-gateway", GATEWAY), ("acme-bff", BFF), ("acme-ui", UI)):
         r = analyze_repository(_write(tmp_path_factory.mktemp(name), files), "rev", name)
         obs += [{"id": uuid.uuid4(), "connector_id": name, "origin": o.origin, "subject_kind": o.subject_kind, "subject_key": o.subject_key,
                  "kind": o.kind, "name": o.name, "attributes": o.attributes, "source_ref": o.source_ref, "source_revision": "rev",
@@ -111,5 +122,33 @@ def test_forwarded_flow_keeps_the_real_order(graph):
     flow = next(x for x in flows.recognize(graph)["flows"] if x.get("endpoint") == "endpoint:acme-bff/acme-bff/ACTION list_files")
     sys_of = {p["key"]: p["system"] for p in flow["participants"]}
     hops = [(sys_of.get(s["from"]), sys_of.get(s["to"])) for s in flow["steps"] if sys_of.get(s["from"]) != sys_of.get(s["to"])]
-    assert hops[:2] == [("acme-bff", "acme-gateway"), ("acme-gateway", "acme-backend")]
+    backend_hops = [h for h in hops if "acme-ui" not in h and "" not in h]
+    assert backend_hops[:2] == [("acme-bff", "acme-gateway"), ("acme-gateway", "acme-backend")]
+    assert hops[0][1] in ("acme-ui", "acme-bff")                             # the user enters through the UI first
     assert any(s["kind"] == "forwards" for s in flow["steps"])
+
+
+def test_rpc_ui_actions_resolve_to_the_presenter_and_flows_start_at_the_user(graph):
+    e = graph["edges"]
+    assert "component:acme-ui/acme-ui/cases|calls|endpoint:acme-bff/acme-bff/ACTION list_files" in e          # use site, via constant map
+    assert "container:acme-ui/acme-ui|calls|endpoint:acme-bff/acme-bff/POST /bff/do" in e                      # the dispatcher, from .env
+    assert "list_ghosts@acme-bff" in graph["unresolved_names"] and not any("ghost" in k for k in e)           # never invented
+    flow = next(x for x in flows.recognize(graph)["flows"] if x.get("endpoint") == "endpoint:acme-bff/acme-bff/ACTION list_files")
+    names = [p["system"] for p in flow["participants"]]
+    assert names[0] in ("", "acme-ui") and {"acme-ui", "acme-bff", "acme-gateway", "acme-backend"} <= set(flow["systems"])
+
+
+def test_compose_service_built_from_a_sibling_repository_is_that_repositorys_container():
+    obs_ = [{"subject_kind": "node", "kind": "container", "subject_key": "container:main/presenter",
+             "attributes": {"build_context": "/w/backend/acme-presenter"}},
+            {"subject_kind": "node", "kind": "container", "subject_key": "container:acme-presenter/acme-presenter",
+             "attributes": {"build_context": "."}},
+            {"subject_kind": "node", "kind": "container", "subject_key": "container:main/api", "attributes": {"build_context": "."}}]
+    assert builder.sibling_build_aliases(obs_) == {"container:main/presenter": "container:acme-presenter/acme-presenter"}
+
+
+def test_contract_drift_between_ui_gateway_and_backend(graph):
+    from archtwin.drift.rules import Coverage, evaluate
+    fs = {(f["rule_id"], f["title"]) for f in evaluate(None, graph, Coverage.from_inputs([]))}
+    assert ("DR-ACTION-UNROUTED-001", "cases sends action list_ghosts but acme-bff does not route it") in fs
+    assert any(r == "DR-ROUTE-NO-ENDPOINT-001" and "POST /api/nothing/here" in t for r, t in fs)        # gateway -> missing endpoint

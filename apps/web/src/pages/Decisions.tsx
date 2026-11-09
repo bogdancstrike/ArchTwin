@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Badge, Button, Card, Dialog, ErrorBox, Field, Input, Spinner, Textarea, ago } from "@/components/ui";
 import { RichMarkdown } from "@/components/RichMarkdown";
 import { api, download } from "@/lib/api";
+import { takeFlag } from "@/lib/deeplink";
 import { useAction, useApi, useMe } from "@/lib/hooks";
 import type { Adr } from "@/lib/types";
 import { usd } from "@/components/charts";
@@ -10,6 +11,7 @@ import { DataTable } from "@/components/DataTable";
 import { SplitLayout } from "@/components/SplitLayout";
 import { CostEstimate, modelLabel } from "@/components/CostEstimate";
 import { PageAsk } from "@/components/PageAsk";
+import { ExportMenu } from "@/components/ExportMenu";
 
 const TONE: Record<string, string> = { proposed: "warn", accepted: "ok", rejected: "bad", superseded: "muted" };
 
@@ -114,10 +116,10 @@ function AdrView({ projectId, id }: { projectId: string; id: string }) {
 
 export function DecisionsPage({ projectId }: { projectId: string }) {
   const [sel, setSel] = useState<string | null>(() => new URLSearchParams(window.location.search).get("adr"));   // deep link from Home
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => takeFlag("new"));
   return <SplitLayout storageKey="decisions" title="Decision records" sideWidth="xl:w-[460px]" side={(toggle) => <div className="space-y-4">
     <PageAsk projectId={projectId} page="decisions" selected={sel} onPick={(m) => setSel(m.id)} />
-    <Card eyebrow="MADR" title="Decision records" actions={<><Button size="sm" variant="primary" onClick={() => setOpen(true)}><Plus size={14} /> New</Button>{toggle}</>}>
+    <Card eyebrow="MADR" title="Decision records" actions={<><ExportMenu projectId={projectId} resource="decisions" label="All" /><Button size="sm" variant="primary" onClick={() => setOpen(true)}><Plus size={14} /> New</Button>{toggle}</>}>
       <DataTable<Adr> queryKey={["adrs", projectId]} endpoint={`/projects/${projectId}/adrs`} rowKey={(a) => a.id} defaultSort="number" defaultDir="desc"
         searchPlaceholder="Search decisions" selected={sel} onRowClick={(a) => setSel(a.id)}
         filters={[{ key: "status", label: "Status", options: [["proposed", "Proposed"], ["accepted", "Accepted"], ["rejected", "Rejected"], ["superseded", "Superseded"]] }]}
@@ -126,7 +128,7 @@ export function DecisionsPage({ projectId }: { projectId: string }) {
           { key: "title", label: "Title", sortable: true, render: (a) => <>{a.title}{a.ai_drafted && <Bot size={11} className="ml-1 inline text-link" />}<div className="text-[10px] text-soft">{ago(a.created_at)}</div></> },
           { key: "status", label: "Status", sortable: true, render: (a) => <Badge tone={TONE[a.status]}>{a.status}</Badge> }]} />
     </Card></div>}>
-    <Card title="Record">{sel ? <AdrView projectId={projectId} id={sel} /> : <p className="text-sm text-soft">Select an ADR.</p>}</Card>
+    <Card title="Record" actions={sel ? <ExportMenu projectId={projectId} resource="decisions" id={sel} label="Export ADR" /> : undefined}>{sel ? <AdrView projectId={projectId} id={sel} /> : <p className="text-sm text-soft">Select an ADR.</p>}</Card>
     <AdrForm projectId={projectId} open={open} onClose={() => setOpen(false)} />
   </SplitLayout>;
 }

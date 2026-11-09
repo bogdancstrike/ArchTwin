@@ -11,12 +11,14 @@ import { ElementDetail, EvidenceList } from "@/components/ElementInspector";
 import type { Snapshot, View } from "@/lib/types";
 import { C4Edge, C4Node, ZoomContext, type EdgeData, type NodeData } from "@/diagram/elements";
 import { layoutView, NODE_H, NODE_W } from "@/diagram/layout";
+import { useTheme } from "@/lib/theme";
+import { ExportMenu } from "@/components/ExportMenu";
 
 const nodeTypes = { c4: C4Node };
 const edgeTypes = { c4: C4Edge };
 const reduced = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-interface Search { view?: string; snapshot?: string; compare?: string; full?: boolean; deps?: boolean; table?: boolean }
+interface Search { view?: string; snapshot?: string; compare?: string; full?: boolean; deps?: boolean; table?: boolean; focus?: string }
 
 function viewPath(projectId: string, key: string, s: Search) {
   const q = new URLSearchParams();
@@ -71,6 +73,7 @@ function Canvas({ projectId }: { projectId: string }) {
   const nav = useNavigate();
   const qc = useQueryClient();
   const rf = useReactFlow();
+  const theme = useTheme();
   const viewKey = search.view ?? "context";
   const setSearch = useCallback((patch: Partial<Search>) => nav({ to: ".", search: (s: Search) => ({ ...s, ...patch }) as never, replace: false }), [nav]);
   const q = useQuery({ queryKey: ["view", projectId, viewKey, search.snapshot, search.full, search.deps], queryFn: () => api<View>(viewPath(projectId, viewKey, search)), retry: false });
@@ -83,6 +86,16 @@ function Canvas({ projectId }: { projectId: string }) {
   const zooming = useRef(false);
   const focus = useRef<string | null>(null);
   const moved = useRef<Record<string, { x: number; y: number }>>({});
+
+  // ?focus=<element key> (command palette, deep links): select and center it once its view is drawn
+  useEffect(() => {
+    if (!search.focus) return;
+    const n = nodes.find((x) => x.id === search.focus);
+    if (!n) return;
+    setSel({ kind: "node", data: n.data as unknown as NodeData });
+    requestAnimationFrame(() => rf.setCenter(n.position.x + NODE_W / 2, n.position.y + NODE_H / 2, { zoom: 1.4, duration: 300 }));
+    nav({ to: ".", search: (s: Search) => ({ ...s, focus: undefined }) as never, replace: true });
+  }, [search.focus, nodes, rf, nav]);
 
   useEffect(() => {
     const v = q.data;
@@ -107,7 +120,7 @@ function Canvas({ projectId }: { projectId: string }) {
         const d: EdgeData = { ...e, route: usesOverride ? undefined : laid.routes[e.id],
           diff: e.members.some((m) => eAdded.has(m)) ? "added" : e.members.some((m) => eChanged.has(m)) ? "changed" : undefined };
         return { id: e.id, source: e.source, target: e.target, type: "c4", data: d as never,
-          markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: e.focal ? "#eb6c36" : e.kind === "calls" ? "#2e5aa8" : "#4f5d75" } };
+          markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: e.focal ? "var(--color-accent)" : e.kind === "calls" ? "var(--color-link)" : "var(--color-muted)" } };
       });
       setNodes(ns); setEdges(es);
       const f = focus.current ? ns.find((n) => n.id === focus.current) : undefined;
@@ -208,6 +221,7 @@ function Canvas({ projectId }: { projectId: string }) {
           try { await download(`/projects/${projectId}/export/${f}/${viewKey}${search.full ? "?full=true" : ""}`, `${viewKey.replace(/[:/]/g, "_")}.${ext}`); }
           catch (err) { toast.error((err as Error).message); }
         }}><option value="">Export…</option><option value="svg">SVG (linted)</option><option value="html">HTML (linted)</option><option value="mermaid">Mermaid</option><option value="structurizr">Structurizr DSL</option></Select>
+        <ExportMenu projectId={projectId} resource="architecture" label="Export model" />
       </div>
     </div>
     {v.detail_views.length > 0 && <div className="flex flex-wrap items-center gap-2 border-b border-rule px-4 py-1.5 text-xs text-muted">
@@ -222,14 +236,14 @@ function Canvas({ projectId }: { projectId: string }) {
       </Table><h3 className="eyebrow mt-6 mb-2">Relationships</h3><Table head={["From", "Relation", "To", "Confidence"]}>
         {v.edges.map((e) => <tr key={e.id} className="border-b border-rule"><td className="px-2 py-1">{v.nodes.find((n) => n.id === e.source)?.name}</td><td className="px-2 font-mono text-xs">{e.label}</td><td className="px-2">{v.nodes.find((n) => n.id === e.target)?.name}</td><td className="px-2">{e.confidence.toFixed(2)}</td></tr>)}</Table></div>
       : <div className="relative min-h-0 flex-1">
-        <ZoomContext.Provider value={zoomInto}><ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={0.1} maxZoom={3} proOptions={{ hideAttribution: true }}
+        <ZoomContext.Provider value={zoomInto}><ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={0.1} maxZoom={3} proOptions={{ hideAttribution: true }} colorMode={theme}
           onNodesChange={(chs) => setNodes((ns) => ns.map((n) => { const c = chs.find((x) => x.type === "position" && x.id === n.id) as { position?: { x: number; y: number } } | undefined;
             if (c?.position) { moved.current[n.id] = c.position; return { ...n, position: c.position }; } const s = chs.find((x) => x.type === "select" && x.id === n.id) as { selected?: boolean } | undefined; return s ? { ...n, selected: s.selected } : n; }))}
           onNodeClick={(_, n) => setSel({ kind: "node", data: n.data as unknown as NodeData })} onEdgeClick={(_, e) => setSel({ kind: "edge", data: e.data as unknown as EdgeData })}
           onNodeDoubleClick={onNodeDouble} onNodeMouseEnter={onHover} onPaneClick={() => setSel(null)} deleteKeyCode={null} nodesConnectable={false} zoomOnDoubleClick={false} fitView>
           <Background gap={24} color="var(--color-rule)" />
           <Controls showInteractive={false} />
-          <MiniMap pannable zoomable nodeColor={(n) => ((n.data as unknown as NodeData).focal ? "#eb6c36" : "#bfc0c0")} />
+          <MiniMap pannable zoomable nodeColor={(n) => ((n.data as unknown as NodeData).focal ? "var(--color-accent)" : "var(--color-soft)")} />
         </ReactFlow></ZoomContext.Provider>
         <EvidencePanel projectId={projectId} sel={sel} onClose={() => setSel(null)} onZoom={(k) => zoomInto(k, sel?.data.id)} />
         <div className="pointer-events-none absolute bottom-3 left-14 rounded bg-card/90 px-2 py-1 font-mono text-[9px] text-soft">

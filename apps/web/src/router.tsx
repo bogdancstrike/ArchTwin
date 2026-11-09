@@ -34,7 +34,8 @@ function sub(path: string, C: (p: { projectId: string }) => ReactElement) {
 }
 const architecture = createRoute({ getParentRoute: () => project, path: "architecture", component: function Arch() { return <ArchitecturePage projectId={usePid()} />; },
   validateSearch: (s: Record<string, unknown>) => ({ view: s.view as string | undefined, snapshot: s.snapshot as string | undefined,
-    compare: s.compare as string | undefined, full: s.full ? true : undefined, deps: s.deps ? true : undefined, table: s.table ? true : undefined }) });
+    compare: s.compare as string | undefined, full: s.full ? true : undefined, deps: s.deps ? true : undefined, table: s.table ? true : undefined,
+    focus: s.focus as string | undefined }) });
 
 const tree = root.addChildren([index, home, projectsList, flags, audit, system, roles, usagePage, project.addChildren([sub("/", OverviewPage), architecture, sub("datasources", InventoryPage), sub("flows", FlowsPage),
   sub("inventory", InventoryPage) /* old bookmark path */,

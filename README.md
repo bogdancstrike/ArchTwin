@@ -107,10 +107,12 @@ Design → ADR → plan → issues / commits → runtime observation → drift �
 - **Keycloak** single sign-on, **Cerbos** policy-as-code on every read and write (list filtering included), PostgreSQL row-level security as defence in depth.
 - **Hash-chained audit log** with an export verifier; envelope-encrypted connector secrets that never reach browsers, logs or prompts.
 - **Feature flags** for every optional module, connector and AI operation, with an emergency kill switch — security invariants are never flaggable.
+- **Command palette (⌘K / Ctrl+K)**: jump to any page, switch project, run actions (scan all, evaluate drift, new ADR, add datasource, theme) and search the current project's elements, flows, decisions and documents. **Night mode** uses neutral graphite surfaces (no blue cast), WCAG AA text, theme-aware diagrams and code.
 
 ### Discovery and evidence
 - Connectors for **local directories (single repos, folders of repos, docs/architecture folders), GitHub, GitLab, Taiga, Docker, PostgreSQL/MySQL, Kafka + Schema Registry, OpenAPI, OpenTelemetry service graph** and uploaded documents (Docling); Kubernetes and Jira are planned in the [connector matrix](docs/connectors/CONNECTOR_MATRIX.md).
 - Code extraction from declared artifacts first (OpenAPI, AsyncAPI, Helm, Backstage `catalog-info.yaml`, CODEOWNERS), plus tree-sitter detectors and Syft SBOMs — every finding with file, line and commit.
+- **Distributed systems end to end**: service-to-service HTTP calls (literal hosts or config variables), API gateway routing tables, BFF → gateway forwarding, and **RPC-style web UIs** (one presenter URL from `VITE_*` env, the action named in the body: action literals, constant maps and their use sites) — e.g. *UI → presenter → gate → backend → stores* in the real order. A Compose service built from a sibling repository (`build: ../svc`) is the same element as that repository's container. **Scan all** datasources of a project with one click.
 - Webhooks + watches + scheduled reconciliation; partial scans never cause false deletions.
 
 ### Living architecture
@@ -119,10 +121,13 @@ Design → ADR → plan → issues / commits → runtime observation → drift �
 - **Animated C4 zoom**: dive from the system context (L1) into a system's containers (L2) and a container's components (L3), with breadcrumbs and reduced-motion support.
 - **Editorial diagram quality**: every generated diagram follows the open-source [diagram-design](https://github.com/cathrynlavery/diagram-design) system — org-branded tokens, at most two focal accents, ≤ 9 primary nodes per view, orthogonal connectors — checked by a linter before export.
 - **ADRs** (MADR) with independent approval and immutable history; **living documentation** where every generated sentence cites its evidence.
+- **Complete generated documents, not summaries.** Deterministic, exhaustive documents cover every system, container, endpoint, table and flow: system overview (with C4 diagrams and functional areas), container catalog, interface catalog, data model (ER diagram), flows (order, feature, description, components, steps, sequence diagrams), a **testing guide** (every endpoint as a test case with an example request and expectations, every flow as a test scenario), developer reference and decision log. AI documents — **user manual, PRD, ARF (arc42) and developer guide** — are drafted **section by section** from a full outline; sections such as *Using {feature}*, *Functional requirements — {feature}* and *Module reference — {feature}* expand into one section per functional area. Each section gets its own cited evidence and model call (≤ 4 in parallel); the Docs page shows the planned outline and the pre-flight cost before you generate.
+- **Exports** from Architecture, Flows, Drift, Decisions and Docs: Markdown (canonical, diagrams as Mermaid), Word (.docx), PDF or a ZIP bundle (every item, all formats and a `manifest.json` with project, snapshot and source revisions) — same permissions as the page, audited (`GET /api/v1/projects/{id}/export/{resource}?format=md|docx|pdf|zip`).
 
 ### Drift and delivery
 - **Three-way drift**: desired (baseline/ADR) vs code vs runtime, with `unknown` / `incomplete` states, grace windows and an observe-only rollout to keep false positives down.
 - Triage workflow, scoped and expiring suppressions (reasons optional), **delete** a finding you consider untrue (dismissed as a false positive, never resurrected by re-evaluation, restorable) — one at a time or every open finding of a rule. Re-keyed elements and inferred external dependencies never raise "X is no longer observed".
+- **Contract drift across services** (no baseline needed): a UI action its gateway does not route, a gateway route to an endpoint the backend does not expose (framework probe paths excluded).
 - Notifications to email, Slack, Teams or webhooks (Apprise).
 - **Traceability** from initiative → issue → PR → commit → build → image digest → running workload: *Done in Jira* is never confused with *deployed*.
 - Architecture checks for CI as signed **SARIF** reports — report-only first, blocking only with deterministic rules and owner approval.
