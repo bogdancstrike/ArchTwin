@@ -362,6 +362,27 @@ flags:
   scope: org/project
   enforcement: explicit enable; eval thresholds must pass
   immutable: false
+- key: ai.general_chat
+  default: false
+  phase: phase-06-intelligence
+  scope: org/project
+  enforcement: 'Assistant General scope: plain chat via LiteLLM, never receives project
+    evidence'
+  immutable: false
+- key: ai.architecture_draft
+  default: false
+  phase: phase-06-intelligence
+  scope: org/project
+  enforcement: AI proposes elements/relations from docs as a draft; nothing enters
+    the model until an architect accepts
+  immutable: false
+- key: ai.text_extend
+  default: false
+  phase: phase-06-intelligence
+  scope: org/project
+  enforcement: Extend/improve text the user is writing (ADR editor); suggestion only,
+    user applies it
+  immutable: false
 - key: ai.diagram_drafting
   default: false
   phase: phase-06-intelligence

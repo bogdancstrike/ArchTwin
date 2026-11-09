@@ -281,8 +281,41 @@ def container_view(g: dict[str, Any], ckey: str, drift_keys: set[str], group: st
             "hidden_edges": hidden, "hidden_reason": "single-import dependencies hidden for readability" if hidden else ""}
 
 
+def annotate_links(g: dict[str, Any], view: dict[str, Any]) -> dict[str, Any]:
+    """Per node: how many ADRs, work items (Taiga/GitLab/GitHub) and documented diagram relations point at it or at an
+    element it contains — so docs and plans show up on the diagram, not only code."""
+    contains: dict[str, list[str]] = defaultdict(list)
+    for e in g["edges"].values():
+        if e["kind"] == "contains":
+            contains[e["source"]].append(e["target"])
+    refs: dict[str, dict[str, int]] = defaultdict(lambda: {"adrs": 0, "work_items": 0, "documented": 0})
+    for e in g["edges"].values():
+        src_kind = g["nodes"].get(e["source"], {}).get("kind")
+        if e["kind"] == "references" and src_kind in ("adr", "work-item"):
+            refs[e["target"]]["adrs" if src_kind == "adr" else "work_items"] += 1
+        if e["attributes"].get("documented"):
+            refs[e["source"]]["documented"] += 1
+            refs[e["target"]]["documented"] += 1
+
+    def total(k: str, depth: int = 0) -> dict[str, int]:
+        t = dict(refs.get(k, {"adrs": 0, "work_items": 0, "documented": 0}))
+        if depth < 3:
+            for c in contains.get(k, []):
+                for a, v in total(c, depth + 1).items():
+                    t[a] += v
+        return t
+    for n in view.get("nodes", []):
+        n["links"] = total(n["id"]) if n.get("kind") != "group" else {"adrs": 0, "work_items": 0, "documented": 0}
+    return view
+
+
 def build_view(g: dict[str, Any], view_key: str, drift_keys: set[str] | None = None, full: bool = False, deps: bool = False,
                min_conf: float = 0.5) -> dict[str, Any]:
+    return annotate_links(g, _build_view(g, view_key, drift_keys, full, deps, min_conf))
+
+
+def _build_view(g: dict[str, Any], view_key: str, drift_keys: set[str] | None = None, full: bool = False, deps: bool = False,
+                min_conf: float = 0.5) -> dict[str, Any]:
     drift_keys = drift_keys or set()
     if view_key == "context":
         return context_view(g, drift_keys)

@@ -8,7 +8,7 @@ import { Badge, Button, Card, cn, Empty, ErrorBox, OriginBadges, Select, Spinner
 import { api, download } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import type { Evidence, Snapshot, View } from "@/lib/types";
-import { C4Edge, C4Node, type EdgeData, type NodeData } from "@/diagram/elements";
+import { C4Edge, C4Node, ZoomContext, type EdgeData, type NodeData } from "@/diagram/elements";
 import { layoutView, NODE_H, NODE_W } from "@/diagram/layout";
 
 const nodeTypes = { c4: C4Node };
@@ -200,7 +200,7 @@ function Canvas({ projectId }: { projectId: string }) {
       </Table><h3 className="eyebrow mt-6 mb-2">Relationships</h3><Table head={["From", "Relation", "To", "Confidence"]}>
         {v.edges.map((e) => <tr key={e.id} className="border-b border-rule"><td className="px-2 py-1">{v.nodes.find((n) => n.id === e.source)?.name}</td><td className="px-2 font-mono text-xs">{e.label}</td><td className="px-2">{v.nodes.find((n) => n.id === e.target)?.name}</td><td className="px-2">{e.confidence.toFixed(2)}</td></tr>)}</Table></div>
       : <div className="relative min-h-0 flex-1">
-        <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={0.1} maxZoom={3} proOptions={{ hideAttribution: true }}
+        <ZoomContext.Provider value={zoomInto}><ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={0.1} maxZoom={3} proOptions={{ hideAttribution: true }}
           onNodesChange={(chs) => setNodes((ns) => ns.map((n) => { const c = chs.find((x) => x.type === "position" && x.id === n.id) as { position?: { x: number; y: number } } | undefined;
             if (c?.position) { moved.current[n.id] = c.position; return { ...n, position: c.position }; } const s = chs.find((x) => x.type === "select" && x.id === n.id) as { selected?: boolean } | undefined; return s ? { ...n, selected: s.selected } : n; }))}
           onNodeClick={(_, n) => setSel({ kind: "node", data: n.data as unknown as NodeData })} onEdgeClick={(_, e) => setSel({ kind: "edge", data: e.data as unknown as EdgeData })}
@@ -208,7 +208,7 @@ function Canvas({ projectId }: { projectId: string }) {
           <Background gap={24} color="var(--color-rule)" />
           <Controls showInteractive={false} />
           <MiniMap pannable zoomable nodeColor={(n) => ((n.data as unknown as NodeData).focal ? "#eb6c36" : "#bfc0c0")} />
-        </ReactFlow>
+        </ReactFlow></ZoomContext.Provider>
         <EvidencePanel projectId={projectId} sel={sel} onClose={() => setSel(null)} onZoom={(k) => zoomInto(k, sel?.data.id)} />
         <div className="pointer-events-none absolute bottom-3 left-14 rounded bg-card/90 px-2 py-1 font-mono text-[9px] text-soft">
           double-click / Enter to zoom · Backspace up · solid = observed · dashed = depends-on / inferred · accent = focal</div>

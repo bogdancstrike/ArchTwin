@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from dataclasses import dataclass
 from functools import lru_cache
@@ -28,6 +29,7 @@ from openai import (
 )
 
 from archtwin.common.errors import problem
+from archtwin.common.logging import log
 from archtwin.config import settings
 
 
@@ -102,6 +104,7 @@ class Completion:
     tokens_out: int
     latency_ms: int
     trace_id: str
+    cost_usd: float = 0.0
 
 
 _client: AsyncOpenAI | None = None
@@ -115,8 +118,14 @@ def _llm() -> AsyncOpenAI:
     return _client
 
 
-def _fake(messages: list[dict[str, str]], json_mode: bool) -> str:
+def _fake(messages: list[dict[str, str]], json_mode: bool, operation: str = "") -> str:
     user = messages[-1]["content"]
+    if operation == "general_chat":
+        return f"General answer (fake LLM mode, no project evidence): {user[:120]}"
+    if operation == "text_extend":
+        src = re.search(r"<text>\n?(.*?)\n?</text>", user, re.DOTALL)
+        base = (src.group(1) if src else user).strip()
+        return f"{base}\n\nThis extension elaborates the point above with consequences and trade-offs (fake LLM mode)."
     ids = []
     for line in user.splitlines():
         if line.startswith("[E") and "]" in line:
@@ -135,11 +144,29 @@ def _fake(messages: list[dict[str, str]], json_mode: bool) -> str:
 
 
 async def complete(messages: list[dict[str, str]], *, model: str, operation: str, project_id: str, user_id: str,
-                   json_mode: bool = False, max_tokens: int = 4000) -> Completion:
+                   json_mode: bool = False, max_tokens: int = 4000, ctx: Any = None) -> Completion:
+    """One chat completion through LiteLLM. With `ctx`: monthly spend limits are checked first (402 AT-BUD-001) and the call
+    — success or error — is written to the `llm_calls` ledger with tokens and cost."""
+    from archtwin.intelligence import usage
+    if ctx is not None:
+        await usage.check(ctx)
     t0 = time.monotonic()
+
+    async def ledger(**kw: Any) -> float:
+        if ctx is None:
+            return 0.0
+        try:
+            return await usage.record(ctx, org_id=ctx.org_id, project_id=ctx.project_id, user_id=ctx.actor_id, operation=operation,
+                                      model=model, latency_ms=int((time.monotonic() - t0) * 1000), **kw)
+        except Exception as e:  # noqa: BLE001 — accounting must never break the answer; it is logged loudly instead
+            log.error("llm_ledger_failed", error=type(e).__name__)
+            return 0.0
+
     if settings().llm_mode == "fake":
-        txt = _fake(messages, json_mode)
-        return Completion(txt, model, sum(len(m["content"]) // 4 for m in messages), len(txt) // 4, int((time.monotonic() - t0) * 1000), "fake")
+        txt = _fake(messages, json_mode, operation)
+        tin, tout = sum(len(m["content"]) // 4 for m in messages), len(txt) // 4
+        cost = await ledger(input_tokens=tin, output_tokens=tout, trace_id="fake")
+        return Completion(txt, model, tin, tout, int((time.monotonic() - t0) * 1000), "fake", cost)
     kwargs: dict[str, Any] = {"model": model, "messages": messages, "max_completion_tokens": max_tokens,
                               "extra_body": {"reasoning_effort": "medium",
                                              "metadata": {"trace_name": f"archtwin.{operation}", "generation_name": operation,
@@ -150,17 +177,30 @@ async def complete(messages: list[dict[str, str]], *, model: str, operation: str
     last: Exception | None = None
     for attempt in range(3):                      # the single retry layer
         try:
-            r = await _llm().chat.completions.create(**kwargs)
+            raw = await _llm().chat.completions.with_raw_response.create(**kwargs)
+            r = raw.parse()
             u = r.usage
-            return Completion(r.choices[0].message.content or "", r.model or model, getattr(u, "prompt_tokens", 0) or 0,
-                              getattr(u, "completion_tokens", 0) or 0, int((time.monotonic() - t0) * 1000), r.id or "")
+            tin, tout = getattr(u, "prompt_tokens", 0) or 0, getattr(u, "completion_tokens", 0) or 0
+            cached = getattr(getattr(u, "prompt_tokens_details", None), "cached_tokens", 0) or 0
+            reasoning = getattr(getattr(u, "completion_tokens_details", None), "reasoning_tokens", 0) or 0
+            try:
+                gw_cost = float(raw.headers.get("x-litellm-response-cost", "")) if raw.headers.get("x-litellm-response-cost") else None
+            except ValueError:
+                gw_cost = None
+            cost = await ledger(input_tokens=tin, cached_input_tokens=cached, output_tokens=tout, reasoning_tokens=reasoning,
+                                gateway_cost=gw_cost, trace_id=r.id or "")
+            return Completion(r.choices[0].message.content or "", r.model or model, tin, tout, int((time.monotonic() - t0) * 1000),
+                              r.id or "", cost)
         except (APIConnectionError, APITimeoutError, RateLimitError, InternalServerError) as e:
             last = e
             await asyncio.sleep(1.5 * (attempt + 1))
         except (NotFoundError, PermissionDeniedError) as e:
+            await ledger(status="error", error_code="model_unavailable")
             mark_unavailable(model)
             raise problem(422, "AT-AI-004", "Model unavailable", f"{model} failed capability validation with the provider and is now hidden; "
                           "choose another model.") from e
         except APIStatusError as e:
+            await ledger(status="error", error_code=f"http_{e.status_code}")
             raise problem(502, "AT-AI-005", "AI provider error", f"HTTP {e.status_code}", retryable=e.status_code >= 500) from e
+    await ledger(status="error", error_code=type(last).__name__ if last else "unavailable")
     raise problem(503, "AT-AI-002", "AI gateway unavailable", type(last).__name__ if last else "", retryable=True)

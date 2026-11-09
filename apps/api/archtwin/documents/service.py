@@ -124,17 +124,24 @@ async def get_document(conn, ctx: RequestContext, doc_id: uuid.UUID) -> dict[str
     return d
 
 
-async def search_passages(conn, ctx: RequestContext, query: str, limit: int = 8) -> list[dict[str, Any]]:
-    """Project-scoped FTS (RLS + explicit project filter); only the latest version of each document."""
+async def search_passages(conn, ctx: RequestContext, query: str, limit: int = 8, *, connector_ids: list[str] | None = None,
+                          uploads: bool = True) -> list[dict[str, Any]]:
+    """Project-scoped FTS (RLS + explicit project filter); only the latest version of each document.
+    `connector_ids` (None = every source) restricts to documents from those connectors; `uploads` adds uploaded files."""
     words = [w for w in re.findall(r"[A-Za-z0-9_]{3,}", query.lower())][:12]
     if not words:
         return []
     tsq = " | ".join(words)
-    rs = await conn.execute(text("""
+    flt = ""
+    params: dict[str, Any] = {"p": ctx.project_id, "q": tsq, "n": limit}
+    if connector_ids is not None:
+        flt = " AND (d.connector_id = ANY(CAST(:cids AS uuid[]))" + (" OR d.connector_id IS NULL)" if uploads else ")")
+        params["cids"] = connector_ids
+    rs = await conn.execute(text(f"""
         WITH latest AS (SELECT DISTINCT ON (path) id FROM documents WHERE project_id = :p ORDER BY path, version DESC)
         SELECT ps.id, ps.text, ps.heading, ps.line_start, ps.line_end, d.title, d.path, d.revision, d.id AS document_id,
-               ts_rank(ps.tsv, to_tsquery('english', :q)) AS rank
+               d.connector_id, ts_rank(ps.tsv, to_tsquery('english', :q)) AS rank
         FROM passages ps JOIN documents d ON d.id = ps.document_id JOIN latest l ON l.id = d.id
-        WHERE ps.project_id = :p AND ps.tsv @@ to_tsquery('english', :q)
-        ORDER BY rank DESC LIMIT :n"""), {"p": ctx.project_id, "q": tsq, "n": limit})
+        WHERE ps.project_id = :p AND ps.tsv @@ to_tsquery('english', :q){flt}
+        ORDER BY rank DESC LIMIT :n"""), params)
     return [dict(r._mapping) for r in rs]

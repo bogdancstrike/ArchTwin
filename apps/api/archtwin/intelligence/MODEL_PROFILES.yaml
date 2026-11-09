@@ -21,9 +21,16 @@ profiles:
   architecture-reasoning:
     model_alias: "${selected_model}"     # user choice, default gpt-6-luna
     reasoning_effort: medium
-    allowed_operations: [integration_design, adrs, architecture_review, question_answering]
+    allowed_operations: [integration_design, adrs, architecture_review, question_answering, architecture_draft]
     max_output_tokens: 10000
     require_citations: true
+    sensitive_payload_traces: false
+  general-chat:                          # Assistant "General" scope and text extension: no project evidence is sent
+    model_alias: "${selected_model}"
+    reasoning_effort: medium
+    allowed_operations: [general_chat, text_extend]
+    max_output_tokens: 6000
+    require_citations: false
     sensitive_payload_traces: false
   architecture-fast:
     model_alias: gpt-6-luna              # system task, not user-selectable

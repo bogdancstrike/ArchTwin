@@ -21,6 +21,26 @@ from archtwin.flags import service as flags
 from archtwin.kernel import outbox
 
 PUBLIC_FIELDS = [c for c in connectors.c if c.name != "secret_id"]
+SOURCE_ROOTS_KEY = "source_roots"
+
+
+async def org_source_roots(org_id: uuid.UUID) -> list[str] | None:
+    """Admin whitelist of local source roots for this org (System page); None = every mounted boundary."""
+    from sqlalchemy import text as sql_text
+
+    from archtwin.common.db import unscoped
+    from archtwin.common.schema import org_settings
+    async with unscoped() as conn:
+        await conn.execute(sql_text("SELECT set_config('app.org_id', :o, true)"), {"o": str(org_id)})
+        r = (await conn.execute(select(org_settings.c.value).where(and_(org_settings.c.org_id == org_id,
+                                                                         org_settings.c.key == SOURCE_ROOTS_KEY)))).first()
+    return list(r.value) if r and isinstance(r.value, list) else None
+
+
+async def scoped_roots(org_id: uuid.UUID):
+    """Set the org's local-root whitelist for the local-directory connector in this task (contextvar)."""
+    from archtwin.connectors.adapters.git_repo import ORG_ROOTS
+    ORG_ROOTS.set(await org_source_roots(org_id))
 
 
 async def require_enabled(ctx: RequestContext, kind: str) -> None:
@@ -106,6 +126,7 @@ async def test(ctx: RequestContext, cid: uuid.UUID) -> dict[str, Any]:
     await require_enabled(ctx, c["kind"])
     async with uow(ctx) as conn:
         sec = await _unseal(conn, ctx, c["secret_id"])
+    await scoped_roots(ctx.org_id)
     res = await registry.get(c["kind"]).test(c["config"], sec)
     async with uow(ctx) as conn:
         await audit.record(conn, ctx, "connector.test", "connector", cid, details={"ok": res.ok})
@@ -153,6 +174,7 @@ async def execute_scan(ctx: RequestContext, scan_id: uuid.UUID) -> dict[str, Any
         await conn.execute(scan_runs.update().where(scan_runs.c.id == scan_id).values(status="running", started_at=datetime.now(UTC)))
         sec = await _unseal(conn, ctx, c["secret_id"])
     try:
+        await scoped_roots(ctx.org_id)
         result: ScanResult = await impl.scan(c["config"], sec, s["ref"])
     except Exception as e:  # noqa: BLE001
         msg = redact(str(getattr(e, "problem_detail", None) or e))[:500]

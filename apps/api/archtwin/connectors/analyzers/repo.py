@@ -32,6 +32,81 @@ V_CODEOWNERS = "codeowners/1.0"
 V_TS = "ts-imports/1.0"
 V_DOCS = "markdown/1.0"
 V_INFER = "infer/1.0"
+V_XREPO = "config-urls-xrepo/1.0"
+V_DIAGRAM = "doc-diagrams/1.0"
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal", "example.com", "example.org"}
+IP_RX = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+
+
+def name_ref(host: str) -> str | None:
+    """A host that may be a service in ANOTHER repository/datasource -> `name:<service>` (resolved by the graph builder
+    across all datasources; unresolved names are dropped, never invented). Public FQDNs and local hosts are skipped."""
+    h = host.lower().strip(".")
+    if not h or h in LOCAL_HOSTS or IP_RX.match(h) or "${" in h:
+        return None
+    for suffix in (".svc.cluster.local", ".svc", ".cluster.local"):
+        if h.endswith(suffix):
+            return "name:" + h[: -len(suffix)].split(".")[0]
+    return None if "." in h else f"name:{h}"
+
+
+DIAGRAM_REL = [(re.compile(r"publish|produc|emit|send event", re.IGNORECASE), "publishes"), (re.compile(r"consum|subscrib|listen", re.IGNORECASE), "consumes"),
+               (re.compile(r"\bwrite|store|persist|insert|save", re.IGNORECASE), "writes"), (re.compile(r"\bread|query|fetch|load", re.IGNORECASE), "reads")]
+MERMAID_NODE = re.compile(r"(?<![\w\-])([A-Za-z0-9_][A-Za-z0-9_\-]*)\s*(?:\[\(|\(\(|\[\[|\[/|\[|\(|\{\{|\{)\s*\"?([^\]\)\}\"|]{1,80})\"?\s*(?:\)\]|\)\)|\]\]|/\]|\]|\)|\}\}|\})")
+MERMAID_EDGE = re.compile(r"([A-Za-z0-9_\-]+)(?:\s*(?:\[[^\]]*\]|\([^)]*\)|\{[^}]*\}))?\s*(?:-->|-\.->|==>|---|-->>|->>|--\)|-\)|->)\s*(?:\|([^|]{0,80})\|)?\s*([A-Za-z0-9_\-]+)(?:\s*:\s*(.{0,80}))?")
+MERMAID_LABELED = re.compile(r"([A-Za-z0-9_\-]+)(?:\s*(?:\[[^\]]*\]|\([^)]*\)))?\s*--\s*([^->][^-]{0,60}?)\s*-->\s*([A-Za-z0-9_\-]+)")
+PUML_EDGE = re.compile(r"^\s*\[?\"?([A-Za-z0-9_\- ]+?)\"?\]?\s*-+(?:>|\.>)\s*\[?\"?([A-Za-z0-9_\- ]+?)\"?\]?\s*(?::\s*(.{0,80}))?$")
+PUML_ALIAS = re.compile(r"^\s*(?:component|node|database|queue|actor|participant|rectangle|interface|cloud|frame|package)\s+\"?([^\"]+?)\"?\s+as\s+([A-Za-z0-9_]+)", re.IGNORECASE)
+DSL_ALIAS = re.compile(r"^\s*([A-Za-z0-9_]+)\s*=\s*(?:softwareSystem|container|component|person)\s+\"([^\"]+)\"", re.IGNORECASE)
+DSL_EDGE = re.compile(r"^\s*([A-Za-z0-9_.]+)\s*->\s*([A-Za-z0-9_.]+)\s*(?:\"([^\"]*)\")?")
+SKIP_DIAGRAM_NAMES = {"user", "users", "client", "browser", "start", "end", "a", "b", "c", "x", "y"}
+
+
+def diagram_edges(lang: str, src: str) -> list[tuple[str, str, str, str]]:
+    """(source name, relation, target name, label) from Mermaid flowchart/sequence, PlantUML or Structurizr DSL text.
+    Pure text parsing — the names are matched to real elements by the graph builder."""
+    labels: dict[str, str] = {}
+    out: list[tuple[str, str, str, str]] = []
+    lines = src.splitlines()
+    if lang == "mermaid":
+        for ln in lines:
+            for m in MERMAID_NODE.finditer(ln):
+                labels.setdefault(m.group(1), m.group(2).strip())
+            pm = re.match(r"^\s*participant\s+([A-Za-z0-9_\-]+)(?:\s+as\s+(.+))?", ln)
+            if pm:
+                labels[pm.group(1)] = (pm.group(2) or pm.group(1)).strip()
+        for ln in lines:
+            hits = [(m.group(1), m.group(3), m.group(2).strip()) for m in MERMAID_LABELED.finditer(ln)]
+            rest = MERMAID_LABELED.sub(" ", ln)                 # "a -- text --> b" must not also yield "text --> b"
+            hits += [(m.group(1), m.group(3), (m.group(2) or m.group(4) or "").strip()) for m in MERMAID_EDGE.finditer(rest)]
+            for a, b, label in hits:
+                out.append((labels.get(a, a), "", labels.get(b, b), label))
+    elif lang == "plantuml":
+        for ln in lines:
+            am = PUML_ALIAS.match(ln)
+            if am:
+                labels[am.group(2)] = am.group(1).strip()
+        for ln in lines:
+            m = PUML_EDGE.match(ln)
+            if m:
+                out.append((labels.get(m.group(1).strip(), m.group(1).strip()), "", labels.get(m.group(2).strip(), m.group(2).strip()), m.group(3) or ""))
+    elif lang == "structurizr":
+        for ln in lines:
+            am = DSL_ALIAS.match(ln)
+            if am:
+                labels[am.group(1)] = am.group(2)
+        for ln in lines:
+            m = DSL_EDGE.match(ln)
+            if m:
+                a, b = m.group(1).split(".")[-1], m.group(2).split(".")[-1]
+                out.append((labels.get(a, a), "", labels.get(b, b), m.group(3) or ""))
+    res = []
+    for a, _, b, label in out:
+        if a == b or a.lower() in SKIP_DIAGRAM_NAMES or b.lower() in SKIP_DIAGRAM_NAMES:
+            continue
+        rel = next((r for rx, r in DIAGRAM_REL if rx.search(label)), "calls")
+        res.append((a, rel, b, label))
+    return list(dict.fromkeys(res))
 
 KNOWN_EXTERNAL_ENV = {  # env var name -> (key, display name, protocol)
     "OPENAI_API_KEY": ("external:openai", "OpenAI API", "https"),
@@ -293,12 +368,20 @@ class RepoAnalyzer:
                 self.r.edge("static", svc.key, "calls", ek, V_CONFIG, attrs={"protocol": scheme, "via": var or "config"},
                             ref=ref, span=span, confidence=0.9)
                 found = True
+            elif host != svc.name and (nr := name_ref(host)):      # maybe a service of another repository / datasource
+                rel, proto = SCHEME_REL.get(scheme, ("calls", scheme))
+                self.r.edge("static", svc.key, rel, nr, V_XREPO, attrs={"protocol": proto, "port": port, "via": var or "config",
+                            "url": safe_url(m.group(0))[:200], "resolved_by": "name"}, ref=ref, span=span, confidence=0.7)
+                found = True
         if not found:
             hm = HOSTPORT_RX.match(value.strip())
             if hm and hm.group("host") in names and hm.group("host") != svc.name:
                 self.r.edge("static", svc.key, "calls", names[hm.group("host")].key, V_CONFIG,
                             attrs={"protocol": "tcp", "port": hm.group("port"), "via": var or "config"}, ref=ref, span=span,
                             confidence=0.85)
+            elif hm and hm.group("host") != svc.name and (nr := name_ref(hm.group("host"))):
+                self.r.edge("static", svc.key, "calls", nr, V_XREPO, attrs={"protocol": "tcp", "port": hm.group("port"),
+                            "via": var or "config", "resolved_by": "name"}, ref=ref, span=span, confidence=0.65)
 
     def persons(self) -> None:
         """Containers published on all host interfaces with a UI/IdP role are reached by end users (inferred)."""
@@ -607,6 +690,19 @@ class RepoAnalyzer:
                                         ref=rel, span={"path": rel, "line_start": i, "line_end": i})
 
     # ------------------------------------------------------------------ documents
+    def _documented(self, rel: str, blocks: list[tuple[str, str]]) -> None:
+        """Relations drawn in architecture diagrams inside the docs: `inferred` (documented intent, not observed),
+        between names the builder resolves to real elements across every datasource."""
+        n = 0
+        for lang, body in blocks:
+            for a, rel_kind, b, label in diagram_edges(lang, body):
+                self.r.edge("inferred", f"name:{a}", rel_kind, f"name:{b}", V_DIAGRAM, ref=rel, span={"path": rel},
+                            attrs={"documented": True, "diagram": rel, "notation": lang, "label": label[:120], "resolved_by": "name"},
+                            confidence=0.6)
+                n += 1
+                if n >= 300:
+                    return
+
     def _wants_doc(self, rel: str, f: Path) -> bool:
         """docs mode: every document anywhere. auto/code: root files, conventional doc folders and ADR folders anywhere."""
         if self.content == "docs":
@@ -640,6 +736,10 @@ class RepoAnalyzer:
                 tags = ["adr"] if ADR_PATH.search(rel) or re.match(r"^(adr[-_]?)?\d{3,4}[-_]", f.name, re.IGNORECASE) else []
             mime = "text/markdown" if suf in (".md", ".mdx", ".markdown") or is_diagram else "text/plain"
             self.r.documents.append(DocumentOut(path=rel, title=title, text=text, mime=mime, tags=tags))
+            blocks = [(DIAGRAM_TEXT[suf], read(f))] if is_diagram else \
+                [(lang if lang != "puml" else "plantuml", body) for lang, body in
+                 re.findall(r"```(mermaid|plantuml|puml|structurizr)\s*\n(.*?)```", text, re.DOTALL)]
+            self._documented(rel, blocks)
             if "adr" in tags and suf in (".md", ".mdx", ".markdown"):
                 ak = f"adr:{self.repo}/{rel}"
                 self.r.node("static", ak, "adr", title, V_DOCS, attrs={"path": rel, "imported": True}, ref=rel,

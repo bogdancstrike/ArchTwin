@@ -8,6 +8,7 @@ resourcePolicy:
   - actions:
     - view
     - create_project
+    - view_own_usage          # your own AI spend and tokens
     effect: EFFECT_ALLOW
     derivedRoles:
     - org_member
@@ -16,6 +17,10 @@ resourcePolicy:
     - manage_members
     - view_audit
     - export_audit
+    - view_usage_all          # everyone's AI spend, tokens, export
+    - manage_spend_limits     # monthly USD caps (global / user / project)
+    - view_system             # dependency health, LLM last hour, jobs
+    - inspect_access          # effective permissions per role, policy files
     effect: EFFECT_ALLOW
     derivedRoles:
     - org_administrator

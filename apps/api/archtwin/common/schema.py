@@ -245,7 +245,37 @@ prompt_runs = Table("prompt_runs", metadata,
     J("context_refs", "'[]'::jsonb"), Column("grounded", Boolean, nullable=False, server_default="false"),
     Column("tokens_in", Integer, nullable=False, server_default="0"), Column("tokens_out", Integer, nullable=False, server_default="0"),
     Column("latency_ms", Integer, nullable=False, server_default="0"), Column("trace_id", Text, nullable=False, server_default=""),
-    Column("status", Text, nullable=False, server_default="ok"), ts(), proj_fk())
+    Column("status", Text, nullable=False, server_default="ok"), ts(), proj_fk(),
+    uid("conversation_id", nullable=True), Column("scope", Text), Column("evidence", JSONB))
+
+llm_calls = Table("llm_calls", metadata,              # append-only usage ledger: every model call, success or error
+    uid("id", primary_key=True), uid("org_id"), uid("project_id", nullable=True), uid("user_id", nullable=True),
+    Column("operation", Text, nullable=False), Column("model", Text, nullable=False),
+    Column("input_tokens", Integer, nullable=False, server_default="0"), Column("cached_input_tokens", Integer, nullable=False, server_default="0"),
+    Column("output_tokens", Integer, nullable=False, server_default="0"), Column("reasoning_tokens", Integer, nullable=False, server_default="0"),
+    Column("cost_usd", Numeric(12, 6), nullable=False, server_default="0"), Column("cost_source", Text, nullable=False, server_default="table"),
+    Column("latency_ms", Integer, nullable=False, server_default="0"), Column("status", Text, nullable=False, server_default="ok"),
+    Column("error_code", Text), Column("trace_id", Text, nullable=False, server_default=""), ts(),
+    ForeignKeyConstraint(["org_id"], ["organizations.id"], ondelete="CASCADE"))
+
+spend_limits = Table("spend_limits", metadata,        # monthly USD caps: global | user:<id> | project:<id>
+    uid("org_id"), Column("subject", Text, nullable=False), Column("monthly_usd", Numeric(10, 2), nullable=False),
+    uid("updated_by", nullable=True), ts("updated_at"), PrimaryKeyConstraint("org_id", "subject"),
+    ForeignKeyConstraint(["org_id"], ["organizations.id"], ondelete="CASCADE"))
+
+org_settings = Table("org_settings", metadata,        # admin-edited org settings (System page), e.g. local source roots
+    uid("org_id"), Column("key", Text, nullable=False), Column("value", JSONB, nullable=False), uid("updated_by", nullable=True),
+    ts("updated_at"), PrimaryKeyConstraint("org_id", "key"), ForeignKeyConstraint(["org_id"], ["organizations.id"], ondelete="CASCADE"))
+
+conversations = Table("conversations", metadata,       # owner-only assistant chats (General / Data scope)
+    uid("id", primary_key=True), *scoped(), uid("user_id"), Column("scope", Text, nullable=False), J("sources", "'[]'::jsonb"),
+    Column("title", Text, nullable=False, server_default=""), Column("archived", Boolean, nullable=False, server_default="false"),
+    ts(), ts("updated_at"), proj_fk())
+
+architecture_drafts = Table("architecture_drafts", metadata,   # AI-proposed elements/relations: never facts until accepted
+    uid("id", primary_key=True), *scoped(), uid("created_by"), Column("model", Text, nullable=False),
+    Column("status", Text, nullable=False, server_default="proposed"), J("content"), J("evidence", "'[]'::jsonb"),
+    uid("decided_by", nullable=True), Column("decided_at", DateTime(timezone=True)), ts(), proj_fk())
 
 # ------------------------------------------------------------------ webhook ingress (RLS; dedupe of provider deliveries)
 webhook_deliveries = Table("webhook_deliveries", metadata,

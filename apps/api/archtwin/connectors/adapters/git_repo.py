@@ -22,6 +22,7 @@ import re
 import shutil
 import tarfile
 import tempfile
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -51,12 +52,33 @@ async def _git(*args: str, cwd: str | None = None, env: dict | None = None, time
     return proc.returncode or 0, out, err
 
 
+# Org whitelist of local source roots (System page), set by the connector service for the current org. None = every
+# mounted boundary (ARCHTWIN_LOCAL_SOURCE_ROOTS). A whitelisted root is only honoured inside a mounted boundary.
+ORG_ROOTS: ContextVar[list[str] | None] = ContextVar("archtwin_org_source_roots", default=None)
+BUILTIN_ROOT = "/sources"
+
+
+def _under(p: Path, r: Path) -> bool:
+    return p == r or str(p).startswith(str(r).rstrip(os.sep) + os.sep)
+
+
+def allowed_roots() -> list[Path]:
+    bounds = [Path(r).resolve() for r in settings().source_roots]
+    org = ORG_ROOTS.get()
+    if org is None:
+        return list(dict.fromkeys(bounds))
+    picked = [Path(r).resolve() for r in org]
+    out = [b for b in bounds if str(b) == str(Path(BUILTIN_ROOT).resolve())]
+    out += [r for r in picked if any(_under(r, b) for b in bounds)]
+    return list(dict.fromkeys(out))
+
+
 def _local_path(cfg: dict[str, Any]) -> Path:
     p = Path(str(cfg.get("path", ""))).resolve()
-    roots = [Path(r).resolve() for r in settings().source_roots]
-    if not any(p == r or str(p).startswith(str(r) + os.sep) for r in roots):
-        raise ValueError(f"path must be under an allowed source root ({', '.join(map(str, roots))}); "
-                         "mount the directory read-only and add it to ARCHTWIN_SOURCE_WORKSPACE")
+    roots = allowed_roots()
+    if not any(_under(p, r) for r in roots):
+        raise ValueError(f"path must be under an allowed source root ({', '.join(map(str, roots))}); an administrator can "
+                         "whitelist more folders in System › Source roots (inside the mounted ARCHTWIN_SOURCE_WORKSPACE)")
     if not p.is_dir():
         raise ValueError(f"{p} is not a directory")
     return p
@@ -98,14 +120,13 @@ DOC_MARKERS = ("docs", "doc", "documentation", "adr", "adrs", "architecture", "o
 def browse(path: str | None) -> dict[str, Any]:
     """Folder picker for the local-directory datasource: subfolders of an allowed source root (names only, never file
     contents). Hidden/dependency folders are skipped; symlinks are not followed out of the roots."""
-    roots = [Path(r).resolve() for r in settings().source_roots]
-    roots = [r for r in dict.fromkeys(roots) if r.is_dir()]
+    roots = [r for r in allowed_roots() if r.is_dir()]
     places = [{"name": r.name or str(r), "path": str(r)} for r in roots]
     if not path:
         return {"path": "", "name": "Sources", "parent": None, "root": None, "places": places, "layout": None, "markers": [],
                 "folders": [{"name": str(r), "path": str(r), "is_repo": _is_repo(r), "has_children": True} for r in roots]}
     p = _local_path({"path": path})
-    root = max((r for r in roots if p == r or str(p).startswith(str(r) + os.sep)), key=lambda r: len(str(r)))
+    root = max((r for r in roots if _under(p, r)), key=lambda r: len(str(r)))
     folders: list[dict[str, Any]] = []
     try:
         entries = sorted((c for c in p.iterdir() if c.is_dir() and not c.is_symlink()), key=lambda c: c.name.lower())

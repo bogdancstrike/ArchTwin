@@ -36,6 +36,7 @@ from archtwin.intelligence import assistant, gateway
 from archtwin.inventory import service as inventory
 from archtwin.kernel.idempotency import idempotent
 from archtwin.notifications import service as notify
+from archtwin.operations import service as ops
 from archtwin.projects import service as projects
 
 r = APIRouter(prefix="/api/v1")
@@ -269,10 +270,11 @@ async def connector_kinds(project_id: uuid.UUID | None = None, c: RequestContext
 
 @r.get("/projects/{project_id}/source-folders", tags=["connectors"])
 async def source_folders(path: str | None = None, c: RequestContext = Depends(project_ctx)):
-    """Folder picker for local-directory datasources: subfolders of the mounted source roots (names only)."""
+    """Folder picker for local-directory datasources: subfolders of the org's allowed source roots (names only)."""
     await connectors.require_enabled(c, "git")
     await require(c, "connector", "create")          # only people who may add a datasource can browse the roots
     from archtwin.connectors.adapters.git_repo import browse
+    await connectors.scoped_roots(c.org_id)
     try:
         return await asyncio.to_thread(browse, path)
     except ValueError as e:
@@ -677,11 +679,45 @@ async def ai_models(c: RequestContext = Depends(get_ctx)):
 
 @r.post("/projects/{project_id}/assistant/ask", tags=["ai"])
 async def ai_ask(body: S.AskIn, c: RequestContext = Depends(project_ctx)):
-    keys = ["module.architecture-assistant", "ai.answers"] + (["module.integration-designer", "ai.integration_design"] if body.mode == "design" else [])
+    keys = ["module.architecture-assistant"] + (["ai.general_chat"] if body.scope == "general" else ["ai.answers"]) \
+        + (["module.integration-designer", "ai.integration_design"] if body.mode == "design" else [])
     await flags.require(c, *keys)
     await require(c, "assistant", "ask")
     model = gateway.resolve_model(body.model, (await iam.get_preferences(c.actor_id)).get("preferred_model"))
-    return await assistant.ask(c, body.question, model, body.mode, body.history)
+    return await assistant.ask(c, body.question, model, body.mode, body.history, scope=body.scope, sources=body.sources,
+                               conversation_id=body.conversation_id)
+
+
+@r.get("/projects/{project_id}/assistant/conversations", tags=["ai"])
+async def ai_conversations(c: RequestContext = Depends(project_ctx)):
+    await flags.require(c, "module.architecture-assistant")
+    await require(c, "assistant", "ask")
+    return await assistant.list_conversations(c)
+
+
+@r.get("/projects/{project_id}/assistant/conversations/{cid}", tags=["ai"])
+async def ai_conversation(cid: uuid.UUID, c: RequestContext = Depends(project_ctx)):
+    await flags.require(c, "module.architecture-assistant")
+    await require(c, "assistant", "ask")
+    return await assistant.get_conversation(c, cid)
+
+
+@r.delete("/projects/{project_id}/assistant/conversations/{cid}", status_code=204, tags=["ai"])
+async def ai_conversation_archive(cid: uuid.UUID, c: RequestContext = Depends(project_ctx)):
+    await flags.require(c, "module.architecture-assistant")
+    await require(c, "assistant", "ask")
+    await assistant.archive_conversation(c, cid)
+
+
+@r.get("/projects/{project_id}/assistant/sources", tags=["ai"])
+async def ai_sources(c: RequestContext = Depends(project_ctx)):
+    """Datasources the Data scope can be restricted to (names and kinds only)."""
+    await flags.require(c, "module.architecture-assistant")
+    await require(c, "assistant", "ask")
+    await require(c, "connector", "view")
+    cs = [x for x in await connectors.list_(c) if x["enabled"]]
+    return [{"id": str(x["id"]), "name": x["name"], "kind": x["kind"]} for x in cs] + \
+        [{"id": "uploads", "name": "Uploaded documents", "kind": "uploads"}, {"id": "adrs", "name": "Decision records (ADRs)", "kind": "adrs"}]
 
 
 @r.post("/projects/{project_id}/assistant/draft-adr", tags=["ai"])
@@ -728,3 +764,101 @@ async def notifications_stream(request: Request, p: Principal = Depends(principa
                 yield {"event": "notifications", "data": json.dumps({"unread": len(items), "items": items}, default=str)}
             await asyncio.sleep(3)
     return EventSourceResponse(gen(), ping=15)
+
+
+# ------------------------------------------------------------------ operations: AI usage & cost, spend limits, system, access
+async def _org_allowed(c: RequestContext, action: str) -> bool:
+    return await authz.allowed(c.principal, "org", action, str(c.org_id), {"org_id": str(c.org_id)})
+
+
+async def _org_require(c: RequestContext, action: str) -> None:
+    if not await _org_allowed(c, action):
+        await audit.record_denial(c, f"org.{action}", "org", c.org_id)
+        raise problem(403, "AT-AUTHZ-001", "Forbidden", f"You may not {action.replace('_', ' ')}.")
+
+
+async def _everyone(c: RequestContext, scope: str) -> bool:
+    await _org_require(c, "view_own_usage")
+    if scope == "all":
+        await _org_require(c, "view_usage_all")
+        return True
+    return False
+
+
+@r.get("/usage/overview", tags=["operations"])
+async def usage_overview(days: int = Query(30, ge=1, le=400), scope: str = Query("me", pattern="^(me|all)$"), c: RequestContext = Depends(get_ctx)):
+    return await ops.overview(c, days, await _everyone(c, scope))
+
+
+@r.get("/usage/breakdown", tags=["operations"])
+async def usage_breakdown(days: int = Query(30, ge=1, le=400), group_by: str = "model", granularity: str = "day",
+                          scope: str = Query("me", pattern="^(me|all)$"), c: RequestContext = Depends(get_ctx)):
+    return await ops.breakdown(c, days, group_by, granularity, await _everyone(c, scope))
+
+
+@r.get("/usage/export", tags=["operations"])
+async def usage_export(days: int = Query(30, ge=1, le=400), scope: str = Query("me", pattern="^(me|all)$"), c: RequestContext = Depends(get_ctx)):
+    body = await ops.export_csv(c, days, await _everyone(c, scope))
+    return Response(body, media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="archtwin-ai-usage-{days}d.csv"'})
+
+
+@r.get("/admin/spend-limits", tags=["operations"])
+async def get_spend_limits(c: RequestContext = Depends(get_ctx)):
+    await _org_require(c, "manage_spend_limits")
+    from archtwin.intelligence import usage
+    return {"items": await ops._label_subjects(c, await usage.list_limits(c)), "warn_at": usage.WARN_AT, "prices": usage.price_table()}
+
+
+@r.put("/admin/spend-limits", tags=["operations"])
+async def put_spend_limits(body: S.SpendLimitsIn, c: RequestContext = Depends(get_ctx)):
+    await _org_require(c, "manage_spend_limits")
+    return {"items": await ops.set_limits(c, [i.model_dump() for i in body.items])}
+
+
+@r.get("/admin/system", tags=["operations"])
+async def admin_system(c: RequestContext = Depends(get_ctx)):
+    await _org_require(c, "view_system")
+    return await ops.system(c)
+
+
+@r.get("/admin/source-roots", tags=["operations"])
+async def admin_source_roots(c: RequestContext = Depends(get_ctx)):
+    await _org_require(c, "view_system")
+    return await ops.source_roots(c)
+
+
+@r.put("/admin/source-roots", tags=["operations"])
+async def admin_set_source_roots(body: S.SourceRootsIn, c: RequestContext = Depends(get_ctx)):
+    await _org_require(c, "manage")
+    return await ops.set_source_roots(c, body.roots)
+
+
+@r.get("/admin/source-folders", tags=["operations"])
+async def admin_source_folders(path: str | None = None, c: RequestContext = Depends(get_ctx)):
+    """Folder picker over the mounted boundaries (not just the whitelist) to choose roots to whitelist; names only."""
+    await _org_require(c, "manage")
+    from archtwin.connectors.adapters.git_repo import ORG_ROOTS, browse
+    ORG_ROOTS.set(None)
+    try:
+        return await asyncio.to_thread(browse, path)
+    except ValueError as e:
+        raise problem(422, "AT-CONN-004", "Folder not available", str(e)) from e
+
+
+@r.get("/admin/access", tags=["operations"])
+async def admin_access(c: RequestContext = Depends(get_ctx)):
+    await _org_require(c, "inspect_access")
+    return await ops.access_matrix(c)
+
+
+@r.get("/admin/policies", tags=["operations"])
+async def admin_policies(c: RequestContext = Depends(get_ctx)):
+    await _org_require(c, "inspect_access")
+    return {**ops.policy_files(), "pdp_healthy": await authz.healthy()}
+
+
+@r.get("/me/permissions", tags=["identity"])
+async def my_org_permissions(c: RequestContext = Depends(get_ctx)):
+    """Which org-level admin pages to show (the UI hides what Cerbos would deny anyway)."""
+    return {a: await _org_allowed(c, a) for a in ("view_own_usage", "view_usage_all", "manage_spend_limits", "view_system",
+                                                  "inspect_access", "view_audit", "manage")}

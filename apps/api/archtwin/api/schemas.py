@@ -109,6 +109,9 @@ class AskIn(Strict):
     model: str | None = None
     mode: Literal["ask", "design"] = "ask"
     history: list[dict[str, str]] = Field(default_factory=list, max_length=12)
+    scope: Literal["data", "general"] = "data"          # data = grounded in project evidence; general = no project data
+    sources: list[str] | None = Field(default=None, max_length=50)   # data scope: connector ids, "uploads", "adrs"; None = all
+    conversation_id: uuid.UUID | None = None
 
 
 class GenerateIn(Strict):
@@ -126,3 +129,16 @@ class TokensIn(Strict):
 class PrefsIn(Strict):
     preferred_model: str | None = None
     theme: Literal["light", "dark", "system"] | None = None
+
+
+class SpendLimitItem(Strict):
+    subject: str = Field(min_length=6, max_length=60)          # global | user:<uuid> | project:<uuid>
+    monthly_usd: float | None = Field(default=None, ge=0, le=1_000_000)
+
+
+class SpendLimitsIn(Strict):
+    items: list[SpendLimitItem] = Field(max_length=200)
+
+
+class SourceRootsIn(Strict):
+    roots: list[str] | None = Field(default=None, max_length=50)   # None = every mounted boundary

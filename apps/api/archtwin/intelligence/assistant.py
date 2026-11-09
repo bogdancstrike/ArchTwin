@@ -1,5 +1,9 @@
 """Grounded architecture assistant, integration designer and ADR drafting (AT-ARCHITECTURE_ASSISTANT, AT-INTEGRATION_DESIGNER).
 
+Two scopes (like an Ask panel): `data` (default) answers from this project's evidence only — optionally restricted to the
+datasources the user picks (connector ids, "uploads", "adrs") — and `general` is a plain chat through the same LiteLLM
+gateway that receives NO project evidence (and says so). Every turn belongs to an owner-only saved conversation.
+
 Retrieval is deterministic and project-scoped (RLS + explicit filters): graph elements, document passages and ADRs.
 Evidence is passed as clearly delimited UNTRUSTED data. Every answer must cite [E#]; citations are validated against the
 evidence actually provided; unknown citations are stripped and the answer is marked ungrounded.
@@ -8,16 +12,19 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 
 from archtwin.architecture import service as arch
 from archtwin.audit import service as audit
 from archtwin.common.db import RequestContext, rows, uow
+from archtwin.common.errors import not_found, problem
 from archtwin.common.ids import new_id
 from archtwin.common.logging import redact_text
-from archtwin.common.schema import adr_versions, adrs, prompt_runs
+from archtwin.common.schema import adr_versions, adrs, conversations, prompt_runs
 from archtwin.documents import service as docs
 from archtwin.intelligence import gateway
 
@@ -31,6 +38,13 @@ SYSTEM = """You are ArchTwin's architecture assistant for ONE project. Rules:
    connector or document would be needed. Missing evidence is never proof that something does not exist.
 4. Prefer concise, structured answers (short paragraphs or bullets). Distinguish observed facts from inferences.
 5. Detection of drift and authorization are deterministic platform functions; you only explain and draft."""
+
+GENERAL = """You are ArchTwin's general assistant for software architecture questions (patterns, technologies, trade-offs,
+writing). In this GENERAL mode you have NO access to the user's project, its code, documents or datasources: never claim
+to know anything about them, and suggest switching to the Data scope for questions about this project. Be concise and
+structured; mark uncertainty. Detection of drift and authorization are deterministic platform functions."""
+SPECIAL_SOURCES = {"uploads", "adrs"}
+MAX_SOURCES = 50
 
 DESIGN = """Task: integration design. Propose exactly TWO options to connect the requested systems, grounded in the observed
 architecture (existing protocols, gateways, workflow engines, data stores). For each option: summary, flow (numbered
@@ -60,13 +74,39 @@ def _summ(n: dict[str, Any]) -> str:
     return " · ".join(str(b) for b in bits if b)
 
 
-async def retrieve(ctx: RequestContext, question: str) -> list[dict[str, Any]]:
+def _from_sources(x: dict[str, Any], cids: set[str] | None) -> bool:
+    """An element/relationship is in scope when at least one of its observations came from a picked connector."""
+    if cids is None:
+        return True
+    return any((ev.get("connector_id") in cids) or (ev.get("origin") == "manual") for ev in x.get("evidence") or [])
+
+
+def normalize_sources(sources: list[str] | None) -> list[str] | None:
+    """None/empty = every datasource. Otherwise connector UUIDs plus the special "uploads" and "adrs"."""
+    if not sources:
+        return None
+    out: list[str] = []
+    for s in sources[:MAX_SOURCES]:
+        s = str(s).strip()
+        if s in SPECIAL_SOURCES:
+            out.append(s)
+            continue
+        try:
+            out.append(str(uuid.UUID(s)))
+        except ValueError as e:
+            raise problem(422, "AT-AI-004", "Invalid source", f"{s!r} is not a datasource id") from e
+    return sorted(set(out))
+
+
+async def retrieve(ctx: RequestContext, question: str, sources: list[str] | None = None) -> list[dict[str, Any]]:
     terms = _terms(question)
     ev: list[dict[str, Any]] = []
+    cids = None if sources is None else {s for s in sources if s not in SPECIAL_SOURCES}
     async with uow(ctx) as conn:
         snap = await arch.resolve_snapshot(conn, ctx)
         g = await arch.load_graph(conn, snap["id"]) if snap else {"nodes": {}, "edges": {}}
-        nodes, edges = g["nodes"], g["edges"]
+        nodes = {k: n for k, n in g["nodes"].items() if _from_sources(n, cids)}
+        edges = {k: e for k, e in g["edges"].items() if _from_sources(e, cids) and e["source"] in nodes and e["target"] in nodes}
         scored = []
         for k, n in nodes.items():
             if n["kind"] in ("library",):
@@ -96,11 +136,14 @@ async def retrieve(ctx: RequestContext, question: str) -> list[dict[str, Any]]:
                        "text": f"{nodes[e['source']]['name']} {e['kind']} {nodes[e['target']]['name']}" + (f" via {proto}" if proto else "")
                                + f" (confidence {e['confidence']:.2f}; origins {','.join(e['origins'])})",
                        "source": first.get("source_ref", ""), "revision": first.get("source_revision", ""), "span": first.get("span", {})})
-        for p in await docs.search_passages(conn, ctx, question, limit=8):
+        passages = await docs.search_passages(conn, ctx, question, limit=8, connector_ids=None if cids is None else sorted(cids),
+                                              uploads=sources is None or "uploads" in sources)
+        for p in passages:
             ev.append({"type": "passage", "key": f"doc:{p['path']}#L{p['line_start']}", "text": f"{p['title']} › {p['heading']}: {p['text'][:900]}",
                        "source": p["path"], "revision": p["revision"], "span": {"line_start": p["line_start"], "line_end": p["line_end"]}})
-        ad = rows(await conn.execute(select(adrs.c.number, adrs.c.title, adrs.c.status, adr_versions.c.content).join(
-            adr_versions, (adr_versions.c.adr_id == adrs.c.id) & (adr_versions.c.version == adrs.c.current_version))
+        ad = [] if sources is not None and "adrs" not in sources else rows(await conn.execute(
+            select(adrs.c.number, adrs.c.title, adrs.c.status, adr_versions.c.content).join(
+                adr_versions, (adr_versions.c.adr_id == adrs.c.id) & (adr_versions.c.version == adrs.c.current_version))
             .where(adrs.c.project_id == ctx.project_id).order_by(adrs.c.number.desc()).limit(6)))
         for a in ad:
             ev.append({"type": "adr", "key": f"adr:{a['number']}", "text": f"ADR-{a['number']:04d} {a['title']} [{a['status']}]: "
@@ -126,38 +169,112 @@ def validate_citations(answer: str, ev: list[dict[str, Any]]) -> tuple[str, list
     return answer, good, bad
 
 
-async def ask(ctx: RequestContext, question: str, model: str, mode: str = "ask", history: list[dict[str, str]] | None = None) -> dict[str, Any]:
-    ev = await retrieve(ctx, question)
-    sys = SYSTEM + ("\n\n" + DESIGN if mode == "design" else "")
+async def _conversation(conn, ctx: RequestContext, cid: uuid.UUID | None, scope: str, sources: list[str] | None,
+                        question: str) -> tuple[uuid.UUID, list[dict[str, str]]]:
+    """Owner-only: continue the caller's conversation (its server-side history) or start a new one."""
+    if cid:
+        c = (await conn.execute(select(conversations).where(and_(conversations.c.id == cid, conversations.c.user_id == ctx.actor_id,
+                                                                 conversations.c.archived.is_(False))))).first()
+        if not c:
+            raise not_found("conversation")
+        turns = rows(await conn.execute(select(prompt_runs.c.question, prompt_runs.c.answer).where(
+            prompt_runs.c.conversation_id == cid).order_by(prompt_runs.c.created_at.desc()).limit(3)))
+        hist: list[dict[str, str]] = []
+        for t in reversed(turns):
+            hist += [{"role": "user", "content": t["question"]}, {"role": "assistant", "content": t["answer"]}]
+        await conn.execute(conversations.update().where(conversations.c.id == cid).values(
+            scope=scope, sources=sources or [], updated_at=datetime.now(UTC)))
+        return cid, hist
+    cid = new_id()
+    await conn.execute(conversations.insert().values(id=cid, org_id=ctx.org_id, project_id=ctx.project_id, user_id=ctx.actor_id,
+                                                     scope=scope, sources=sources or [], title=redact_text(question)[:120]))
+    return cid, []
+
+
+async def ask(ctx: RequestContext, question: str, model: str, mode: str = "ask", history: list[dict[str, str]] | None = None, *,
+              scope: str = "data", sources: list[str] | None = None, conversation_id: uuid.UUID | None = None) -> dict[str, Any]:
+    if scope not in ("data", "general"):
+        raise problem(422, "AT-AI-005", "Invalid scope", "scope must be 'data' or 'general'")
+    if scope == "general" and mode == "design":
+        raise problem(422, "AT-AI-006", "Design needs project data", "Integration design is grounded: use the Data scope.")
+    sources = normalize_sources(sources) if scope == "data" else None
+    async with uow(ctx) as conn:
+        conversation_id, server_hist = await _conversation(conn, ctx, conversation_id, scope, sources, question)
+    ev = await retrieve(ctx, question, sources) if scope == "data" else []
+    sys = GENERAL if scope == "general" else SYSTEM + ("\n\n" + DESIGN if mode == "design" else "")
     msgs = [{"role": "system", "content": sys}]
-    for h in (history or [])[-6:]:
+    for h in (server_hist or history or [])[-6:]:
         if h.get("role") in ("user", "assistant"):
             msgs.append({"role": h["role"], "content": str(h.get("content", ""))[:4000]})
-    msgs.append({"role": "user", "content": f"<evidence>\n{_evidence_block(ev)}\n</evidence>\n\nQuestion: {question}"})
-    c = await gateway.complete(msgs, model=model, operation="integration_design" if mode == "design" else "question_answering",
-                               project_id=str(ctx.project_id), user_id=str(ctx.actor_id), max_tokens=6000)
-    answer, good, bad = validate_citations(c.text, ev)
-    grounded = bool(good) and not bad
+    msgs.append({"role": "user", "content": question if scope == "general"
+                 else f"<evidence>\n{_evidence_block(ev)}\n</evidence>\n\nQuestion: {question}"})
+    operation = "general_chat" if scope == "general" else "integration_design" if mode == "design" else "question_answering"
+    c = await gateway.complete(msgs, model=model, operation=operation, project_id=str(ctx.project_id), user_id=str(ctx.actor_id), ctx=ctx,
+                               max_tokens=6000)
+    if scope == "general":
+        answer, good, bad = c.text, [], []
+    else:
+        answer, good, bad = validate_citations(c.text, ev)
+    grounded = scope == "data" and bool(good) and not bad
+    shown = ([e for e in ev if e["id"] in good] or ev[:6]) if scope == "data" else []
     rid = new_id()
     async with uow(ctx) as conn:
         await conn.execute(prompt_runs.insert().values(id=rid, org_id=ctx.org_id, project_id=ctx.project_id, user_id=ctx.actor_id,
-                                                       operation=mode, model=model, question=question[:4000], answer=answer,
-                                                       citations=good, context_refs=[{"id": e["id"], "key": e["key"]} for e in ev],
+                                                       operation=mode if scope == "data" else "general", model=model, question=question[:4000],
+                                                       answer=answer, citations=good, context_refs=[{"id": e["id"], "key": e["key"]} for e in ev],
                                                        grounded=grounded, tokens_in=c.tokens_in, tokens_out=c.tokens_out,
-                                                       latency_ms=c.latency_ms, trace_id=c.trace_id,
+                                                       latency_ms=c.latency_ms, trace_id=c.trace_id, conversation_id=conversation_id,
+                                                       scope=scope, evidence=shown,
                                                        status="ok" if not bad else "invalid_citations_removed"))
-        await audit.record(conn, ctx, f"ai.{mode}", "assistant", rid, details={"model": model, "grounded": grounded,
-                                                                               "evidence": len(ev), "invalid_citations": bad})
-    return {"id": rid, "answer": answer, "model": c.model or model, "grounded": grounded, "citations": good, "invalid_citations": bad,
-            "evidence": [e for e in ev if e["id"] in good] or ev[:6], "all_evidence": ev, "tokens": {"in": c.tokens_in, "out": c.tokens_out},
-            "latency_ms": c.latency_ms}
+        await conn.execute(conversations.update().where(conversations.c.id == conversation_id).values(updated_at=datetime.now(UTC)))
+        await audit.record(conn, ctx, f"ai.{mode if scope == 'data' else 'general'}", "assistant", rid,
+                           details={"model": model, "grounded": grounded, "scope": scope, "sources": sources or "all",
+                                    "evidence": len(ev), "invalid_citations": bad, "conversation": str(conversation_id)})
+    return {"id": rid, "conversation_id": conversation_id, "scope": scope, "sources": sources, "answer": answer, "model": c.model or model,
+            "cost_usd": round(c.cost_usd, 6), "grounded": grounded, "citations": good, "invalid_citations": bad, "evidence": shown, "all_evidence": ev,
+            "tokens": {"in": c.tokens_in, "out": c.tokens_out}, "latency_ms": c.latency_ms}
+
+
+async def list_conversations(ctx: RequestContext, limit: int = 100) -> list[dict[str, Any]]:
+    async with uow(ctx) as conn:
+        turns = (select(prompt_runs.c.conversation_id, func.count().label("turns")).where(prompt_runs.c.conversation_id.isnot(None))
+                 .group_by(prompt_runs.c.conversation_id).subquery())
+        return rows(await conn.execute(
+            select(conversations.c.id, conversations.c.title, conversations.c.scope, conversations.c.sources, conversations.c.created_at,
+                   conversations.c.updated_at, func.coalesce(turns.c.turns, 0).label("turns"))
+            .outerjoin(turns, turns.c.conversation_id == conversations.c.id)
+            .where(and_(conversations.c.project_id == ctx.project_id, conversations.c.user_id == ctx.actor_id,
+                        conversations.c.archived.is_(False)))
+            .order_by(conversations.c.updated_at.desc()).limit(limit)))
+
+
+async def get_conversation(ctx: RequestContext, cid: uuid.UUID) -> dict[str, Any]:
+    async with uow(ctx) as conn:
+        c = (await conn.execute(select(conversations).where(and_(conversations.c.id == cid, conversations.c.user_id == ctx.actor_id,
+                                                                 conversations.c.archived.is_(False))))).first()
+        if not c:
+            raise not_found("conversation")
+        turns = rows(await conn.execute(select(prompt_runs.c.id, prompt_runs.c.question, prompt_runs.c.answer, prompt_runs.c.model,
+                                               prompt_runs.c.grounded, prompt_runs.c.citations, prompt_runs.c.evidence, prompt_runs.c.scope,
+                                               prompt_runs.c.latency_ms, prompt_runs.c.status, prompt_runs.c.created_at)
+                                        .where(prompt_runs.c.conversation_id == cid).order_by(prompt_runs.c.created_at)))
+    return {**dict(c._mapping), "turns": turns}
+
+
+async def archive_conversation(ctx: RequestContext, cid: uuid.UUID) -> None:
+    async with uow(ctx) as conn:
+        r = await conn.execute(conversations.update().where(and_(conversations.c.id == cid, conversations.c.user_id == ctx.actor_id))
+                               .values(archived=True).returning(conversations.c.id))
+        if r.first() is None:
+            raise not_found("conversation")
+        await audit.record(conn, ctx, "ai.conversation.archive", "assistant", cid)
 
 
 async def draft_adr(ctx: RequestContext, question: str, model: str) -> dict[str, Any]:
     ev = await retrieve(ctx, question)
     msgs = [{"role": "system", "content": SYSTEM + "\n\n" + ADR_JSON},
             {"role": "user", "content": f"<evidence>\n{_evidence_block(ev)}\n</evidence>\n\nDecision to record: {question}"}]
-    c = await gateway.complete(msgs, model=model, operation="adrs", project_id=str(ctx.project_id), user_id=str(ctx.actor_id),
+    c = await gateway.complete(msgs, model=model, operation="adrs", project_id=str(ctx.project_id), user_id=str(ctx.actor_id), ctx=ctx,
                                json_mode=True, max_tokens=6000)
     try:
         data = json.loads(c.text)

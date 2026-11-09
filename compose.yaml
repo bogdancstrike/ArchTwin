@@ -34,6 +34,11 @@ x-app-env: &app-env
   ARCHTWIN_EGRESS_ALLOW_PRIVATE_HOSTS: docker-proxy,api,postgres,kafka,schema-registry,prometheus,orders-db,inventory-db,${ARCHTWIN_EGRESS_ALLOW_PRIVATE_HOSTS:-}
   # operator-only: hosts whose TLS certificate is not verified (self-signed / wrong CN). Keep empty unless you must.
   ARCHTWIN_EGRESS_INSECURE_TLS_HOSTS: ${ARCHTWIN_EGRESS_INSECURE_TLS_HOSTS:-}
+  # USD per 1M tokens for models without a default price, e.g. {"gpt-6-sol": [input, cached_input, output]}
+  ARCHTWIN_LLM_PRICES: ${ARCHTWIN_LLM_PRICES:-}
+  TEMPORAL_UI_PORT: ${TEMPORAL_UI_PORT:-8253}
+  LANGFUSE_PORT: ${LANGFUSE_PORT:-3201}
+  LITELLM_PORT: ${LITELLM_PORT:-4200}
   ARCHTWIN_DOCLING_URL: ${ARCHTWIN_DOCLING_URL:-}
 
 services:
@@ -326,6 +331,7 @@ services:
       - ${ARCHTWIN_SOURCE_HORIZON:-../horizon}:/sources/horizon:ro
       - ./:/sources/archtwin:ro
       - ${ARCHTWIN_SOURCE_WORKSPACE:-./fixtures}:${ARCHTWIN_SOURCE_WORKSPACE:-/sources/fixtures}:ro
+      - ./deploy/cerbos/policies:/policies:ro          # Roles & Permissions › policy viewer (read-only)
     ports: ["127.0.0.1:${API_PORT:-8200}:8000"]
     depends_on:
       migrate: {condition: service_completed_successfully}
