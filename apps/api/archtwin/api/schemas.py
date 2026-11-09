@@ -157,3 +157,15 @@ class ExtendIn(Strict):
 
 class DeleteProjectIn(Strict):
     confirm: str = Field(min_length=1, max_length=120)      # must equal the project slug (server-side double confirmation)
+
+
+class CompleteAdrIn(Strict):
+    title: str = Field(default="", max_length=300)
+    context: str = Field(default="", max_length=12000)
+    decision_drivers: list[str] = Field(default_factory=list, max_length=50)
+    considered_options: list[str] = Field(default_factory=list, max_length=20)
+    decision_outcome: str = Field(default="", max_length=8000)
+    consequences: str = Field(default="", max_length=8000)
+    instruction: str = Field(default="", max_length=1000)
+    grounded: bool = True
+    model: str | None = None

@@ -72,3 +72,16 @@ def test_code_passages_preserve_exact_line_numbers():
             rebuilt.setdefault(p["line_start"] + i, ln)
     assert all(rebuilt.get(n) == lines[n - 1] for n in range(1, len(lines) + 1) if lines[n - 1].strip())   # every code line, same number
     assert any(len(p["text"]) > 1800 for p in split_code(src))                                         # long chunks are not truncated
+
+
+def test_complete_adr_normalization_keeps_author_text():
+    from archtwin.intelligence.assistant import normalize_adr
+    written = {"title": "Use Kafka", "context": "We need events.", "decision_drivers": ["throughput"], "considered_options": ["Kafka", "RabbitMQ"],
+               "decision_outcome": "", "consequences": ""}
+    out = normalize_adr({"context": "We need durable events between services.", "decision_drivers": "- throughput\n- replay",
+                         "considered_options": [{"name": "Kafka", "pros": ["replay"], "cons": "ops cost"}, "RabbitMQ"],
+                         "decision_outcome": "Chosen option: Kafka, because replay."}, written)
+    assert out["title"] == "Use Kafka" and out["decision_drivers"] == ["throughput", "replay"]
+    assert out["considered_options"][0] == {"name": "Kafka", "pros": ["replay"], "cons": ["ops cost"]}
+    assert out["considered_options"][1]["name"] == "RabbitMQ" and out["consequences"] == ""
+    assert normalize_adr({}, written)["considered_options"] == [{"name": "Kafka", "pros": [], "cons": []}, {"name": "RabbitMQ", "pros": [], "cons": []}]

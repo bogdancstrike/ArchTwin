@@ -713,6 +713,16 @@ async def ai_ask(body: S.AskIn, c: RequestContext = Depends(project_ctx)):
                                conversation_id=body.conversation_id)
 
 
+@r.post("/projects/{project_id}/assistant/complete-adr", tags=["ai"])
+async def ai_complete_adr(body: S.CompleteAdrIn, c: RequestContext = Depends(project_ctx)):
+    """One AI suggestion for the whole ADR form (MADR), from everything the author wrote so far."""
+    await flags.require(c, "module.architecture-assistant", "module.adr-workflow", "ai.adr_drafting")
+    await require(c, "assistant", "draft")
+    model = gateway.resolve_model(body.model, (await iam.get_preferences(c.actor_id)).get("preferred_model"))
+    fields = body.model_dump(include={"title", "context", "decision_drivers", "considered_options", "decision_outcome", "consequences"})
+    return await assistant.complete_adr(c, fields, model, instruction=body.instruction, grounded=body.grounded)
+
+
 @r.post("/projects/{project_id}/assistant/extend", tags=["ai"])
 async def ai_extend(body: S.ExtendIn, c: RequestContext = Depends(project_ctx)):
     await flags.require(c, "module.architecture-assistant", "ai.text_extend")
