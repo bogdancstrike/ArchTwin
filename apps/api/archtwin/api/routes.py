@@ -265,6 +265,18 @@ async def connector_kinds(project_id: uuid.UUID | None = None, c: RequestContext
     return out
 
 
+@r.get("/projects/{project_id}/source-folders", tags=["connectors"])
+async def source_folders(path: str | None = None, c: RequestContext = Depends(project_ctx)):
+    """Folder picker for local-directory datasources: subfolders of the mounted source roots (names only)."""
+    await connectors.require_enabled(c, "git")
+    await require(c, "connector", "create")          # only people who may add a datasource can browse the roots
+    from archtwin.connectors.adapters.git_repo import browse
+    try:
+        return await asyncio.to_thread(browse, path)
+    except ValueError as e:
+        raise problem(422, "AT-CONN-004", "Folder not available", str(e)) from e
+
+
 @r.get("/projects/{project_id}/connectors", tags=["connectors"])
 async def list_connectors(c: RequestContext = Depends(project_ctx)):
     await require(c, "connector", "view")

@@ -1,9 +1,11 @@
-import { Activity, ArrowLeft, Box, CheckCircle2, Database, FolderGit2, FolderOpen, GitBranch, GitMerge, Globe, KeyRound, Play, Plus, Radio, ShieldCheck, SquareKanban, Trash2, Webhook, XCircle } from "lucide-react";
+import { Activity, ArrowLeft, Box, CheckCircle2, Dices, ExternalLink, Eye, EyeOff, Database, FolderGit2, FolderOpen, GitBranch, GitMerge, Globe, KeyRound, Play, Plus, Radio, ShieldCheck, SquareKanban, Trash2, Webhook, XCircle } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Badge, Button, Card, Dialog, Empty, ErrorBox, Field, FreshnessBadge, Input, OriginBadges, Skeleton, StatTile, StatusDot, Table, Textarea, ago, cn } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import type { Connector, Scan } from "@/lib/types";
+import { FolderPicker } from "@/components/FolderPicker";
+import { credentialLinks, newSecret, type CredentialLink } from "@/lib/credentialLinks";
 
 interface Kind { kind: string; name: string; origin: string; category: string; scopes: string[]; enabled: boolean; flag: string; module_flag: string;
   config: Record<string, unknown>; secret?: Record<string, string>; webhooks?: string[]; source_roots?: string[] }
@@ -29,6 +31,14 @@ const PRESETS: Record<string, { config: object }> = {
 };
 const pretty = (o: object | undefined) => (o ? JSON.stringify(o, null, 2) : "");
 
+function Links({ links }: { links?: CredentialLink[] }) {
+  if (!links?.length) return null;
+  return <span className="flex flex-wrap gap-x-3 gap-y-0.5">{links.map((l) => <a key={l.href} href={l.href} target="_blank" rel="noopener noreferrer"
+    className="inline-flex items-center gap-1 text-xs text-link hover:underline">{l.label} <ExternalLink size={11} /></a>)}</span>;
+}
+
+const parseCfg = (text: string): Record<string, unknown> => { try { const o = JSON.parse(text); return o && typeof o === "object" ? o : {}; } catch { return {}; } };
+
 function KindIcon({ kind, className }: { kind: string; className?: string }) {
   const I = ICONS[kind] ?? Box;
   return <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-rule bg-paper text-muted", className)}><I size={17} /></span>;
@@ -41,6 +51,9 @@ function AddConnector({ projectId, open, onClose }: { projectId: string; open: b
   const [config, setConfig] = useState("");
   const [secret, setSecret] = useState<Record<string, string>>({});
   const [jsonErr, setJsonErr] = useState<string | null>(null);
+  const [reveal, setReveal] = useState<Record<string, boolean>>({});
+  const [picking, setPicking] = useState(false);
+  const setCfgKey = (patch: Record<string, unknown>) => setConfig(pretty({ ...parseCfg(config), ...patch }));
   const create = useAction(() => api("/projects/" + projectId + "/connectors", { method: "POST", idempotent: true, json: {
     kind, name, config: JSON.parse(config), secret: Object.values(secret).some((v) => v.trim()) ? Object.fromEntries(Object.entries(secret).filter(([, v]) => v.trim())) : null } }),
     [["connectors", projectId]], "Datasource added");
@@ -48,7 +61,7 @@ function AddConnector({ projectId, open, onClose }: { projectId: string; open: b
   const pick = (x: Kind) => {
     const preset = { ...(PRESETS[x.kind]?.config ?? {}) } as Record<string, unknown>;
     if (x.kind === "git" && x.source_roots?.length) preset.path = x.source_roots[x.source_roots.length - 1];
-    setKind(x.kind); setName(x.kind === "git" ? "local-sources" : x.kind.replace("_", "-")); setConfig(pretty(preset)); setSecret({}); setJsonErr(null);
+    setKind(x.kind); setName(x.kind === "git" ? "local-sources" : x.kind.replace("_", "-")); setConfig(pretty(preset)); setSecret({}); setReveal({}); setJsonErr(null);
   };
   const close = () => { setKind(null); setSecret({}); onClose(); };
   return <Dialog open={open} onClose={close} title={k ? `Add ${k.name}` : "Add a source of evidence"} wide>
@@ -75,6 +88,17 @@ function AddConnector({ projectId, open, onClose }: { projectId: string; open: b
         <div className="min-w-0 text-xs text-muted"><div className="flex items-center gap-1.5"><ShieldCheck size={14} className="text-ok" /> read-only · origin <Badge>{k.origin}</Badge></div>
           <div className="mt-1.5 flex flex-wrap gap-1">{k.scopes.map((s) => <Badge key={s} tone="link">{s}</Badge>)}</div></div></div>
       <Field label="Name"><Input required value={name} onChange={(e) => setName(e.target.value)} /></Field>
+      {k.kind === "git" && <Field label="Local directory" hint="One repository, a folder of repositories (each becomes a system) or a docs / architecture folder.">
+        <div className="flex gap-1.5"><Input aria-label="Local directory path" className="font-mono text-xs" placeholder="/home/me/workspace/project/backend"
+          value={String(parseCfg(config).path ?? "")} onChange={(e) => setCfgKey({ path: e.target.value })} />
+          <Button type="button" onClick={() => setPicking(true)}><FolderOpen size={14} /> Browse…</Button></div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">Content:
+          {(["auto", "code", "docs"] as const).map((m) => <button type="button" key={m} onClick={() => setCfgKey({ content: m })} aria-pressed={(parseCfg(config).content ?? "auto") === m}
+            className={cn("rounded-full border px-2 py-0.5", (parseCfg(config).content ?? "auto") === m ? "border-ink bg-ink text-paper" : "border-rule hover:border-muted")}>{m}</button>)}
+          <span className="text-soft">auto = code + docs folders + ADRs · docs = every document, diagram and ADR</span></div>
+        <FolderPicker projectId={projectId} open={picking} value={String(parseCfg(config).path ?? "")} onClose={() => setPicking(false)}
+          onChoose={(path, info) => { setCfgKey({ path, content: info.suggested_content ?? "auto" }); setName(path.split("/").filter(Boolean).pop() || name); setPicking(false); }} />
+      </Field>}
       {k.kind === "git" && k.source_roots?.length ? <p className="rounded-lg bg-paper/70 p-2 text-xs text-muted">Local directories must be under a mounted source root:{" "}
         {k.source_roots.map((r) => <code key={r} className="mr-1 font-mono">{r}</code>)}. A folder of repositories scans each repository as its own system;
         set <code className="font-mono">content</code> to <code className="font-mono">docs</code> for documentation or architecture folders.</p> : null}
@@ -83,9 +107,17 @@ function AddConnector({ projectId, open, onClose }: { projectId: string; open: b
       {k.secret && Object.keys(k.secret).length > 0 && <fieldset className="space-y-2 rounded-lg border border-rule p-3">
         <legend className="flex items-center gap-1.5 px-1 text-sm font-medium"><KeyRound size={14} /> Credentials <span className="font-normal text-soft">(optional)</span></legend>
         <p className="text-xs text-soft">Sealed with envelope encryption; never returned, logged or sent to the AI. Use read-only credentials.</p>
-        {Object.entries(k.secret).map(([key, hint]) => <Field key={key} label={key.replace(/_/g, " ")} hint={String(hint)}>
-          <Input type={key === "username" ? "text" : "password"} autoComplete={key === "username" ? "off" : "new-password"} aria-label={`credential ${key}`}
-            className="font-mono text-xs" value={secret[key] ?? ""} onChange={(e) => setSecret((s) => ({ ...s, [key]: e.target.value }))} /></Field>)}
+        {Object.entries(k.secret).map(([key, hint]) => { const links = credentialLinks(k.kind, parseCfg(config))[key]; const plain = key === "username" || reveal[key];
+          return <Field key={key} label={key.replace(/_/g, " ")} hint={String(hint)}>
+          <div className="flex items-center gap-1.5">
+            <Input type={plain ? "text" : "password"} autoComplete={key === "username" ? "off" : "new-password"} aria-label={`credential ${key}`}
+              className="font-mono text-xs" value={secret[key] ?? ""} onChange={(e) => setSecret((s) => ({ ...s, [key]: e.target.value }))} />
+            {key !== "username" && <Button type="button" size="sm" variant="ghost" aria-label={`${reveal[key] ? "Hide" : "Show"} ${key}`}
+              onClick={() => setReveal((r) => ({ ...r, [key]: !r[key] }))}>{reveal[key] ? <EyeOff size={13} /> : <Eye size={13} />}</Button>}
+            {key === "webhook_secret" && <Button type="button" size="sm" aria-label="Generate webhook secret" title="Generate a random secret, then paste it into the provider's webhook settings"
+              onClick={() => { setSecret((s) => ({ ...s, webhook_secret: newSecret() })); setReveal((r) => ({ ...r, webhook_secret: true })); }}><Dices size={13} /> Generate</Button>}
+          </div>
+          <div className="mt-1"><Links links={links} /></div></Field>; })}
       </fieldset>}
       {jsonErr && <div role="alert" className="text-sm text-bad">Invalid JSON: {jsonErr}</div>}
       <ErrorBox error={create.error} />
@@ -100,6 +132,7 @@ function WebhookDialog({ projectId, c, onClose }: { projectId: string; c: Connec
     {!w.data ? <Skeleton className="h-24" /> : <div className="space-y-4 text-sm">
       {!w.data.enabled && <div className="rounded-lg border border-warn/30 bg-warn/10 p-3 text-warn-ink">Webhooks are off (<code>connectors.webhooks</code>). Polling and scheduled reconciliation still converge.</div>}
       <Field label="Payload URL"><Input readOnly value={w.data.url} className="font-mono text-xs" onFocus={(e) => e.target.select()} /></Field>
+      {c && <Links links={credentialLinks(c.kind, c.config as Record<string, unknown>).webhook_secret} />}
       <p className="text-muted">Signature: <code className="font-mono text-xs">{w.data.signature}</code> using the connector's <code className="font-mono text-xs">webhook_secret</code>. Events: {w.data.events.join(", ")}.
         Redeliveries are de-duplicated; a commit is extracted once.</p>
       <div><div className="eyebrow mb-1">Recent deliveries</div>

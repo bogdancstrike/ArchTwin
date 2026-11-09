@@ -91,6 +91,51 @@ def discover_repos(root: Path, include: list[str] | None = None, exclude: list[s
     return found
 
 
+MAX_BROWSE = 500
+DOC_MARKERS = ("docs", "doc", "documentation", "adr", "adrs", "architecture", "openspec")
+
+
+def browse(path: str | None) -> dict[str, Any]:
+    """Folder picker for the local-directory datasource: subfolders of an allowed source root (names only, never file
+    contents). Hidden/dependency folders are skipped; symlinks are not followed out of the roots."""
+    roots = [Path(r).resolve() for r in settings().source_roots]
+    roots = [r for r in dict.fromkeys(roots) if r.is_dir()]
+    places = [{"name": r.name or str(r), "path": str(r)} for r in roots]
+    if not path:
+        return {"path": "", "name": "Sources", "parent": None, "root": None, "places": places, "layout": None, "markers": [],
+                "folders": [{"name": str(r), "path": str(r), "is_repo": _is_repo(r), "has_children": True} for r in roots]}
+    p = _local_path({"path": path})
+    root = max((r for r in roots if p == r or str(p).startswith(str(r) + os.sep)), key=lambda r: len(str(r)))
+    folders: list[dict[str, Any]] = []
+    try:
+        entries = sorted((c for c in p.iterdir() if c.is_dir() and not c.is_symlink()), key=lambda c: c.name.lower())
+    except OSError as e:
+        raise ValueError(f"cannot list {p}: {e.strerror}") from e
+    for c in entries:
+        if c.name in SKIP_DIRS or c.name.startswith("."):
+            continue
+        try:
+            has_children = any(g.is_dir() and not g.name.startswith(".") and g.name not in SKIP_DIRS for g in c.iterdir())
+        except OSError:
+            has_children = False
+        folders.append({"name": c.name, "path": str(c), "is_repo": _is_repo(c), "has_children": has_children})
+        if len(folders) >= MAX_BROWSE:
+            break
+    repos_here = sum(1 for f in folders if f["is_repo"])
+    names = {f["name"].lower() for f in folders}
+    try:
+        files = [f.name for f in p.iterdir() if f.is_file()]
+    except OSError:
+        files = []
+    markers = sorted({m for m in DOC_MARKERS if m in names}
+                     | ({"compose"} if any(re.fullmatch(r"(docker-)?compose(\.[\w\-]+)?\.ya?ml", f) for f in files) else set())
+                     | ({"markdown"} if any(f.lower().endswith((".md", ".mdx")) for f in files) else set()))
+    layout = "repository" if _is_repo(p) else "folder of repositories" if repos_here else "plain directory"
+    return {"path": str(p), "name": p.name, "parent": str(p.parent) if p != root else "", "root": str(root), "places": places,
+            "layout": layout, "repositories": repos_here, "markers": markers, "truncated": len(folders) >= MAX_BROWSE,
+            "folders": folders, "suggested_content": "docs" if not _is_repo(p) and not repos_here and "markdown" in markers else "auto"}
+
+
 def _safe_extract(tar_bytes_path: Path, dest: Path) -> None:
     with tarfile.open(tar_bytes_path) as tf:
         tf.extractall(dest, filter="data")         # rejects absolute paths, '..', links outside dest

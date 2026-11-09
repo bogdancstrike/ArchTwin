@@ -53,15 +53,19 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 }
 
 export function Dialog({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
-    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const k = (e: KeyboardEvent) => {            // stacked dialogs: Escape closes only the top-most one
+      const all = document.querySelectorAll('[role="dialog"]');
+      if (e.key === "Escape" && all[all.length - 1] === ref.current) onClose();
+    };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, [open, onClose]);
   if (!open) return null;
   return <div className="fixed inset-0 z-50 grid place-items-center bg-ink/35 p-4 backdrop-blur-[2px]" onMouseDown={onClose}>
-    <div role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => e.stopPropagation()}
+    <div ref={ref} role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => e.stopPropagation()}
       className={cn("fade-up max-h-[90vh] w-full overflow-auto rounded-xl border border-rule bg-card shadow-lift", wide ? "max-w-3xl" : "max-w-lg")}>
       <header className="flex items-center justify-between border-b border-rule px-4 py-3"><h2 className="serif text-xl">{title}</h2>
         <button aria-label="Close" onClick={onClose} className="text-muted hover:text-ink"><X size={18} /></button></header>

@@ -398,3 +398,28 @@ async def test_guarded_login_refuses_redirects_and_private_hosts(monkeypatch):
     monkeypatch.setattr(egress, "resolve", lambda host: [ipaddress.ip_address("169.254.169.254")])
     with pytest.raises(Exception, match="blocked address range"):
         await egress.guarded_login(f"{TAPI}/auth", json={"u": 1})
+
+
+# ------------------------------------------------------------------ folder picker (browse the mounted roots, names only)
+def test_browse_lists_roots_folders_and_layouts(workspace):
+    top = git_repo.browse(None)
+    assert top["path"] == "" and top["folders"][0]["path"] == str(workspace.resolve())
+    b = git_repo.browse(str(workspace / "backend"))
+    assert b["layout"] == "folder of repositories" and b["repositories"] == 2 and b["parent"] == str(workspace.resolve())
+    assert [f["name"] for f in b["folders"]] == ["service-data", "service-iam"]           # node_modules and dot-dirs hidden
+    assert all(f["is_repo"] for f in b["folders"])
+    sd = git_repo.browse(str(workspace / "backend" / "service-data"))
+    assert sd["layout"] == "repository" and "compose" in sd["markers"] and "docs" in sd["markers"]
+    assert git_repo.browse(str(workspace))["parent"] == ""                               # at a root: "up" goes to the places list
+
+
+def test_browse_refuses_paths_outside_roots_and_symlink_escapes(workspace, tmp_path_factory):
+    outside = tmp_path_factory.mktemp("secret-place")
+    with pytest.raises(ValueError, match="allowed source root"):
+        git_repo.browse(str(outside))
+    (workspace / "link").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="allowed source root"):
+        git_repo.browse(str(workspace / "link"))                                         # resolved before the root check
+    assert "link" not in [f["name"] for f in git_repo.browse(str(workspace))["folders"]]
+    with pytest.raises(ValueError, match="allowed source root"):
+        git_repo.browse(str(workspace / ".." / outside.name))
