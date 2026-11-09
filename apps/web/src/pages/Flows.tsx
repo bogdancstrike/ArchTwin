@@ -1,7 +1,8 @@
-import { Database, GitFork, Globe, Network, Radio, Workflow } from "lucide-react";
+import { Database, GitFork, Globe, Network, Radio, Workflow, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Badge, Card, Empty, OriginBadges, Table, cn } from "@/components/ui";
+import { Badge, Button, Card, Empty, OriginBadges, Table, cn } from "@/components/ui";
 import { DataTable } from "@/components/DataTable";
+import { ElementDetail, EvidenceList } from "@/components/ElementInspector";
 import { SplitLayout } from "@/components/SplitLayout";
 
 interface Step { from: string; to: string; kind: string; edge: string; label: string; protocol: string; origins: string[]; confidence: number;
@@ -15,7 +16,8 @@ const KIND: Record<Flow["kind"], { label: string; icon: typeof Network }> = { re
 const kindOf = (k: string) => KIND[k as Flow["kind"]] ?? { label: k, icon: Workflow };      // unknown kinds never crash the page
 
 /** Sequence diagram in real pixels: lifelines per participant (grouped by system), numbered arrows top-down. */
-function Sequence({ flow, active, onStep }: { flow: Flow; active: number | null; onStep: (i: number) => void }) {
+function Sequence({ flow, active, onStep, onParticipant, selected }: { flow: Flow; active: number | null; onStep: (i: number) => void;
+  onParticipant: (p: Participant) => void; selected?: string | null }) {
   const box = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(900);
   useEffect(() => {
@@ -37,8 +39,10 @@ function Sequence({ flow, active, onStep }: { flow: Flow; active: number | null;
     <svg width={W} height={H} role="img" aria-label={`Sequence diagram: ${flow.name}`} className="block">
       <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--color-muted)" /></marker>
         <marker id="arr-on" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--color-accent)" /></marker></defs>
-      {ps.map((p) => { const cx = x(p.key); return <g key={p.key}>
-        <rect x={cx - col / 2 + 6} y={8} width={col - 12} height={40} rx={6} fill="var(--color-card)" stroke={p.system ? sysColor[p.system] : "var(--color-rule)"} strokeWidth={1.5} />
+      {ps.map((p) => { const cx = x(p.key); return <g key={p.key} role="button" tabIndex={0} aria-label={`Inspect ${p.name}`} className="cursor-pointer"
+        onClick={() => onParticipant(p)} onKeyDown={(e) => e.key === "Enter" && onParticipant(p)}>
+        <rect x={cx - col / 2 + 6} y={8} width={col - 12} height={40} rx={6} fill={selected === p.key ? "var(--color-accent-tint)" : "var(--color-card)"}
+          stroke={selected === p.key ? "var(--color-accent)" : p.system ? sysColor[p.system] : "var(--color-rule)"} strokeWidth={selected === p.key ? 2 : 1.5} />
         <text x={cx} y={25} textAnchor="middle" fontSize={11.5} fontWeight={600} fill="var(--color-ink)">{p.name.length > 22 ? p.name.slice(0, 21) + "…" : p.name}</text>
         <text x={cx} y={40} textAnchor="middle" fontSize={9} fill="var(--color-soft)">{(p.kind === "kafka-topic" ? "topic" : p.subtype || p.kind)}{p.system ? ` · ${p.system}` : ""}</text>
         <line x1={cx} x2={cx} y1={48} y2={H - 10} stroke="var(--color-rule)" strokeDasharray="3 4" /></g>; })}
@@ -67,7 +71,11 @@ function Sequence({ flow, active, onStep }: { flow: Flow; active: number | null;
 export function FlowsPage({ projectId }: { projectId: string }) {
   const [cur, setCur] = useState<Flow | null>(null);
   const [step, setStep] = useState<number | null>(null);
-  useEffect(() => setStep(null), [cur?.id]);
+  const [inspect, setInspect] = useState<{ kind: "element" | "relation"; key: string; title: string } | null>(null);
+  useEffect(() => { setStep(null); setInspect(null); }, [cur?.id]);
+  const name = (k: string) => cur?.participants.find((pp) => pp.key === k)?.name ?? k;
+  const pickStep = (i: number) => { setStep(i); const st = cur!.steps[i];
+    setInspect({ kind: "relation", key: st.edge, title: `${name(st.from)} ${st.kind} ${name(st.to)}` }); };
   return <SplitLayout storageKey="flows" title="Flows" sideWidth="xl:w-[440px]" side={(toggle) => <>
     <Card eyebrow="Recognized automatically" title={<span className="flex items-center gap-2"><Workflow size={16} /> Flows</span>} actions={toggle}>
       <DataTable<Flow> queryKey={["flows", projectId]} endpoint={`/projects/${projectId}/flows`} rowKey={(x) => x.id} selected={cur?.id ?? null}
@@ -85,13 +93,22 @@ export function FlowsPage({ projectId }: { projectId: string }) {
   </>}>
       {!cur ? <Empty title="Select a flow">Pick a flow to see it as a diagram with the evidence for every step.</Empty> : <>
         <Card eyebrow={`${kindOf(cur.kind).label} flow · confidence ${cur.confidence.toFixed(2)}${cur.distributed ? ` · across ${cur.systems.join(", ")}` : ""}`} title={cur.name}>
-          <Sequence flow={cur} active={step} onStep={setStep} />
-          <p className="mt-2 text-xs text-soft">Solid = observed in code or runtime; dashed = documented in a diagram, inferred, or low confidence. Click a step for its evidence.</p>
+          <Sequence flow={cur} active={step} onStep={pickStep} selected={inspect?.kind === "element" ? inspect.key : null}
+            onParticipant={(pp) => { setStep(null); setInspect({ kind: "element", key: pp.key, title: pp.name }); }} />
+          <p className="mt-2 text-xs text-soft">Solid = observed in code or runtime; dashed = documented in a diagram, inferred, or low confidence.
+            Click a participant to inspect it (source, references) or a step for its evidence.</p>
         </Card>
+        {inspect && <Card eyebrow={inspect.kind === "element" ? "Participant" : "Step"} title={inspect.title}
+          actions={<Button size="sm" variant="ghost" aria-label="Close inspector" onClick={() => setInspect(null)}><X size={14} /></Button>}>
+          {inspect.kind === "element" ? <div className="space-y-3"><ElementDetail projectId={projectId} elementKey={inspect.key} />
+            <EvidenceList projectId={projectId} elementKey={inspect.key} /></div>
+            : <div className="space-y-3"><EvidenceList projectId={projectId} elementKey={inspect.key} />
+              <p className="text-xs text-soft">Steps marked “uses” or “handles” come from the endpoint's route module (its imports); inspect the participants for their source.</p></div>}
+        </Card>}
         <Card eyebrow="Steps" title="Evidence per step">
           <Table head={["#", "From", "Relation", "To", "Origins", "Confidence", "Evidence"]}>{cur.steps.map((st, i) => {
-            const n = (k: string) => cur.participants.find((pp) => pp.key === k)?.name ?? k;
-            return <tr key={i} onClick={() => setStep(i)} className={cn("cursor-pointer border-b border-rule", step === i && "bg-accent-tint")}>
+            const n = name;
+            return <tr key={i} onClick={() => pickStep(i)} className={cn("cursor-pointer border-b border-rule", step === i && "bg-accent-tint")}>
               <td className="px-2 py-1.5 font-mono text-xs">{i + 1}</td><td className="px-2 text-sm">{n(st.from)}</td>
               <td className="px-2 text-xs">{st.kind}{st.protocol ? ` · ${st.protocol}` : ""}{st.documented && <Badge tone="muted">doc</Badge>}</td><td className="px-2 text-sm">{n(st.to)}</td>
               <td className="px-2"><OriginBadges origins={st.origins} /></td><td className="num px-2">{st.confidence.toFixed(2)}</td><td className="num px-2">{st.evidence}</td></tr>; })}</Table>
