@@ -50,7 +50,7 @@ Structural drift decisions MUST come from reproducible rules over normalized evi
 ### Requirement: Suppressions and acceptance
 **Requirement ID:** `AT-DRIFT_ENGINE-004`
 
-Users MUST be able to accept intended changes or apply time-bound, scoped suppressions with reasons, reviewers and expiry.
+Users MUST be able to accept intended changes or apply time-bound, scoped suppressions with an expiry (at most one year, 30 days by default), an optional reason and the reviewer recorded in the audit log.
 
 #### Scenario: Expired exception
 - **GIVEN** a temporary suppression expires

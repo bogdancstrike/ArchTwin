@@ -88,6 +88,15 @@ def _is_repo(p: Path) -> bool:
     return (p / ".git").exists()
 
 
+async def _enclosing_repo(p: Path) -> Path | None:
+    """The repository a sub-folder belongs to (a service folder in a monorepo), if it is inside the allowed roots."""
+    rc, out, _ = await _git("rev-parse", "--show-toplevel", cwd=str(p))
+    if rc != 0:
+        return None
+    top = Path(out.decode().strip()).resolve()
+    return top if top != p.resolve() and any(_under(top, r) for r in allowed_roots()) else None
+
+
 def discover_repos(root: Path, include: list[str] | None = None, exclude: list[str] | None = None) -> list[str]:
     """Relative paths of Git repositories below `root` (not descending into a repository), filtered by glob patterns."""
     found: list[str] = []
@@ -193,6 +202,12 @@ class GitRepoConnector:
                     return TestResult(ok=True, scopes=["filesystem:read (mounted read-only)"],
                                       details={"path": str(p), "layout": "repository", "head": out.decode().strip() if rc == 0 else "no commits"})
                 repos = discover_repos(p, cfg.get("include"), cfg.get("exclude"))
+                top = None if repos else await _enclosing_repo(p)
+                if top:
+                    rc, out, _ = await _git("rev-parse", "HEAD", cwd=str(top))
+                    return TestResult(ok=True, scopes=["filesystem:read (mounted read-only)"],
+                                      details={"path": str(p), "layout": "repository sub-folder", "repository": str(top),
+                                               "head": out.decode().strip() if rc == 0 else "no commits"})
                 if repos:
                     warnings = [f"{len(repos)} repositories found; only the first {MAX_REPOS} are scanned"] if len(repos) > MAX_REPOS else []
                     return TestResult(ok=True, scopes=["filesystem:read (mounted read-only)"], warnings=warnings,
@@ -232,6 +247,13 @@ class GitRepoConnector:
                         if ref != "HEAD":
                             raise ValueError("a ref applies to a single repository: add the child directory as its own source to pick a ref")
                         return await self._scan_many(src, repos, cfg, content, work)
+                    top = await _enclosing_repo(src)
+                    if top:          # a folder inside a repository (monorepo service): that sub-tree at the commit of `ref`
+                        root, revision = await self._archive(top, ref, work / "tree", sub=str(src.resolve().relative_to(top)))
+                        result = await asyncio.to_thread(analyze_repository, root, revision, cfg.get("name") or src.name, content)
+                        await self._binary_docs(result, root)
+                        result.stats["ref"] = ref
+                        return result
                     if ref != "HEAD":
                         raise ValueError(f"ref {ref!r} not found (not a git repository)")
                     result = await asyncio.to_thread(analyze_repository, src, "working-tree", cfg.get("name") or src.name, content)
@@ -264,7 +286,7 @@ class GitRepoConnector:
             shutil.rmtree(work, ignore_errors=True)
 
     @staticmethod
-    async def _archive(src: Path, ref: str, dest: Path) -> tuple[Path, str]:
+    async def _archive(src: Path, ref: str, dest: Path, sub: str | None = None) -> tuple[Path, str]:
         """Extract `ref` of the local repository `src` into `dest` (never touching the source)."""
         rc, out, _ = await _git("rev-parse", "--verify", f"{ref}^{{commit}}", cwd=str(src))
         if rc != 0:
@@ -274,12 +296,12 @@ class GitRepoConnector:
         revision = out.decode().strip()
         dest.mkdir(parents=True)
         tarp = dest.with_suffix(".tar")
-        rc2, _, err = await _git("archive", "--format=tar", "-o", str(tarp), revision, cwd=str(src))
+        rc2, _, err = await _git("archive", "--format=tar", "-o", str(tarp), revision, *([sub] if sub else []), cwd=str(src))
         if rc2 != 0:
             raise RuntimeError(f"git archive failed: {err.decode()[:200]}")
-        _safe_extract(tarp, dest)
+        await asyncio.to_thread(_safe_extract, tarp, dest)          # large trees: do not block the worker's event loop
         tarp.unlink(missing_ok=True)
-        return dest, revision
+        return (dest / sub if sub else dest), revision
 
     async def _scan_many(self, src: Path, repos: list[str], cfg: dict[str, Any], content: str, work: Path) -> ScanResult:
         """A folder of repositories: each child repository is its own system, scanned at HEAD; results are merged."""

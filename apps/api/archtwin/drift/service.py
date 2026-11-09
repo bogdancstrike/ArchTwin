@@ -150,8 +150,8 @@ async def transition(ctx: RequestContext, fid: uuid.UUID, status: str, note: str
     if status not in STATES:
         raise problem(422, "AT-DRIFT-001", "Unknown status", status)
     if status == "suppressed":
-        suppress_days = suppress_days or 30               # the reason is optional; an expiry always exists (default 30 days)
-        if suppress_days > 365:
+        suppress_days = 30 if suppress_days is None else suppress_days   # reason optional; an expiry always exists (default 30 days)
+        if not 1 <= suppress_days <= 365:                  # 0 or negative would create an already-expired (or endless) exception
             raise problem(422, "AT-DRIFT-002", "Suppression expiry must be 1–365 days")
     async with uow(ctx) as conn:
         f = row((await conn.execute(select(drift_findings).where(drift_findings.c.id == fid))).first())
