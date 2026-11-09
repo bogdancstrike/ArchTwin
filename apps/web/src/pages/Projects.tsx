@@ -1,10 +1,11 @@
 import { Link, useNavigate } from "@tanstack/react-router";
+import { FavoriteStar } from "@/components/FavoriteStar";
 import { Plus, Search } from "lucide-react";
 import { useState } from "react";
 import { Button, Dialog, Empty, ErrorBox, Field, Input, PageHeader, Select, Skeleton, Textarea } from "@/components/ui";
 import { type HomeData, ProjectHealthCard } from "./Home";
 import { api } from "@/lib/api";
-import { useAction, useApi, useMe } from "@/lib/hooks";
+import { useAction, useApi, useFavorites, useMe } from "@/lib/hooks";
 import type { Project } from "@/lib/types";
 
 export function NewProjectDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -28,6 +29,7 @@ export function NewProjectDialog({ open, onClose }: { open: boolean; onClose: ()
 
 export function ProjectsPage() {
   const me = useMe();
+  const { isFav } = useFavorites();
   const h = useApi<HomeData>(["home", me.data?.org_id], me.data ? "/home" : null);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -38,8 +40,8 @@ export function ProjectsPage() {
   const shown = new Set((h.data?.projects ?? []).map((p) => p.id));
   const rest = (all.data ?? []).filter((p) => !shown.has(p.id) && matches(p)).sort((a, b) => a.title.localeCompare(b.title));
   const list = (h.data?.projects ?? []).filter(matches)
-    .sort((a, b) => sort === "name" ? a.title.localeCompare(b.title) : sort === "drift" ? (b.drift?.open ?? 0) - (a.drift?.open ?? 0) : b.last_activity.localeCompare(a.last_activity));
-  return <div className="hero-wash min-h-full"><div className="mx-auto max-w-7xl space-y-6 p-8">
+    .sort((a, b) => Number(isFav(b.id)) - Number(isFav(a.id)) || (sort === "name" ? a.title.localeCompare(b.title) : sort === "drift" ? (b.drift?.open ?? 0) - (a.drift?.open ?? 0) : b.last_activity.localeCompare(a.last_activity)));
+  return <div className="hero-wash min-h-full"><div className="space-y-6 p-8">
     <PageHeader eyebrow={me.data?.orgs.find((o) => o.id === me.data?.org_id)?.name} title="Projects"
       actions={<Button variant="primary" onClick={() => setOpen(true)}><Plus size={16} /> New project</Button>}>
       Each project is a living twin of one architecture: what was designed, what the code says and what is running.</PageHeader>
@@ -54,13 +56,14 @@ export function ProjectsPage() {
     {h.data?.projects.length === 0 && <Empty title="No projects yet">Create one, connect a repository and the platform builds the architecture from evidence.</Empty>}
     {h.data && h.data.projects.length > 0 && list.length === 0 && <Empty title="No match">Nothing matches “{q}”.</Empty>}
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-      {!h.data ? [0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-48 !rounded-xl" />) : list.map((p) => <ProjectHealthCard key={p.id} p={p} />)}
+      {!h.data ? [0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-48 !rounded-xl" />) : list.map((p) => <div key={p.id} className="relative"><ProjectHealthCard p={p} />
+        <FavoriteStar projectId={p.id} title={p.title} className="absolute bottom-3 right-3" /></div>)}
     </div>
     {rest.length > 0 && <section aria-label="Other projects" className="space-y-2">
       <h2 className="text-sm font-semibold text-soft">Other projects <span className="font-normal">(no recent activity)</span></h2>
       <ul className="divide-y divide-rule overflow-hidden rounded-xl border border-rule bg-card">
-        {rest.map((p) => <li key={p.id}><Link to="/projects/$projectId" params={{ projectId: p.id }} className="flex items-baseline gap-3 px-4 py-2.5 hover:bg-paper-2">
-          <span className="font-medium">{p.title}</span><span className="truncate text-sm text-soft">{p.purpose}</span></Link></li>)}
+        {rest.map((p) => <li key={p.id} className="flex items-center pr-2"><Link to="/projects/$projectId" params={{ projectId: p.id }} className="flex flex-1 items-baseline gap-3 px-4 py-2.5 hover:bg-paper-2">
+          <span className="font-medium">{p.title}</span><span className="truncate text-sm text-soft">{p.purpose}</span></Link><FavoriteStar projectId={p.id} title={p.title} size={14} /></li>)}
       </ul>
     </section>}
     <NewProjectDialog open={open} onClose={() => setOpen(false)} />

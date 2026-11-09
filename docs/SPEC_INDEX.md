@@ -19,7 +19,7 @@ Regenerate this table and `acceptance/REQUIREMENT_TRACEABILITY.csv` from the spe
 | phase-02-connectors | Document and diagram import processing | 3 | 6 | [`document-parsing`](../openspec/changes/phase-02-connectors/specs/document-parsing/spec.md) |
 | phase-02-connectors | Evidence normalization, confidence and freshness | 3 | 6 | [`normalization-freshness`](../openspec/changes/phase-02-connectors/specs/normalization-freshness/spec.md) |
 | phase-02-connectors | Runtime infrastructure inventory | 3 | 6 | [`runtime-discovery`](../openspec/changes/phase-02-connectors/specs/runtime-discovery/spec.md) |
-| phase-02-connectors | Source repository and code architecture extraction | 3 | 6 | [`source-code-discovery`](../openspec/changes/phase-02-connectors/specs/source-code-discovery/spec.md) |
+| phase-02-connectors | Source repository and code architecture extraction | 5 | 10 | [`source-code-discovery`](../openspec/changes/phase-02-connectors/specs/source-code-discovery/spec.md) |
 | phase-02-connectors | GitHub/GitLab, Jira and Taiga application connectors | 3 | 6 | [`work-connectors`](../openspec/changes/phase-02-connectors/specs/work-connectors/spec.md) |
 | phase-03-architecture | Architecture decisions and review governance | 3 | 6 | [`adr-workflow`](../openspec/changes/phase-03-architecture/specs/adr-workflow/spec.md) |
 | phase-03-architecture | Canonical architectural knowledge graph | 3 | 6 | [`architecture-graph`](../openspec/changes/phase-03-architecture/specs/architecture-graph/spec.md) |
@@ -45,4 +45,4 @@ Regenerate this table and `acceptance/REQUIREMENT_TRACEABILITY.csv` from the spe
 | phase-07-enterprise | Reliability, scale, backup and retention | 3 | 6 | [`enterprise-operations`](../openspec/changes/phase-07-enterprise/specs/enterprise-operations/spec.md) |
 | phase-07-enterprise | Unified search, discovery and portability | 3 | 6 | [`unified-search-export`](../openspec/changes/phase-07-enterprise/specs/unified-search-export/spec.md) |
 
-**Total: 38 capability specs / 125 requirements / 250 scenarios.**
+**Total: 38 capability specs / 127 requirements / 254 scenarios.**

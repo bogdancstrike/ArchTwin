@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import defaultdict
 from typing import Any
 
@@ -30,6 +31,187 @@ def _evidence(o: dict[str, Any]) -> dict[str, Any]:
             "origin": o["origin"], "source_ref": o.get("source_ref", ""), "source_revision": o.get("source_revision", ""),
             "observed_at": o["observed_at"].isoformat() if hasattr(o.get("observed_at"), "isoformat") else o.get("observed_at"),
             "parser_version": o["parser_version"], "confidence": float(o["confidence"]), "span": o.get("evidence") or {}}
+
+
+RESOLVABLE = ("container", "software-system", "database", "external-system", "service")
+GENERIC_NAMES = {"api", "app", "web", "db", "data", "worker", "server", "client", "service", "backend", "frontend", "main", "core",
+                 "test", "tests", "docs", "admin", "user", "users", "cache", "proxy", "gateway", "queue", "jobs", "job", "ui"}
+
+
+def _norm(x: str) -> str:
+    return re.sub(r"[\s_]+", "-", x.strip().lower())
+
+
+def _name_index(nodes: dict[str, dict[str, Any]]) -> dict[str, dict[str, set[str]]]:
+    """normalized name -> {kind: {node keys}} over elements that a name in another datasource may refer to."""
+    idx: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    for k, n in nodes.items():
+        if n["kind"] not in RESOLVABLE:
+            continue
+        leaf = k.split(":", 1)[-1].rsplit("/", 1)[-1]
+        for name in {n.get("name", ""), leaf}:
+            if name:
+                idx[_norm(name)][n["kind"]].add(k)
+    return idx
+
+
+GENERIC_TOKENS = {"service", "svc", "app", "api", "server", "backend", "srv", "prod", "dev", "staging"}
+
+
+def _tokens(x: str) -> set[str]:
+    return {t for t in re.split(r"[^a-z0-9]+", x.lower()) if t and t not in GENERIC_TOKENS}
+
+
+def _fuzzy_container(host: str, nodes: dict[str, dict[str, Any]], exclude: str) -> str | None:
+    """Gateway/k8s naming: 'qsint-data-query' -> the container 'query' of system 'service-data' (host ends with the
+    container name and shares a distinctive token with its system), or a single-container system named like the host
+    ('qsint-gate' -> system 'service-qsint-gate'). Unique match only."""
+    h = _norm(host)
+    ht = _tokens(h)
+    hits: set[str] = set()
+    for k, n in nodes.items():
+        if n["kind"] != "container" or k == exclude or n["attributes"].get("volume"):
+            continue
+        system, _, cname = k.split(":", 1)[1].partition("/")
+        c, sysn = _norm(cname), _norm(system)
+        system_and_container = h in (f"{sysn}-{c}", f"{c}-{sysn}")
+        container_suffix_with_system_token = h.endswith("-" + c) and len(c) >= 3 and bool((ht - _tokens(c)) & _tokens(sysn))
+        distinctive = len(ht) >= 2 or (len(ht) == 1 and len(next(iter(ht))) >= 6)     # 'presenter' alone is distinctive; 'api' is not
+        single_container_system_named_like_host = c == sysn and distinctive and ht <= _tokens(sysn)
+        if system_and_container or container_suffix_with_system_token or single_container_system_named_like_host:
+            hits.add(k)
+    return next(iter(hits)) if len(hits) == 1 else None
+
+
+def _norm_path(p: str) -> str:
+    p = re.sub(r"\{[^}]*\}|<[^>]*>|:[A-Za-z_]\w*", "{}", p.split("?")[0])
+    return p.rstrip("/") or "/"
+
+
+def _resolve_endpoint(container: str, method: str, path: str, nodes: dict[str, dict[str, Any]]) -> str | None:
+    prefix = "endpoint:" + container.split(":", 1)[1] + "/"
+    exact = f"{prefix}{method} {path}"
+    if exact in nodes:
+        return exact
+    want = _norm_path(path)
+    hits = [k for k, n in nodes.items() if k.startswith(prefix) and n["kind"] == "api-endpoint"
+            and n["attributes"].get("method") == method and _norm_path(str(n["attributes"].get("path", ""))) == want]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _resolve(name: str, idx: dict[str, dict[str, set[str]]], exclude: str, nodes: dict[str, dict[str, Any]] | None = None) -> str | None:
+    """`name` may be 'host', 'host:port' or 'host#METHOD /path' (a call to a specific endpoint of that service)."""
+    target, _, ep = name.partition("#")
+    target = target.split(":")[0] if re.fullmatch(r"[^:]+:\d+", target) else target
+    hit = _resolve_name(target, idx, exclude) or (_fuzzy_container(target, nodes, exclude) if nodes else None)
+    if hit and ep and nodes and nodes.get(hit, {}).get("kind") == "container":
+        method, _, path = ep.partition(" ")
+        hit = _resolve_endpoint(hit, method, path, nodes) or hit          # the exact endpoint, else the service itself
+    return hit
+
+
+def _resolve_name(name: str, idx: dict[str, dict[str, set[str]]], exclude: str) -> str | None:
+    by_kind = idx.get(_norm(name))
+    if not by_kind:
+        return None
+    for kind in ("container", "database", "service", "software-system", "external-system"):   # most specific first
+        cands = by_kind.get(kind, set()) - {exclude}
+        if len(cands) == 1:
+            return next(iter(cands))
+        if len(cands) > 1:
+            return None                                        # ambiguous: never guess
+    return None
+
+
+def _action_index(nodes: dict[str, dict[str, Any]]) -> dict[str, list[str]]:
+    """RPC action name -> the gateway endpoints that handle it ('ACTION investigations_get')."""
+    idx: dict[str, list[str]] = defaultdict(list)
+    for k, n in nodes.items():
+        if n["kind"] == "api-endpoint" and n["attributes"].get("method") == "ACTION":
+            idx[str(n["attributes"].get("path"))].append(k)
+    return idx
+
+
+def _ref(key: str, idx: dict[str, dict[str, set[str]]], exclude: str, nodes: dict[str, dict[str, Any]],
+         actions: dict[str, list[str]]) -> str | None:
+    """A relation end: a concrete key, `name:<host>[#<METHOD> <path>]` or `action:<name>[@<service>]` (an RPC action
+    sent to a gateway, optionally naming the gateway service, e.g. from VITE_APP_PRESENTER)."""
+    if key.startswith("name:"):
+        return _resolve(key[5:], idx, exclude, nodes)
+    if key.startswith("action:"):
+        name, _, service = key[7:].partition("@")
+        cands = actions.get(name, [])
+        if service and len(cands) > 1:
+            gw = _resolve(service, idx, exclude, nodes)
+            cands = [c for c in cands if gw and c.startswith("endpoint:" + gw.split(":", 1)[1] + "/")]
+        return cands[0] if len(cands) == 1 else None
+    return key
+
+
+def resolve_names(nodes: dict[str, dict[str, Any]], edges: dict[str, dict[str, Any]]) -> list[str]:
+    """Edges whose endpoint is `name:<x>` (cross-repository config URLs, diagrams in docs) are re-pointed to the unique element
+    with that name in ANY datasource; ambiguous or unknown names are dropped (and reported), never invented."""
+    idx = _name_index(nodes)
+    for e in edges.values():                    # a relation may say which hop carries it (gateway -> forwarder -> backend)
+        via = e["attributes"].get("via")
+        if isinstance(via, str) and via.startswith("name:"):
+            hit = _resolve(via[5:], idx, e["source"], nodes)
+            if hit:
+                e["attributes"]["via_resolved"] = hit
+    actions = _action_index(nodes)
+    pending = [k for k, e in edges.items() if e["source"].startswith(("name:", "action:")) or e["target"].startswith(("name:", "action:"))]
+    if not pending:
+        return []
+    unresolved: set[str] = set()
+    for k in pending:
+        e = edges.pop(k)
+        src = _ref(e["source"], idx, "", nodes, actions)
+        dst = _ref(e["target"], idx, src or "", nodes, actions)
+        if not src or not dst or src == dst:
+            unresolved.update(x.split(":", 1)[1] for x, r in ((e["source"], src), (e["target"], dst)) if x.startswith(("name:", "action:")) and not r)
+            continue
+        nk = f"{src}|{e['kind']}|{dst}"
+        cur = edges.get(nk)
+        if cur is None:
+            edges[nk] = {**e, "key": nk, "source": src, "target": dst}
+            continue
+        cur["origins"] |= e["origins"]                     # corroboration: e.g. code and a documented diagram agree
+        cur["confidence"] = max(cur["confidence"], e["confidence"])
+        for o, attrs in e["by_origin"].items():
+            cur["by_origin"].setdefault(o, attrs)
+        for a, v in e["attributes"].items():
+            cur["attributes"].setdefault(a, v)
+        cur["evidence"] = (cur["evidence"] + e["evidence"])[:MAX_EVIDENCE]
+    return sorted(unresolved)[:200]
+
+
+def link_mentions(nodes: dict[str, dict[str, Any]], edges: dict[str, dict[str, Any]]) -> None:
+    """ADRs and work items (Taiga / GitLab / GitHub) `references` the containers and systems their title names explicitly
+    (whole word, distinctive names only): inferred, low confidence, never used for drift."""
+    targets: list[tuple[re.Pattern[str], str]] = []
+    for k, n in nodes.items():
+        if n["kind"] not in ("container", "software-system", "database"):
+            continue
+        name = n.get("name") or ""
+        if len(name) < 4 or _norm(name) in GENERIC_NAMES:
+            continue
+        pat = re.escape(_norm(name)).replace("\\-", "[-_ ]")
+        targets.append((re.compile(rf"(?<![\w-]){pat}(?![\w-])", re.IGNORECASE), k))
+    if not targets:
+        return
+    for k, n in list(nodes.items()):
+        if n["kind"] not in ("adr", "work-item"):
+            continue
+        text = f"{n.get('name', '')} {n['attributes'].get('path', '')}"
+        hits = [t for rx, t in targets if rx.search(text)][:5]
+        for t in hits:
+            ek = f"{k}|references|{t}"
+            if ek in edges:
+                continue
+            ev = (n.get("evidence") or [{}])[:1]
+            edges[ek] = {"key": ek, "kind": "references", "source": k, "target": t, "attributes": {"detected_by": "name mention"},
+                         "by_origin": {"inferred": {"detected_by": "name mention"}}, "origins": {"inferred"}, "confidence": 0.5,
+                         "evidence": [{**ev[0], "origin": "inferred", "parser_version": "mention-link/1.0", "confidence": 0.5}] if ev else []}
 
 
 def build(obs: list[dict[str, Any]], aliases: dict[str, str] | None = None) -> dict[str, Any]:
@@ -72,6 +254,8 @@ def build(obs: list[dict[str, Any]], aliases: dict[str, str] | None = None) -> d
                 e["evidence"].append(_evidence(o))
     for k in retracted:
         nodes.pop(k, None)
+    unresolved = resolve_names(nodes, edges)
+    link_mentions(nodes, edges)
     dropped = []
     for k in list(edges):
         e = edges[k]
@@ -84,6 +268,7 @@ def build(obs: list[dict[str, Any]], aliases: dict[str, str] | None = None) -> d
             x["inferred_only"] = x["origins"] == ["inferred"]
             x["confidence"] = round(x["confidence"], 3)
     return {"nodes": dict(sorted(nodes.items())), "edges": dict(sorted(edges.items())), "dropped_edges": sorted(dropped),
+            "unresolved_names": unresolved,
             "manifest_hash": manifest_hash(nodes, edges)}
 
 

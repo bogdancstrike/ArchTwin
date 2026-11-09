@@ -1,30 +1,44 @@
-import { Activity, ArrowLeft, Box, CheckCircle2, Database, FolderGit2, GitBranch, Globe, Play, Plus, Radio, ShieldCheck, Trash2, Webhook, XCircle } from "lucide-react";
+import { Activity, ArrowLeft, Box, CheckCircle2, Dices, ExternalLink, Eye, EyeOff, Database, FolderGit2, FolderOpen, GitBranch, GitMerge, Globe, KeyRound, Play, Plus, Radio, ShieldCheck, SquareKanban, Trash2, Webhook, XCircle } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Badge, Button, Card, Dialog, Empty, ErrorBox, Field, FreshnessBadge, Input, OriginBadges, Skeleton, StatTile, StatusDot, Table, Textarea, ago, cn } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import type { Connector, Scan } from "@/lib/types";
+import { FolderPicker } from "@/components/FolderPicker";
+import { DataTable } from "@/components/DataTable";
+import { credentialLinks, newSecret, type CredentialLink } from "@/lib/credentialLinks";
 
 interface Kind { kind: string; name: string; origin: string; category: string; scopes: string[]; enabled: boolean; flag: string; module_flag: string;
-  config: Record<string, unknown>; secret?: Record<string, unknown>; webhooks?: string[] }
+  config: Record<string, unknown>; secret?: Record<string, string>; webhooks?: string[]; source_roots?: string[] }
 
-const ICONS: Record<string, typeof Box> = { git: GitBranch, github: FolderGit2, docker: Box, otel_servicegraph: Activity, postgresql: Database, mysql: Database,
+const ICONS: Record<string, typeof Box> = { git: FolderOpen, github: FolderGit2, gitlab: GitMerge, taiga: SquareKanban, docker: Box, otel_servicegraph: Activity, postgresql: Database, mysql: Database,
   kafka: Radio, http_openapi: Globe };
 const CATEGORIES: [string, string, string][] = [["code", "Code & repositories", "static evidence: what the code and config declare"],
   ["runtime", "Runtime", "what is actually running and calling what"], ["data", "Data stores", "catalog metadata — never rows"],
-  ["messaging", "Messaging", "topics, consumer groups, schemas — never payloads"], ["api", "APIs", "live API contracts"]];
+  ["messaging", "Messaging", "topics, consumer groups, schemas — never payloads"], ["api", "APIs", "live API contracts"],
+  ["work", "Work tracking", "plans and status: epics, stories, tasks, sprints — read-only"]];
 
-const PRESETS: Record<string, { config: object; secret?: object }> = {
-  git: { config: { path: "/sources/archtwin/fixtures/shop", name: "archtwin-fixtures" }, secret: { webhook_secret: "" } },
-  github: { config: { repos: ["owner/name"], branches: ["main"], issues: true, pull_requests: true, analyze_code: true, max_items: 200 }, secret: { token: "", webhook_secret: "" } },
+const PRESETS: Record<string, { config: object }> = {
+  git: { config: { path: "/sources/archtwin/fixtures/shop", content: "auto" } },
+  gitlab: { config: { projects: ["https://gitlab.example.com/group/subgroup/project"], branches: [], issues: true, merge_requests: true, analyze_code: true, max_items: 200 } },
+  taiga: { config: { url: "https://taiga.example.com/project/my-project/kanban", epics: true, user_stories: true, tasks: true, issues: true, sprints: true } },
+  github: { config: { repos: ["owner/name"], branches: ["main"], issues: true, pull_requests: true, analyze_code: true, max_items: 200 } },
   docker: { config: { endpoint: "http://docker-proxy:2375", compose_projects: ["archtwin-fixtures"] } },
   otel_servicegraph: { config: { prometheus_url: "http://prometheus:9090", system: "archtwin-fixtures", window: "15m", service_map: {}, peer_map: { orders: "orders-db", inventory: "inventory-db" } } },
-  postgresql: { config: { host: "orders-db", port: 5432, database: "orders", username: "archtwin_catalog_ro", schemas: ["public"], system: "archtwin-fixtures", service: "orders-db" }, secret: { password: "" } },
-  mysql: { config: { host: "inventory-db", port: 3306, database: "inventory", username: "archtwin_catalog_ro", system: "archtwin-fixtures", service: "inventory-db" }, secret: { password: "" } },
+  postgresql: { config: { host: "orders-db", port: 5432, database: "orders", username: "archtwin_catalog_ro", schemas: ["public"], system: "archtwin-fixtures", service: "orders-db" } },
+  mysql: { config: { host: "inventory-db", port: 3306, database: "inventory", username: "archtwin_catalog_ro", system: "archtwin-fixtures", service: "inventory-db" } },
   kafka: { config: { bootstrap_servers: "kafka:9092", system: "archtwin-fixtures", service: "kafka", schema_registry_url: "http://schema-registry:8081", group_services: { billing: "shop-billing" } } },
   http_openapi: { config: { url: "http://api:8000/api/openapi.json", system: "archtwin", service: "api" } },
 };
 const pretty = (o: object | undefined) => (o ? JSON.stringify(o, null, 2) : "");
+
+function Links({ links }: { links?: CredentialLink[] }) {
+  if (!links?.length) return null;
+  return <span className="flex flex-wrap gap-x-3 gap-y-0.5">{links.map((l) => <a key={l.href} href={l.href} target="_blank" rel="noopener noreferrer"
+    className="inline-flex items-center gap-1 text-xs text-link hover:underline">{l.label} <ExternalLink size={11} /></a>)}</span>;
+}
+
+const parseCfg = (text: string): Record<string, unknown> => { try { const o = JSON.parse(text); return o && typeof o === "object" ? o : {}; } catch { return {}; } };
 
 function KindIcon({ kind, className }: { kind: string; className?: string }) {
   const I = ICONS[kind] ?? Box;
@@ -36,17 +50,24 @@ function AddConnector({ projectId, open, onClose }: { projectId: string; open: b
   const [kind, setKind] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [config, setConfig] = useState("");
-  const [secret, setSecret] = useState("");
+  const [secret, setSecret] = useState<Record<string, string>>({});
   const [jsonErr, setJsonErr] = useState<string | null>(null);
+  const [reveal, setReveal] = useState<Record<string, boolean>>({});
+  const [picking, setPicking] = useState(false);
+  const setCfgKey = (patch: Record<string, unknown>) => setConfig(pretty({ ...parseCfg(config), ...patch }));
   const create = useAction(() => api("/projects/" + projectId + "/connectors", { method: "POST", idempotent: true, json: {
-    kind, name, config: JSON.parse(config), secret: secret.trim() && Object.values(JSON.parse(secret)).some(Boolean) ? JSON.parse(secret) : null } }),
-    [["connectors", projectId]], "Connector created");
+    kind, name, config: JSON.parse(config), secret: Object.values(secret).some((v) => v.trim()) ? Object.fromEntries(Object.entries(secret).filter(([, v]) => v.trim())) : null } }),
+    [["connectors", projectId]], "Datasource added");
   const k = kinds.data?.find((x) => x.kind === kind);
-  const pick = (x: Kind) => { setKind(x.kind); setName(x.kind === "git" ? "repo" : x.kind.replace("_", "-")); setConfig(pretty(PRESETS[x.kind]?.config ?? {})); setSecret(pretty(PRESETS[x.kind]?.secret)); setJsonErr(null); };
-  const close = () => { setKind(null); onClose(); };
+  const pick = (x: Kind) => {
+    const preset = { ...(PRESETS[x.kind]?.config ?? {}) } as Record<string, unknown>;
+    if (x.kind === "git" && x.source_roots?.length) preset.path = x.source_roots[x.source_roots.length - 1];
+    setKind(x.kind); setName(x.kind === "git" ? "local-sources" : x.kind.replace("_", "-")); setConfig(pretty(preset)); setSecret({}); setReveal({}); setJsonErr(null);
+  };
+  const close = () => { setKind(null); setSecret({}); onClose(); };
   return <Dialog open={open} onClose={close} title={k ? `Add ${k.name}` : "Add a source of evidence"} wide>
     {!k ? <div className="space-y-5">
-      <p className="text-sm text-muted">Every connector is <b>read-only</b>. Credentials are sealed with envelope encryption and never shown again.</p>
+      <p className="text-sm text-muted">Every datasource is <b>read-only</b>. Credentials are sealed with envelope encryption and never shown again.</p>
       {kinds.isLoading && <Skeleton className="h-40" />}
       {CATEGORIES.map(([cat, label, hint]) => {
         const ks = (kinds.data ?? []).filter((x) => x.category === cat);
@@ -61,20 +82,47 @@ function AddConnector({ projectId, open, onClose }: { projectId: string; open: b
       })}
     </div> : <form className="space-y-3" onSubmit={async (e) => {
       e.preventDefault();
-      try { JSON.parse(config); if (secret.trim()) JSON.parse(secret); } catch (err) { setJsonErr((err as Error).message); return; }
+      try { JSON.parse(config); } catch (err) { setJsonErr((err as Error).message); return; }
       await create.mutateAsync(undefined as never); close(); }}>
-      <button type="button" onClick={() => setKind(null)} className="flex items-center gap-1 text-xs text-link"><ArrowLeft size={13} /> All connector types</button>
+      <button type="button" onClick={() => setKind(null)} className="flex items-center gap-1 text-xs text-link"><ArrowLeft size={13} /> All datasource types</button>
       <div className="flex items-start gap-3 rounded-lg bg-paper/70 p-3"><KindIcon kind={k.kind} />
         <div className="min-w-0 text-xs text-muted"><div className="flex items-center gap-1.5"><ShieldCheck size={14} className="text-ok" /> read-only · origin <Badge>{k.origin}</Badge></div>
           <div className="mt-1.5 flex flex-wrap gap-1">{k.scopes.map((s) => <Badge key={s} tone="link">{s}</Badge>)}</div></div></div>
       <Field label="Name"><Input required value={name} onChange={(e) => setName(e.target.value)} /></Field>
-      <Field label="Configuration (JSON)" hint={Object.entries(k.config).slice(0, 4).map(([a, b]) => `${a}: ${typeof b === "string" ? b : JSON.stringify(b)}`).join(" · ")}>
+      {k.kind === "git" && <Field label="Local directory" hint="One repository, a folder of repositories (each becomes a system) or a docs / architecture folder.">
+        <div className="flex gap-1.5"><Input aria-label="Local directory path" className="font-mono text-xs" placeholder="/home/me/workspace/project/backend"
+          value={String(parseCfg(config).path ?? "")} onChange={(e) => setCfgKey({ path: e.target.value })} />
+          <Button type="button" onClick={() => setPicking(true)}><FolderOpen size={14} /> Browse…</Button></div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">Content:
+          {(["auto", "code", "docs"] as const).map((m) => <button type="button" key={m} onClick={() => setCfgKey({ content: m })} aria-pressed={(parseCfg(config).content ?? "auto") === m}
+            className={cn("rounded-full border px-2 py-0.5", (parseCfg(config).content ?? "auto") === m ? "border-ink bg-ink text-paper" : "border-rule hover:border-muted")}>{m}</button>)}
+          <span className="text-soft">auto = code + docs folders + ADRs · docs = every document, diagram and ADR</span></div>
+        <FolderPicker endpoint={`/projects/${projectId}/source-folders`} open={picking} value={String(parseCfg(config).path ?? "")} onClose={() => setPicking(false)}
+          onChoose={(path, info) => { setCfgKey({ path, content: info.suggested_content ?? "auto" }); setName(path.split("/").filter(Boolean).pop() || name); setPicking(false); }} />
+      </Field>}
+      {k.kind === "git" && k.source_roots?.length ? <p className="rounded-lg bg-paper/70 p-2 text-xs text-muted">Local directories must be under a mounted source root:{" "}
+        {k.source_roots.map((r) => <code key={r} className="mr-1 font-mono">{r}</code>)}. A folder of repositories scans each repository as its own system;
+        set <code className="font-mono">content</code> to <code className="font-mono">docs</code> for documentation or architecture folders.</p> : null}
+      <Field label="Configuration (JSON)" hint={Object.entries(k.config).slice(0, 5).map(([a, b]) => `${a}: ${typeof b === "string" ? b : JSON.stringify(b)}`).join(" · ")}>
         <Textarea rows={8} className="font-mono text-xs" value={config} onChange={(e) => setConfig(e.target.value)} spellCheck={false} /></Field>
-      {k.secret && <Field label="Credentials (JSON, optional)" hint="Sealed with envelope encryption; never returned, logged or sent to the AI.">
-        <Textarea rows={3} className="font-mono text-xs" value={secret} onChange={(e) => setSecret(e.target.value)} spellCheck={false} /></Field>}
+      {k.secret && Object.keys(k.secret).length > 0 && <fieldset className="space-y-2 rounded-lg border border-rule p-3">
+        <legend className="flex items-center gap-1.5 px-1 text-sm font-medium"><KeyRound size={14} /> Credentials <span className="font-normal text-soft">(optional)</span></legend>
+        <p className="text-xs text-soft">Sealed with envelope encryption; never returned, logged or sent to the AI. Use read-only credentials.</p>
+        {Object.entries(k.secret).map(([key, hint]) => { const links = credentialLinks(k.kind, parseCfg(config))[key]; const plain = key === "username" || reveal[key];
+          return <Field key={key} label={key.replace(/_/g, " ")} hint={String(hint)}>
+          <div className="flex items-center gap-1.5">
+            <Input type={plain ? "text" : "password"} autoComplete={key === "username" ? "off" : "new-password"} aria-label={`credential ${key}`}
+              className="font-mono text-xs" value={secret[key] ?? ""} onChange={(e) => setSecret((s) => ({ ...s, [key]: e.target.value }))} />
+            {key !== "username" && <Button type="button" size="sm" variant="ghost" aria-label={`${reveal[key] ? "Hide" : "Show"} ${key}`}
+              onClick={() => setReveal((r) => ({ ...r, [key]: !r[key] }))}>{reveal[key] ? <EyeOff size={13} /> : <Eye size={13} />}</Button>}
+            {key === "webhook_secret" && <Button type="button" size="sm" aria-label="Generate webhook secret" title="Generate a random secret, then paste it into the provider's webhook settings"
+              onClick={() => { setSecret((s) => ({ ...s, webhook_secret: newSecret() })); setReveal((r) => ({ ...r, webhook_secret: true })); }}><Dices size={13} /> Generate</Button>}
+          </div>
+          <div className="mt-1"><Links links={links} /></div></Field>; })}
+      </fieldset>}
       {jsonErr && <div role="alert" className="text-sm text-bad">Invalid JSON: {jsonErr}</div>}
       <ErrorBox error={create.error} />
-      <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={close}>Cancel</Button><Button variant="primary" disabled={create.isPending}>Create connector</Button></div>
+      <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={close}>Cancel</Button><Button variant="primary" disabled={create.isPending}>Add datasource</Button></div>
     </form>}
   </Dialog>;
 }
@@ -85,6 +133,7 @@ function WebhookDialog({ projectId, c, onClose }: { projectId: string; c: Connec
     {!w.data ? <Skeleton className="h-24" /> : <div className="space-y-4 text-sm">
       {!w.data.enabled && <div className="rounded-lg border border-warn/30 bg-warn/10 p-3 text-warn-ink">Webhooks are off (<code>connectors.webhooks</code>). Polling and scheduled reconciliation still converge.</div>}
       <Field label="Payload URL"><Input readOnly value={w.data.url} className="font-mono text-xs" onFocus={(e) => e.target.select()} /></Field>
+      {c && <Links links={credentialLinks(c.kind, c.config as Record<string, unknown>).webhook_secret} />}
       <p className="text-muted">Signature: <code className="font-mono text-xs">{w.data.signature}</code> using the connector's <code className="font-mono text-xs">webhook_secret</code>. Events: {w.data.events.join(", ")}.
         Redeliveries are de-duplicated; a commit is extracted once.</p>
       <div><div className="eyebrow mb-1">Recent deliveries</div>
@@ -121,7 +170,7 @@ function ConnectorCard({ c, projectId, lastScan, onWebhook, children }: { c: Con
       {test.warnings?.map((w: string) => <div key={w} className="mt-0.5 text-warn-ink">⚠ {w}</div>)}</div>}
     {children}
     <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-3">
-      {(c.kind === "git" || c.kind === "github") && <Input aria-label={`ref for ${c.name}`} className="!w-28 font-mono text-xs" placeholder="HEAD" value={ref} onChange={(e) => setRef(e.target.value)} />}
+      {["git", "github", "gitlab"].includes(c.kind) && <Input aria-label={`ref for ${c.name}`} className="!w-28 font-mono text-xs" placeholder="HEAD" value={ref} onChange={(e) => setRef(e.target.value)} />}
       <Button size="sm" variant="primary" disabled={!!running} onClick={() => scan.mutate({ ref })}><Play size={12} /> Scan</Button>
       <Button size="sm" disabled={testing} onClick={async () => { setTesting(true); try { setTest(await api(`/projects/${projectId}/connectors/${c.id}/test`, { method: "POST" })); } catch (e) { setTest({ ok: false, warnings: [(e as Error).message] }); } finally { setTesting(false); } }}>{testing ? "Testing…" : "Test"}</Button>
       {onWebhook && <Button size="sm" variant="ghost" onClick={onWebhook} aria-label={`Webhooks for ${c.name}`}><Webhook size={13} /></Button>}
@@ -145,20 +194,20 @@ export function InventoryPage({ projectId }: { projectId: string }) {
   const max = Math.max(1, ...counts.map((r) => r.n));
   const cat = (k: string) => kinds.data?.find((x) => x.kind === k)?.category ?? "other";
   const hookable = new Set((kinds.data ?? []).filter((k) => k.webhooks).map((k) => k.kind));
-  return <div className="mx-auto max-w-7xl space-y-6 p-6">
+  return <div className="space-y-6 p-6">
     <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      <StatTile label="Connectors" value={cs.data?.length ?? "—"} icon={<Plus size={16} />} hint={`${(cs.data ?? []).filter((c) => c.freshness.status === "current").length} current`} />
+      <StatTile label="Datasources" value={cs.data?.length ?? "—"} icon={<Plus size={16} />} hint={`${(cs.data ?? []).filter((c) => c.freshness.status === "current").length} current`} />
       <StatTile label="Observations" value={total.toLocaleString()} icon={<Activity size={16} />} hint="append-only, with provenance" />
       <StatTile label="Static" value={(byOrigin.static ?? 0).toLocaleString()} tone="link" icon={<GitBranch size={16} />} hint="code & configuration" />
       <StatTile label="Runtime" value={(byOrigin.runtime ?? 0).toLocaleString()} tone="ok" icon={<Box size={16} />} hint="running systems, catalogs, traces" />
     </section>
     <div className="flex items-end justify-between">
-      <div><div className="eyebrow">Read-only connectors</div><h2 className="serif text-3xl">Sources of evidence</h2></div>
-      <Button variant="primary" onClick={() => setOpen(true)}><Plus size={15} /> Add connector</Button>
+      <div><div className="eyebrow">Read-only datasources</div><h2 className="serif text-3xl">Datasources</h2></div>
+      <Button variant="primary" onClick={() => setOpen(true)}><Plus size={15} /> Add datasource</Button>
     </div>
     {cs.isLoading && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-44 !rounded-xl" />)}</div>}
     <ErrorBox error={cs.error} />
-    {cs.data?.length === 0 && <Empty title="No connectors yet">Connect a repository (static), a Docker host or OTel service graph (runtime), a database catalog, a Kafka cluster or a live OpenAPI document.
+    {cs.data?.length === 0 && <Empty title="No datasources yet">Add local directories (code, docs, architecture), GitLab or GitHub projects, Taiga boards, a Docker host or OTel service graph, a database catalog, a Kafka cluster or a live OpenAPI document.
       Until then everything is <b>UNKNOWN</b>, never “absent”.</Empty>}
     {CATEGORIES.map(([k, label]) => {
       const list = (cs.data ?? []).filter((c) => cat(c.kind) === k);
@@ -168,9 +217,17 @@ export function InventoryPage({ projectId }: { projectId: string }) {
           onWebhook={hookable.has(c.kind) ? () => setHook(c) : undefined} />)}</div></section>;
     })}
     <div className="grid gap-6 lg:grid-cols-2">
-      <Card eyebrow="Jobs" title="Recent scans"><Table head={["Connector", "Status", "Revision", "Observations", "When"]}>{scans.data?.slice(0, 15).map((s) => <tr key={s.id} className="border-b border-rule">
-        <td className="px-2 py-1.5">{names[s.connector_id] ?? "—"}</td><td className="px-2"><Badge tone={{ complete: "ok", partial: "warn", failed: "bad", running: "link", queued: "muted", skipped: "warn" }[s.status]}>{s.status}</Badge>{s.error && <div className="max-w-56 truncate text-[10px] text-bad" title={s.error}>{s.error}</div>}</td>
-        <td className="px-2 font-mono text-xs">{(s.revision ?? "").slice(0, 10)}{s.ref ? ` (${s.ref.slice(0, 18)})` : ""}</td><td className="num px-2">{String(s.stats?.observations ?? "")}</td><td className="px-2 text-xs">{ago(s.finished_at ?? s.created_at)}</td></tr>)}</Table></Card>
+      <Card eyebrow="Jobs" title="Scans">
+        <DataTable<Scan & { connector?: string }> queryKey={["scans-page", projectId]} endpoint={`/projects/${projectId}/scans`} rowKey={(s) => s.id}
+          defaultSort="created_at" searchPlaceholder="Search datasource, revision, error"
+          filters={[{ key: "status", label: "Status", options: [["complete", "Complete"], ["partial", "Partial"], ["failed", "Failed"], ["running", "Running"], ["queued", "Queued"], ["skipped", "Skipped"]] }]}
+          columns={[{ key: "connector", label: "Datasource", sortable: true, render: (s) => s.connector ?? names[s.connector_id] ?? "—" },
+            { key: "status", label: "Status", sortable: true, render: (s) => <><Badge tone={({ complete: "ok", partial: "warn", failed: "bad", running: "link", queued: "muted", skipped: "warn" } as Record<string, string>)[s.status]}>{s.status}</Badge>
+              {s.error && <div className="max-w-56 truncate text-[10px] text-bad" title={s.error}>{s.error}</div>}</> },
+            { key: "revision", label: "Revision", sortable: true, render: (s) => <span className="font-mono text-xs">{(s.revision ?? "").slice(0, 10)}{s.ref ? ` (${s.ref.slice(0, 18)})` : ""}</span> },
+            { key: "observations", label: "Observations", render: (s) => <span className="num">{String(s.stats?.observations ?? "")}</span> },
+            { key: "created_at", label: "When", sortable: true, render: (s) => <span className="text-xs">{ago(s.finished_at ?? s.created_at)}</span> }]} />
+      </Card>
       <Card eyebrow="Normalized" title="Observations by origin and kind"><Table head={["Origin", "Kind", "Count"]}>
         {[...counts].sort((a, b) => b.n - a.n).slice(0, 18).map((r) => <tr key={r.origin + r.kind} className="border-b border-rule"><td className="px-2 py-1"><OriginBadges origins={[r.origin]} /></td><td className="px-2">{r.kind}</td>
           <td className="px-2"><div className="flex items-center gap-2"><div className="h-1.5 flex-1 rounded-full bg-paper-2"><div className="h-1.5 rounded-full bg-muted/50" style={{ width: `${(r.n / max) * 100}%` }} /></div><span className="num w-12 text-right">{r.n}</span></div></td></tr>)}</Table></Card>

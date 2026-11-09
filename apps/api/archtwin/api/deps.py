@@ -51,3 +51,15 @@ async def require(c: RequestContext, kind: str, action: str, rid: str = "", **at
     if not await authz.allowed(c.principal, kind, action, rid, a):
         await audit.record_denial(c, f"{kind}.{action}", kind, rid)
         raise problem(403, "AT-AUTHZ-001", "Forbidden", f"You may not {action} this {kind}.")
+
+
+async def org_allowed(c: RequestContext, action: str) -> bool:
+    """Cerbos check on the organization resource (admin pages, usage, spend limits)."""
+    return await authz.allowed(c.principal, "org", action, str(c.org_id), {"org_id": str(c.org_id)})
+
+
+async def org_require(c: RequestContext, action: str) -> None:
+    """Org-level authorization; deny is audited and returned as 403."""
+    if not await org_allowed(c, action):
+        await audit.record_denial(c, f"org.{action}", "org", c.org_id)
+        raise problem(403, "AT-AUTHZ-001", "Forbidden", f"You may not {action.replace('_', ' ')}.")

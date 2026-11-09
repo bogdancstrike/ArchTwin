@@ -109,10 +109,13 @@ class AskIn(Strict):
     model: str | None = None
     mode: Literal["ask", "design"] = "ask"
     history: list[dict[str, str]] = Field(default_factory=list, max_length=12)
+    scope: Literal["data", "general"] = "data"          # data = grounded in project evidence; general = no project data
+    sources: list[str] | None = Field(default=None, max_length=50)   # data scope: connector ids, "uploads", "adrs"; None = all
+    conversation_id: uuid.UUID | None = None
 
 
 class GenerateIn(Strict):
-    template: Literal["system-overview", "container-catalog", "interface-catalog"]
+    template: str = Field(min_length=3, max_length=60)          # a key of documents.doctypes.DOC_TYPES (validated by the engine)
 
 
 class ManualDocIn(Strict):
@@ -126,3 +129,43 @@ class TokensIn(Strict):
 class PrefsIn(Strict):
     preferred_model: str | None = None
     theme: Literal["light", "dark", "system"] | None = None
+    favorite_projects: list[uuid.UUID] | None = Field(default=None, max_length=200)    # starred projects (sidebar)
+
+
+class SpendLimitItem(Strict):
+    subject: str = Field(min_length=6, max_length=60)          # global | user:<uuid> | project:<uuid>
+    monthly_usd: float | None = Field(default=None, ge=0, le=1_000_000)
+
+
+class SpendLimitsIn(Strict):
+    items: list[SpendLimitItem] = Field(max_length=200)
+
+
+class SourceRootsIn(Strict):
+    roots: list[str] | None = Field(default=None, max_length=50)   # None = every mounted boundary
+
+
+class ExtendIn(Strict):
+    text: str = Field(min_length=1, max_length=12000)
+    mode: Literal["extend", "improve", "concise"] = "extend"
+    field: str = Field(default="", max_length=60)
+    title: str = Field(default="", max_length=300)
+    instruction: str = Field(default="", max_length=1000)
+    grounded: bool = True
+    model: str | None = None
+
+
+class DeleteProjectIn(Strict):
+    confirm: str = Field(min_length=1, max_length=120)      # must equal the project slug (server-side double confirmation)
+
+
+class CompleteAdrIn(Strict):
+    title: str = Field(default="", max_length=300)
+    context: str = Field(default="", max_length=12000)
+    decision_drivers: list[str] = Field(default_factory=list, max_length=50)
+    considered_options: list[str] = Field(default_factory=list, max_length=20)
+    decision_outcome: str = Field(default="", max_length=8000)
+    consequences: str = Field(default="", max_length=8000)
+    instruction: str = Field(default="", max_length=1000)
+    grounded: bool = True
+    model: str | None = None

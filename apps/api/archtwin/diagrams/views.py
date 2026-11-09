@@ -252,7 +252,7 @@ def container_view(g: dict[str, Any], ckey: str, drift_keys: set[str], group: st
     more_id = f"more{page + 1}" if page else "more"
     if page:
         crumbs.append({"key": base["view_key"], "title": f"Supporting modules {page}" if page > 1 else "Supporting modules"})
-    nodes = [_node_out(g["nodes"][c], vkind="component") for c in sorted(keep)]
+    nodes = [_node_out(g["nodes"][c], vkind="component", zoom=c if _children(g, c, "code") else None) for c in sorted(keep)]
     if rest:
         nodes.append({"id": "group:more", "kind": "group", "name": "Supporting modules", "technology": f"{len(rest)} components",
                       "primary": True, "zoom": f"container:{system}/{svc}/group:{more_id}", "member_keys": rest, "origins": [], "confidence": 1,
@@ -281,8 +281,185 @@ def container_view(g: dict[str, Any], ckey: str, drift_keys: set[str], group: st
             "hidden_edges": hidden, "hidden_reason": "single-import dependencies hidden for readability" if hidden else ""}
 
 
+def code_view(g: dict[str, Any], comp_key: str, drift_keys: set[str], group: str | None = None) -> dict[str, Any]:
+    """C4 L4 (code): the classes and functions of one component, their inheritance and `uses` references, and the code they
+    depend on in other components (secondary, zoomable). Same 9-primary budget with a paged "more" group."""
+    if comp_key not in g["nodes"]:
+        raise KeyError(comp_key)
+    system, svc, comp = comp_key.split(":", 1)[1].split("/", 2)
+    cname = g["nodes"][comp_key].get("name", comp)
+    crumbs = [{"key": "context", "title": "Context"}, {"key": f"system:{system}", "title": system},
+              {"key": f"container:{system}/{svc}", "title": svc}, {"key": comp_key, "title": cname}]
+    base = {"view_key": comp_key + (f"/group:{group}" if group else ""), "level": 4, "title": f"{cname} — code", "breadcrumbs": crumbs,
+            "groups": [], "detail_views": []}
+    code = _children(g, comp_key, "code")
+    if not code:
+        return {**base, "nodes": [], "edges": [], "empty_reason": "No code-level evidence (classes/functions) for this component.",
+                "budget": {"primary": 0, "max": MAX_PRIMARY, "split": False}}
+    cset = set(code)
+    deps = [e for e in g["edges"].values() if e["kind"] == "depends-on" and (e["source"] in cset or e["target"] in cset)
+            and g["nodes"].get(e["source"], {}).get("kind") == "code" and g["nodes"].get(e["target"], {}).get("kind") == "code"]
+    deg: dict[str, int] = defaultdict(int)
+    for e in deps:
+        deg[e["source"]] += 1
+        deg[e["target"]] += 1
+    ranked = sorted(code, key=lambda c: (-deg[c], g["nodes"][c]["attributes"].get("element") != "class", c))
+    page = int(group[4:] or 1) if group and group.startswith("more") else 0
+    window = ranked[(MAX_PRIMARY - 1) * page:] if page else ranked
+    keep, rest = (set(window[:MAX_PRIMARY - 1]), window[MAX_PRIMARY - 1:]) if len(window) > MAX_PRIMARY else (set(window), [])
+    more_id = f"more{page + 1}" if page else "more"
+    if page:
+        crumbs.append({"key": base["view_key"], "title": f"More code {page}"})
+    owner: dict[str, str] = {}
+    for e in g["edges"].values():
+        if e["kind"] == "contains" and g["nodes"].get(e["target"], {}).get("kind") == "code":
+            owner[e["target"]] = e["source"]
+    nodes = []
+    for c in sorted(keep):
+        n = g["nodes"][c]
+        a = n["attributes"]
+        out = _node_out(n, vkind="component")
+        out["subtype"] = a.get("element", "code")
+        out["technology"] = f"{a.get('element', 'code')} · {a.get('path', '')}:{a.get('line_start', '')}"
+        out["description"] = (f"bases: {', '.join(a.get('bases') or [])}" if a.get("bases") else "") + (f" · {a['methods']} methods" if a.get("methods") else "")
+        nodes.append(out)
+    if rest:
+        nodes.append({"id": "group:more", "kind": "group", "name": "More code", "technology": f"{len(rest)} elements", "primary": True,
+                      "zoom": f"{comp_key}/group:{more_id}", "member_keys": rest, "origins": [], "confidence": 1, "inferred_only": False,
+                      "evidence_count": 0, "focal": False, "subtype": "group", "element_kind": "group",
+                      "description": ", ".join(g["nodes"][c]["name"] for c in rest[:12])})
+    rest_set = set(rest)
+    external: dict[str, int] = defaultdict(int)
+    raw = []
+    for e in deps:
+        def place(k: str) -> str | None:
+            if k in keep:
+                return k
+            if k in rest_set:
+                return "group:more"
+            if k not in cset:
+                external[k] += 1
+                return k
+            return None
+        s_, t_ = place(e["source"]), place(e["target"])
+        if s_ and t_:
+            raw.append((s_, t_, e))
+    ext_keep = {k for k, _ in sorted(external.items(), key=lambda x: -x[1])[:5]}
+    for k in sorted(ext_keep):
+        n = g["nodes"][k]
+        nodes.append({**_node_out(n, vkind="external", primary=False, zoom=owner.get(k)),
+                      "technology": f"{g['nodes'].get(owner.get(k, ''), {}).get('name', 'other component')} · {n['attributes'].get('element', '')}"})
+    raw = [(s_, t_, e) for s_, t_, e in raw if (s_ in keep or s_ == "group:more" or s_ in ext_keep) and (t_ in keep or t_ == "group:more" or t_ in ext_keep)]
+    edges = _aggregate(raw)
+    for e in edges:
+        rels = sorted({g["edges"][m]["attributes"].get("relation", "uses") for m in e["members"] if m in g["edges"]})
+        e["kind"], e["label"] = ("inherits", "inherits") if rels == ["inherits"] else ("uses", " / ".join(rels))
+    _focal(nodes, edges, drift_keys)
+    return {**base, "breadcrumbs": crumbs, "nodes": nodes, "edges": edges,
+            "detail_views": [{"key": f"{comp_key}/group:{more_id}", "title": "More code", "count": len(rest)}] if rest else [],
+            "budget": {"primary": len([n for n in nodes if n.get("primary")]), "max": MAX_PRIMARY, "split": bool(rest), "code_elements": len(code)}}
+
+
+VKIND = {"software-system": "system", "external-system": "external", "person": "person", "container": "container", "component": "component",
+         "code": "component", "database": "container", "table": "component", "kafka-topic": "container", "api-endpoint": "component",
+         "adr": "component", "work-item": "component"}
+
+
+def zoom_target(g: dict[str, Any], k: str) -> str | None:
+    """The view that shows what is inside element `k` (C4 zoom), or None."""
+    n = g["nodes"].get(k, {})
+    if n.get("kind") == "software-system":
+        return f"system:{k.split(':', 1)[1]}"
+    if n.get("kind") == "container" and _children(g, k, "component"):
+        return k
+    if n.get("kind") == "component" and _children(g, k, "code"):
+        return k
+    return None
+
+
+def parent_view(g: dict[str, Any], k: str) -> str:
+    """The view in which element `k` itself is drawn (for "open in Architecture" / search)."""
+    kind = g["nodes"].get(k, {}).get("kind")
+    for e in g["edges"].values():
+        if e["kind"] == "contains" and e["target"] == k:
+            pk = g["nodes"].get(e["source"], {}).get("kind")
+            if pk == "software-system":
+                return f"system:{e['source'].split(':', 1)[1]}"
+            if pk in ("container", "component"):
+                return e["source"]
+    if kind == "table" or kind == "code":
+        for e in g["edges"].values():
+            if e["target"] == k and g["nodes"].get(e["source"], {}).get("kind") in ("container", "component"):
+                return e["source"]
+    return "context"
+
+
+def evidence_view(g: dict[str, Any], keys: list[str], max_nodes: int = 14) -> dict[str, Any] | None:
+    """A diagram for an assistant answer: the cited elements, the endpoints of cited relationships and the direct relations
+    among them; every node zooms into its C4 level (L1-L4) in the Architecture tab."""
+    want: list[str] = []
+    for k in keys:
+        if k in g["edges"]:
+            e = g["edges"][k]
+            for x in (e["source"], e["target"]):
+                if x not in want:
+                    want.append(x)
+        elif k in g["nodes"] and k not in want:
+            want.append(k)
+    want = [k for k in want if g["nodes"].get(k, {}).get("kind") not in ("library", "document")][:max_nodes]
+    if len(want) < 2:
+        return None
+    ws = set(want)
+    nodes = []
+    for k in want:
+        n = g["nodes"][k]
+        out = _node_out(n, vkind=VKIND.get(n["kind"], "container"), zoom=zoom_target(g, k))
+        out["parent_view"] = parent_view(g, k)
+        if n["kind"] == "table":
+            out["technology"] = f"table · {n['attributes'].get('column_count', '?')} columns"
+        nodes.append(out)
+    raw = [(e["source"], e["target"], e) for e in g["edges"].values()
+           if e["source"] in ws and e["target"] in ws and e["kind"] not in ("contains",)]
+    edges = _aggregate(raw)
+    return {"view_key": "answer", "level": 0, "title": "Diagram for this answer", "breadcrumbs": [], "nodes": nodes, "edges": edges,
+            "detail_views": [], "budget": {"primary": len(nodes), "max": max_nodes, "split": False}, "layout": {"overrides": {}, "revision": 0}}
+
+
+def annotate_links(g: dict[str, Any], view: dict[str, Any]) -> dict[str, Any]:
+    """Per node: how many ADRs, work items (Taiga/GitLab/GitHub) and documented diagram relations point at it or at an
+    element it contains — so docs and plans show up on the diagram, not only code."""
+    contains: dict[str, list[str]] = defaultdict(list)
+    for e in g["edges"].values():
+        if e["kind"] == "contains":
+            contains[e["source"]].append(e["target"])
+    refs: dict[str, dict[str, int]] = defaultdict(lambda: {"adrs": 0, "work_items": 0, "documented": 0})
+    for e in g["edges"].values():
+        src_kind = g["nodes"].get(e["source"], {}).get("kind")
+        if e["kind"] == "references" and src_kind in ("adr", "work-item"):
+            refs[e["target"]]["adrs" if src_kind == "adr" else "work_items"] += 1
+        if e["attributes"].get("documented"):
+            refs[e["source"]]["documented"] += 1
+            refs[e["target"]]["documented"] += 1
+
+    def total(k: str, depth: int = 0) -> dict[str, int]:
+        t = dict(refs.get(k, {"adrs": 0, "work_items": 0, "documented": 0}))
+        if depth < 3:
+            for c in contains.get(k, []):
+                for a, v in total(c, depth + 1).items():
+                    t[a] += v
+        return t
+    for n in view.get("nodes", []):
+        n["links"] = total(n["id"]) if n.get("kind") != "group" else {"adrs": 0, "work_items": 0, "documented": 0}
+    return view
+
+
 def build_view(g: dict[str, Any], view_key: str, drift_keys: set[str] | None = None, full: bool = False, deps: bool = False,
                min_conf: float = 0.5) -> dict[str, Any]:
+    return annotate_links(g, _build_view(g, view_key, drift_keys, full, deps, min_conf))
+
+
+def _build_view(g: dict[str, Any], view_key: str, drift_keys: set[str] | None = None, full: bool = False, deps: bool = False,
+                min_conf: float = 0.5) -> dict[str, Any]:
     drift_keys = drift_keys or set()
     if view_key == "context":
         return context_view(g, drift_keys)
@@ -292,6 +469,9 @@ def build_view(g: dict[str, Any], view_key: str, drift_keys: set[str] | None = N
         v = system_view(g, system, drift_keys, grp or None, full, deps, min_conf)
         v["options"] = {"full": full, "deps": deps, "min_conf": min_conf}
         return v
+    if view_key.startswith("component:"):
+        comp, _, grp = view_key.partition("/group:")
+        return code_view(g, comp, drift_keys, grp or None)
     if view_key.startswith("container:"):
         rest = view_key[len("container:"):]
         base, _, grp = rest.partition("/group:")

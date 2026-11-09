@@ -42,9 +42,28 @@ make fixtures-up      # OTel-instrumented shop: web, orders, inventory, billing 
 make fixtures-demo    # creates "Shop (reference fixture)" with git, Docker, OTel, PostgreSQL, MySQL and Kafka connectors and scans them
 ```
 
-Or by hand: **New project → Inventory → Add connector** (`git` with path `/sources/horizon` or `/sources/archtwin`, `github`, `docker`,
+Or by hand: **New project → Datasources → Add datasource** (a local directory, `github`, `gitlab`, `taiga`, `docker`,
 `otel_servicegraph`, `postgresql`, `mysql`, `kafka`, `http_openapi`) → **Scan** → **Architecture** (C4 zoom: double-click / Enter, Backspace to go up) → **Settings → Propose
 baseline** (a different user approves) → **Drift** → **Assistant**.
+
+### Your own sources: local directories, GitLab, Taiga
+
+```bash
+# .env — then `make up`
+ARCHTWIN_SOURCE_WORKSPACE=/home/me/workspace/myproduct     # absolute; mounted read-only at the SAME path
+ARCHTWIN_EGRESS_ALLOW_PRIVATE_HOSTS=gitlab.internal,taiga.internal   # self-hosted providers on 10.x / 172.16-31.x / 192.168.x
+ARCHTWIN_EGRESS_INSECURE_TLS_HOSTS=taiga.internal          # only if a host has a self-signed / wrong-CN certificate
+```
+
+- **Local directory** — *Browse…* opens a folder picker over the mounted roots. A single repository is scanned at any ref; a
+  folder of repositories (e.g. `myproduct/backend`) scans each repository as its own system; set `content: docs` for
+  documentation or architecture folders (every Markdown/text file, ADRs anywhere, Mermaid/PlantUML/Structurizr sources;
+  PDF/DOCX with the `documents` profile). Add as many directories to one project as you like.
+- **GitLab** — paste project URLs (`https://gitlab.internal/group/sub/project`) or whole `groups`; the dialog links to the
+  token page pre-filled with `read_api` + `read_repository`. Commits, branches, issues and merge requests; push webhooks scan
+  only the pushed project.
+- **Taiga** — paste the board URL (`https://taiga.internal/project/<slug>/kanban`); anonymous for public projects, otherwise a
+  read-only user's username + password (or a token). Epics, stories, tasks, issues and sprints become work items.
 
 | Container | Role | Port |
 |---|---|---|
@@ -90,7 +109,7 @@ Design → ADR → plan → issues / commits → runtime observation → drift �
 - **Feature flags** for every optional module, connector and AI operation, with an emergency kill switch — security invariants are never flaggable.
 
 ### Discovery and evidence
-- Connectors for **GitHub, GitLab, Kubernetes, PostgreSQL/MySQL, Kafka + Schema Registry, OpenAPI, OpenTelemetry service graph, Jira, Taiga** and uploaded documents (Docling), with more planned in the [connector matrix](docs/connectors/CONNECTOR_MATRIX.md).
+- Connectors for **local directories (single repos, folders of repos, docs/architecture folders), GitHub, GitLab, Taiga, Docker, PostgreSQL/MySQL, Kafka + Schema Registry, OpenAPI, OpenTelemetry service graph** and uploaded documents (Docling); Kubernetes and Jira are planned in the [connector matrix](docs/connectors/CONNECTOR_MATRIX.md).
 - Code extraction from declared artifacts first (OpenAPI, AsyncAPI, Helm, Backstage `catalog-info.yaml`, CODEOWNERS), plus tree-sitter detectors and Syft SBOMs — every finding with file, line and commit.
 - Webhooks + watches + scheduled reconciliation; partial scans never cause false deletions.
 
@@ -149,7 +168,7 @@ Full adopt-vs-build reasoning: [`docs/TECHNOLOGIES.md`](docs/TECHNOLOGIES.md).
 | Phase | Increment | Milestone | Status |
 |---|---|---|---|
 | [01](openspec/changes/phase-01-foundation/) | Secure multi-project foundations (walking skeleton) | M1 | ✅ MVP implemented (OTel tracing, OpenBao, org deletion, break-glass: later) |
-| [02](openspec/changes/phase-02-connectors/) | Discovery and connected evidence | M1 | 🚧 mostly: git (local/HTTPS) + GitHub, Docker runtime, OTel service graph, PostgreSQL/MySQL catalogs, Kafka + Schema Registry, live OpenAPI, uploads, signed webhooks; Kubernetes (deferred: Docker-only for now), GitLab, Syft SBOM open |
+| [02](openspec/changes/phase-02-connectors/) | Discovery and connected evidence | M1 | 🚧 mostly: local directories (repos, folders of repos, docs) + Git HTTPS, GitHub, GitLab, Taiga, Docker runtime, OTel service graph, PostgreSQL/MySQL catalogs, Kafka + Schema Registry, live OpenAPI, uploads, signed webhooks; Kubernetes (deferred: Docker-only for now), Jira, Syft SBOM open |
 | [03](openspec/changes/phase-03-architecture/) | Living diagrams, C4 zoom, docs and ADRs | M1 | ✅ MVP implemented: graph, snapshots, baselines, C4 L1–L3 zoom, linter, exports, ADRs, docs (PDF/DOCX, reviews: later) |
 | [04](openspec/changes/phase-04-drift/) | Continuous drift and alerts | M2 | ✅ MVP implemented: three-way drift, triage, suppressions, in-app/SSE notifications (Apprise, metrics: later) |
 | [05](openspec/changes/phase-05-delivery/) | Plans, traceability and CI checks | M2 | 📝 specified |

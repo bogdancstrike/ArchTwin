@@ -1,11 +1,11 @@
 import { Link, Outlet, useNavigate, useParams } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Bell, Boxes, Building2, ChevronDown, FileClock, Flag, Home, LogOut, Moon, Sun } from "lucide-react";
+import { Bell, Boxes, Building2, Coins, FileClock, Flag, Home, KeyRound, LogOut, Moon, Server, Star, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuth } from "react-oidc-context";
 import { api, getOrg, setOrg } from "@/lib/api";
 import { getToken } from "@/lib/auth";
-import { useApi, useMe } from "@/lib/hooks";
+import { useApi, useFavorites, useMe } from "@/lib/hooks";
 import type { Project } from "@/lib/types";
 import { ago, Avatar, cn, Select } from "./ui";
 
@@ -68,10 +68,10 @@ export function AppShell() {
   const params = useParams({ strict: false }) as { projectId?: string };
   const projects = useApi<Project[]>(["projects", me.data?.org_id], me.data ? "/projects" : null);
   const [theme, setTheme] = useTheme();
-  const [showAll, setShowAll] = useState(false);
   const isAdmin = me.data && ["org_owner", "org_admin"].includes(me.data.org_role);
-  const list = projects.data ?? [];
-  const visible = showAll ? list : list.filter((p, i) => i < 6 || p.id === params.projectId);
+  const { favs } = useFavorites();
+  const list = (projects.data ?? []).filter((p) => favs.includes(p.id)).sort((a, b) => a.title.localeCompare(b.title));
+  const visible = list;
   return <div className="flex h-full">
     <aside className="flex w-60 shrink-0 flex-col bg-side text-side-ink">
       <Link to="/home" className="flex items-center gap-2.5 px-4 pb-3 pt-4"><img src="/logo.svg" alt="" className="h-8 w-8 rounded-lg bg-white/95 p-0.5" />
@@ -79,13 +79,15 @@ export function AppShell() {
       <nav className="flex-1 space-y-0.5 overflow-auto px-2.5 py-2 text-sm" aria-label="Main">
         <Link to="/home" className={navCls} activeProps={navActive}><Home size={16} /> Home</Link>
         <Link to="/projects" className={navCls} activeProps={navActive} activeOptions={{ exact: true }}><Boxes size={16} /> All projects</Link>
-        <div className="px-2.5 pb-1.5 pt-5 font-mono text-[10px] uppercase tracking-[0.16em] text-side-soft">Projects</div>
+        <Link to="/usage" className={navCls} activeProps={navActive}><Coins size={16} /> Usage &amp; costs</Link>
+        <div className="flex items-center gap-1 px-2.5 pb-1.5 pt-5 font-mono text-[10px] uppercase tracking-[0.16em] text-side-soft"><Star size={10} /> Favorite projects</div>
         {visible.map((p) => <Link key={p.id} to="/projects/$projectId" params={{ projectId: p.id }}
           className={cn(navCls, "py-1", params.projectId === p.id && "!bg-side-2 !text-side-ink font-medium shadow-[inset_2px_0_0_var(--color-accent)]")}>
           <Avatar name={p.title} size={20} className="!rounded-md" onDark /><span className="truncate">{p.title}</span></Link>)}
-        {list.length > 6 && <button onClick={() => setShowAll(!showAll)} className={cn(navCls, "w-full py-1 text-xs")}>
-          <ChevronDown size={14} className={cn("transition", showAll && "rotate-180")} />{showAll ? "Show fewer" : `Show all ${list.length}`}</button>}
+        {list.length === 0 && <p className="px-2.5 py-1 text-xs leading-relaxed text-side-soft">Star a project (☆ on its card or header) to pin it here.</p>}
         {isAdmin && <><div className="px-2.5 pb-1.5 pt-5 font-mono text-[10px] uppercase tracking-[0.16em] text-side-soft">Organization</div>
+          <Link to="/admin/system" className={navCls} activeProps={navActive}><Server size={16} /> System</Link>
+          <Link to="/admin/roles" className={navCls} activeProps={navActive}><KeyRound size={16} /> Roles &amp; permissions</Link>
           <Link to="/admin/flags" className={navCls} activeProps={navActive}><Flag size={16} /> Feature flags</Link>
           <Link to="/admin/audit" className={navCls} activeProps={navActive}><FileClock size={16} /> Audit trail</Link></>}
       </nav>

@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, text
 
 from archtwin.audit import service as audit
 from archtwin.common import authz
@@ -92,3 +92,28 @@ async def set_member(ctx: RequestContext, user_id: uuid.UUID, role: str | None) 
             await conn.execute(project_members.insert().values(org_id=ctx.org_id, project_id=ctx.project_id, user_id=user_id, role=role))
         await audit.record(conn, ctx, "project.member.set", "project", ctx.project_id, details={"user_id": str(user_id), "role": role})
     return await list_members(ctx)
+
+
+async def delete_project(ctx: RequestContext, confirm: str) -> dict[str, Any]:
+    """Permanently delete a project and everything in it (datasources, evidence, snapshots, ADRs, documents, chats).
+    Double confirmation is enforced server-side: `confirm` must equal the project's slug. The organization-wide audit
+    trail and the AI cost ledger are kept (history and spend must survive). Append-only tables are purged under the
+    scoped `app.purge` setting that the append-only trigger honours for deletions (never for audit_events)."""
+    async with uow(ctx) as conn:
+        p = row((await conn.execute(select(projects).where(projects.c.id == ctx.project_id))).first())
+        if not p:
+            raise not_found("project")
+        if confirm.strip() != p["slug"]:
+            raise problem(422, "AT-PROJ-004", "Confirmation does not match", f"Type the project slug {p['slug']!r} to confirm.")
+        await conn.execute(text("SELECT set_config('app.purge', 'on', true)"))
+        counts = {}
+        for t in ("connectors", "observations", "documents", "adrs", "snapshots", "conversations"):
+            try:
+                counts[t] = int((await conn.execute(text(f"SELECT count(*) FROM {t} WHERE project_id = :p"), {"p": ctx.project_id})).scalar() or 0)
+            except Exception:  # noqa: BLE001 — counts are informational only
+                counts[t] = None
+        await conn.execute(text("DELETE FROM outbox_events WHERE project_id = :p AND status = 'pending'"), {"p": ctx.project_id})
+        await conn.execute(projects.delete().where(projects.c.id == ctx.project_id))
+        await audit.record(conn, ctx, "project.delete", "project", ctx.project_id,
+                           details={"name": p["title"], "slug": p["slug"], "deleted": counts})
+    return {"deleted": True, "id": str(ctx.project_id), "slug": p["slug"], "counts": counts}

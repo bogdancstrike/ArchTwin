@@ -20,12 +20,21 @@ def slugify(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:48] or "item"
 
 
+LEGACY_DEFAULT_ORG_SLUGS = ("demo-organization",)       # earlier default name; renamed in place (id and slug kept)
+
+
 async def ensure_default_org(conn) -> uuid.UUID:
     name = settings().default_org_name
     slug = slugify(name)
     r = (await conn.execute(select(organizations.c.id).where(organizations.c.slug == slug))).first()
     if r:
         return r.id
+    legacy = (await conn.execute(select(organizations.c.id, organizations.c.name)
+                                 .where(organizations.c.slug.in_(LEGACY_DEFAULT_ORG_SLUGS)).limit(1))).first()
+    if legacy:
+        if legacy.name != name:
+            await conn.execute(organizations.update().where(organizations.c.id == legacy.id).values(name=name))
+        return legacy.id
     oid = new_id()
     await conn.execute(pg_insert(organizations).values(id=oid, name=name, slug=slug).on_conflict_do_nothing())
     return (await conn.execute(select(organizations.c.id).where(organizations.c.slug == slug))).first().id

@@ -27,3 +27,10 @@ resourcePolicy:
     condition:
       match:
         expr: request.resource.attr.author_id != request.principal.id
+  # Organization administrators may approve a baseline they proposed themselves: an explicit, audited exception to
+  # four-eyes (a written reason is required by the API and stored with the decision).
+  - actions:
+    - self_approve_baseline
+    effect: EFFECT_ALLOW
+    derivedRoles:
+    - org_administrator

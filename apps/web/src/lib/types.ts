@@ -1,5 +1,5 @@
 export interface Me { id: string; username: string; display_name: string; org_id: string; org_role: string; project_roles: Record<string, string>;
-  orgs: { id: string; name: string; role: string }[]; preferences: { preferred_model?: string; theme?: string } }
+  orgs: { id: string; name: string; role: string }[]; preferences: { preferred_model?: string; theme?: string; favorite_projects?: string[] } }
 export interface Project { id: string; slug: string; title: string; purpose: string; tags: string[]; status: string; revision: number;
   created_at: string; my_role?: string | null; environments?: { id: string; name: string }[] }
 export interface Freshness { status: "current" | "stale" | "incomplete" | "unknown"; reason?: string; age_s?: number }
@@ -15,7 +15,7 @@ export interface GEdge { key: string; kind: string; source: string; target: stri
   confidence: number; evidence: Evidence[]; inferred_only: boolean }
 export interface Snapshot { id: string; version: number; manifest_hash: string; node_count: number; edge_count: number; created_at: string; trigger: string;
   inputs?: any }
-export interface ViewNode { id: string; kind: string; name: string; technology: string; subtype: string; description: string; owner: string;
+export interface ViewNode { element_kind?: string; id: string; kind: string; name: string; technology: string; subtype: string; description: string; owner: string;
   origins: string[]; confidence: number; inferred_only: boolean; primary: boolean; zoom: string | null; evidence_count: number; focal: boolean;
   focal_reason?: string; state?: string; member_keys?: string[]; components?: number; children?: number }
 export interface ViewEdge { id: string; source: string; target: string; kind: string; label: string; protocols: string[]; count: number;

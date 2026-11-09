@@ -6,21 +6,40 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import and_, select
+from sqlalchemy import text as sql_text
 
 from archtwin.audit import service as audit
 from archtwin.common import crypto
-from archtwin.common.db import RequestContext, row, rows, uow
+from archtwin.common.db import RequestContext, row, rows, unscoped, uow
 from archtwin.common.errors import not_found, problem
 from archtwin.common.ids import new_id
 from archtwin.common.logging import log, redact
-from archtwin.common.schema import connectors, observations, scan_runs, secrets, source_artifacts
+from archtwin.common.paging import PageQuery, paginate_select
+from archtwin.common.schema import connectors, observations, org_settings, scan_runs, secrets, source_artifacts
 from archtwin.connectors import registry
+from archtwin.connectors.adapters.git_repo import ORG_ROOTS
 from archtwin.connectors.sdk import ScanResult
 from archtwin.documents import service as docs
 from archtwin.flags import service as flags
 from archtwin.kernel import outbox
 
 PUBLIC_FIELDS = [c for c in connectors.c if c.name != "secret_id"]
+SOURCE_ROOTS_KEY = "source_roots"
+
+
+async def org_source_roots(org_id: uuid.UUID) -> list[str] | None:
+    """Admin whitelist of local source roots for this org (System page); None = every mounted boundary."""
+
+    async with unscoped() as conn:
+        await conn.execute(sql_text("SELECT set_config('app.org_id', :o, true)"), {"o": str(org_id)})
+        r = (await conn.execute(select(org_settings.c.value).where(and_(org_settings.c.org_id == org_id,
+                                                                         org_settings.c.key == SOURCE_ROOTS_KEY)))).first()
+    return list(r.value) if r and isinstance(r.value, list) else None
+
+
+async def scoped_roots(org_id: uuid.UUID):
+    """Set the org's local-root whitelist for the local-directory connector in this task (contextvar)."""
+    ORG_ROOTS.set(await org_source_roots(org_id))
 
 
 async def require_enabled(ctx: RequestContext, kind: str) -> None:
@@ -106,6 +125,7 @@ async def test(ctx: RequestContext, cid: uuid.UUID) -> dict[str, Any]:
     await require_enabled(ctx, c["kind"])
     async with uow(ctx) as conn:
         sec = await _unseal(conn, ctx, c["secret_id"])
+    await scoped_roots(ctx.org_id)
     res = await registry.get(c["kind"]).test(c["config"], sec)
     async with uow(ctx) as conn:
         await audit.record(conn, ctx, "connector.test", "connector", cid, details={"ok": res.ok})
@@ -125,6 +145,22 @@ async def request_scan(ctx: RequestContext, cid: uuid.UUID, ref: str | None) -> 
         await outbox.emit(conn, ctx.org_id, ctx.project_id, "scan", sid, "connector.scan_requested",
                           {"scan_id": str(sid), "connector_id": str(cid)})
         return row((await conn.execute(select(scan_runs).where(scan_runs.c.id == sid))).first())
+
+
+SCAN_SORTS = {"created_at": scan_runs.c.created_at, "status": scan_runs.c.status, "connector": connectors.c.name, "revision": scan_runs.c.revision,
+              "finished_at": scan_runs.c.finished_at}
+
+
+async def page_scans(ctx: RequestContext, pq: PageQuery, cid: uuid.UUID | None = None, status: str | None = None) -> dict[str, Any]:
+    q = (select(scan_runs, connectors.c.name.label("connector"), connectors.c.kind.label("connector_kind"))
+         .join(connectors, connectors.c.id == scan_runs.c.connector_id).where(scan_runs.c.project_id == ctx.project_id))
+    if cid:
+        q = q.where(scan_runs.c.connector_id == cid)
+    if status:
+        q = q.where(scan_runs.c.status == status)
+    async with uow(ctx) as conn:
+        return await paginate_select(conn, q, pq, search=[connectors.c.name, scan_runs.c.revision, scan_runs.c.ref, scan_runs.c.error],
+                                     sorts=SCAN_SORTS, default_sort="created_at")
 
 
 async def list_scans(ctx: RequestContext, cid: uuid.UUID | None = None, limit: int = 50) -> list[dict[str, Any]]:
@@ -153,6 +189,7 @@ async def execute_scan(ctx: RequestContext, scan_id: uuid.UUID) -> dict[str, Any
         await conn.execute(scan_runs.update().where(scan_runs.c.id == scan_id).values(status="running", started_at=datetime.now(UTC)))
         sec = await _unseal(conn, ctx, c["secret_id"])
     try:
+        await scoped_roots(ctx.org_id)
         result: ScanResult = await impl.scan(c["config"], sec, s["ref"])
     except Exception as e:  # noqa: BLE001
         msg = redact(str(getattr(e, "problem_detail", None) or e))[:500]

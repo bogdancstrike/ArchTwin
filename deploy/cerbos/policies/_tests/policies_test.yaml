@@ -28,7 +28,27 @@ resources:
   baseline_by_alice: {kind: architecture, id: b1, attr: {org_id: o1, project_id: p1, author_id: alice}}
   flag_o1: {kind: flag, id: f, attr: {org_id: o1}}
   conn_p1: {kind: connector, id: c1, attr: {org_id: o1, project_id: p1, writeback_enabled: false}}
+  org_o1:  {kind: org, id: o1, attr: {org_id: o1}}
 tests:
+  - name: org admins may self-approve a baseline (audited exception); architects may not
+    input:
+      principals: [alice, owner, mallory]
+      resources: [baseline_by_alice]
+      actions: [self_approve_baseline]
+    expected:
+      - {principal: alice, resource: baseline_by_alice, actions: {self_approve_baseline: EFFECT_DENY}}
+      - {principal: owner, resource: baseline_by_alice, actions: {self_approve_baseline: EFFECT_ALLOW}}
+      - {principal: mallory, resource: baseline_by_alice, actions: {self_approve_baseline: EFFECT_DENY}}
+  - name: usage, spend limits, system and access inspection are org-admin only; own usage for members
+    input:
+      principals: [alice, vera, owner, mallory]
+      resources: [org_o1]
+      actions: [view_own_usage, view_usage_all, manage_spend_limits, view_system, inspect_access]
+    expected:
+      - {principal: alice, resource: org_o1, actions: {view_own_usage: EFFECT_ALLOW, view_usage_all: EFFECT_DENY, manage_spend_limits: EFFECT_DENY, view_system: EFFECT_DENY, inspect_access: EFFECT_DENY}}
+      - {principal: vera, resource: org_o1, actions: {view_own_usage: EFFECT_ALLOW, view_usage_all: EFFECT_DENY, manage_spend_limits: EFFECT_DENY, view_system: EFFECT_DENY, inspect_access: EFFECT_DENY}}
+      - {principal: owner, resource: org_o1, actions: {view_own_usage: EFFECT_ALLOW, view_usage_all: EFFECT_ALLOW, manage_spend_limits: EFFECT_ALLOW, view_system: EFFECT_ALLOW, inspect_access: EFFECT_ALLOW}}
+      - {principal: mallory, resource: org_o1, actions: {view_own_usage: EFFECT_DENY, view_usage_all: EFFECT_DENY, manage_spend_limits: EFFECT_DENY, view_system: EFFECT_DENY, inspect_access: EFFECT_DENY}}
   - name: project visibility and isolation
     input:
       principals: [alice, vera, owner, mallory]

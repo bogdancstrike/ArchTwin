@@ -15,6 +15,7 @@ from archtwin.audit import service as audit
 from archtwin.common.db import RequestContext, row, rows, uow
 from archtwin.common.errors import not_found, problem
 from archtwin.common.ids import new_id
+from archtwin.common.paging import PageQuery, paginate_select
 from archtwin.common.schema import adr_versions, adrs, users
 
 MADR_FIELDS = ("context", "decision_drivers", "considered_options", "decision_outcome", "consequences")
@@ -58,9 +59,20 @@ async def get(ctx: RequestContext, aid: uuid.UUID) -> dict[str, Any]:
     return a
 
 
+ADR_SORTS = {"number": adrs.c.number, "title": adrs.c.title, "status": adrs.c.status, "created_at": adrs.c.created_at}
+
+
 async def list_(ctx: RequestContext) -> list[dict[str, Any]]:
     async with uow(ctx) as conn:
         return rows(await conn.execute(select(adrs).where(adrs.c.project_id == ctx.project_id).order_by(adrs.c.number.desc())))
+
+
+async def page(ctx: RequestContext, pq: PageQuery, status: str | None = None) -> dict[str, Any]:
+    q = select(adrs).where(adrs.c.project_id == ctx.project_id)
+    if status:
+        q = q.where(adrs.c.status == status)
+    async with uow(ctx) as conn:
+        return await paginate_select(conn, q, pq, search=[adrs.c.title], sorts=ADR_SORTS, default_sort="number")
 
 
 async def edit(ctx: RequestContext, aid: uuid.UUID, title: str | None, content: dict[str, Any], links: list[str]) -> dict[str, Any]:

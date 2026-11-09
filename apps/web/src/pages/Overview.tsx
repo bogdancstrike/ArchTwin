@@ -38,7 +38,7 @@ export function OverviewPage({ projectId }: { projectId: string }) {
   for (const r of dr.by ?? []) if (r.verdict === "drift") sevCounts[r.severity] = (sevCounts[r.severity] ?? 0) + r.n;
   const base = `/projects/${projectId}`;
   const off = (c: any) => !c.configured && <p className="text-sm text-soft">{c.reason ?? "Not configured yet."}</p>;
-  return <div className="mx-auto max-w-7xl space-y-6 p-6">
+  return <div className="space-y-6 p-6">
     <section aria-label="Key figures" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <StatTile label="Elements" value={a.snapshot ? a.snapshot.node_count.toLocaleString() : "—"} icon={<Network size={16} />}
         hint={a.snapshot ? `${a.snapshot.edge_count.toLocaleString()} relationships · v${a.snapshot.version}` : a.reason ?? "no snapshot yet"} />
@@ -66,8 +66,8 @@ export function OverviewPage({ projectId }: { projectId: string }) {
           {Object.keys(d.freshness.observations_by_origin ?? {}).length ? <OriginBar by={d.freshness.observations_by_origin} /> : <p className="text-sm text-soft">No observations yet.</p>}</div>
       </Card>
 
-      <Card eyebrow="Evidence" title="Sources" actions={<Link className="flex items-center gap-1 text-sm text-link" to="/projects/$projectId/inventory" params={{ projectId }}>Inventory <ArrowRight size={14} /></Link>}>
-        {!d.freshness.configured ? <p className="text-sm text-soft">No connectors yet — add one in Inventory. Until then everything is <b>UNKNOWN</b>, never “absent”.</p>
+      <Card eyebrow="Evidence" title="Sources" actions={<Link className="flex items-center gap-1 text-sm text-link" to="/projects/$projectId/datasources" params={{ projectId }}>Datasources <ArrowRight size={14} /></Link>}>
+        {!d.freshness.configured ? <p className="text-sm text-soft">No datasources yet — add one in Datasources. Until then everything is <b>UNKNOWN</b>, never “absent”.</p>
           : <ul className="space-y-2.5">{d.freshness.connectors.map((c: any) => <li key={c.id} className="flex items-center gap-3">
             <span className="grid h-8 w-8 place-items-center rounded-lg bg-paper-2 font-mono text-[10px] uppercase text-muted">{c.kind.slice(0, 3)}</span>
             <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{c.name}</span><span className="block truncate text-xs text-soft">{c.freshness.reason ?? c.kind}</span></span>

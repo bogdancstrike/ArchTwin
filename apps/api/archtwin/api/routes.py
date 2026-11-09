@@ -20,6 +20,7 @@ from archtwin.common import authz
 from archtwin.common.db import Principal, RequestContext, rows, unscoped, uow
 from archtwin.common.errors import not_found, problem
 from archtwin.common.ids import new_id
+from archtwin.common.paging import PageQuery, page_query
 from archtwin.common.schema import audit_events, diagram_layouts, organizations, prompt_runs
 from archtwin.connectors import registry, webhooks
 from archtwin.connectors import service as connectors
@@ -28,6 +29,7 @@ from archtwin.diagrams import export as dexport
 from archtwin.diagrams import render, views
 from archtwin.documents import engine as docengine
 from archtwin.documents import service as docs
+from archtwin.documents.doctypes import DOC_TYPES
 from archtwin.drift import service as drift
 from archtwin.flags import service as flags
 from archtwin.home import service as home_svc
@@ -52,7 +54,7 @@ async def me(c: RequestContext = Depends(get_ctx)):
 
 @r.put("/me/preferences", tags=["identity"])
 async def set_prefs(body: S.PrefsIn, c: RequestContext = Depends(get_ctx)):
-    prefs = body.model_dump(exclude_none=True)
+    prefs = body.model_dump(exclude_none=True, mode="json")
     if "preferred_model" in prefs:
         gateway.resolve_model(prefs["preferred_model"], None)       # validate server-side
     return await iam.set_preferences(c.actor_id, prefs)
@@ -108,7 +110,9 @@ async def webhook_info(cid: uuid.UUID, request: Request, c: RequestContext = Dep
     base = str(request.base_url).rstrip("/")
     return {"url": f"{base}/api/v1/webhooks/{c.org_id}/{c.project_id}/{cid}", "kind": conn_row["kind"],
             "enabled": await flags.enabled("connectors.webhooks", c.org_id, c.project_id),
-            "signature": "X-Hub-Signature-256" if conn_row["kind"] == "github" else "X-ArchTwin-Signature + X-ArchTwin-Timestamp",
+            "signature": {"github": "X-Hub-Signature-256", "gitlab": "X-Gitlab-Token (the webhook secret token)",
+                          "taiga": "X-TAIGA-WEBHOOK-SIGNATURE (HMAC-SHA1 with the webhook key)"}.get(
+                conn_row["kind"], "X-ArchTwin-Signature + X-ArchTwin-Timestamp"),
             "events": registry.get(conn_row["kind"]).manifest.get("webhooks", ["push"]),
             "recent": await connectors.recent_deliveries(c, cid)}
 
@@ -138,6 +142,12 @@ async def create_project(body: S.ProjectIn, request: Request, c: RequestContext 
 @r.get("/projects/{project_id}", tags=["projects"])
 async def get_project(c: RequestContext = Depends(project_ctx)):
     return await projects.get_project(c)
+
+
+@r.delete("/projects/{project_id}", tags=["projects"])
+async def delete_project(body: S.DeleteProjectIn, c: RequestContext = Depends(project_ctx)):
+    await require(c, "project", "delete", str(c.project_id))
+    return await projects.delete_project(c, body.confirm)
 
 
 @r.patch("/projects/{project_id}", tags=["projects"])
@@ -259,7 +269,23 @@ async def connector_kinds(project_id: uuid.UUID | None = None, c: RequestContext
     for m in registry.manifests():
         out.append({**m, "enabled": await flags.enabled("module.connector-platform", c.org_id, project_id)
                     and await flags.enabled(m["module_flag"], c.org_id, project_id) and await flags.enabled(m["flag"], c.org_id, project_id)})
+        if m["kind"] == "git":          # where local directories may live (mounted read-only); paths only, no contents
+            from archtwin.config import settings
+            out[-1]["source_roots"] = settings().source_roots
     return out
+
+
+@r.get("/projects/{project_id}/source-folders", tags=["connectors"])
+async def source_folders(path: str | None = None, c: RequestContext = Depends(project_ctx)):
+    """Folder picker for local-directory datasources: subfolders of the org's allowed source roots (names only)."""
+    await connectors.require_enabled(c, "git")
+    await require(c, "connector", "create")          # only people who may add a datasource can browse the roots
+    from archtwin.connectors.adapters.git_repo import browse
+    await connectors.scoped_roots(c.org_id)
+    try:
+        return await asyncio.to_thread(browse, path)
+    except ValueError as e:
+        raise problem(422, "AT-CONN-004", "Folder not available", str(e)) from e
 
 
 @r.get("/projects/{project_id}/connectors", tags=["connectors"])
@@ -295,8 +321,11 @@ async def scan_connector(cid: uuid.UUID, body: S.ScanIn, request: Request, c: Re
 
 
 @r.get("/projects/{project_id}/scans", tags=["connectors"])
-async def scans(connector_id: uuid.UUID | None = None, c: RequestContext = Depends(project_ctx)):
+async def scans(connector_id: uuid.UUID | None = None, status: str | None = None, pq: PageQuery = Depends(page_query),
+                c: RequestContext = Depends(project_ctx)):
     await require(c, "connector", "view")
+    if pq.requested:
+        return await connectors.page_scans(c, pq, connector_id, status)
     return await connectors.list_scans(c, connector_id)
 
 
@@ -366,8 +395,12 @@ async def decide_baseline(bid: uuid.UUID, decision: str, body: S.DecisionIn, c: 
         raise not_found("action")
     await flags.require(c, "module.architecture-graph")
     b = await arch.get_baseline(c, bid)
-    await require(c, "architecture", "approve_baseline", str(bid), author_id=str(b["author_id"]))
-    return await arch.decide_baseline(c, bid, decision == "approve", body.note)
+    own = str(b["author_id"]) == str(c.actor_id)
+    if own and decision == "approve":                 # the audited org-admin exception to four-eyes
+        await require(c, "architecture", "self_approve_baseline", str(bid), author_id=str(b["author_id"]))
+    else:
+        await require(c, "architecture", "approve_baseline", str(bid), author_id=str(b["author_id"]))
+    return await arch.decide_baseline(c, bid, decision == "approve", body.note, self_approval=own)
 
 
 @r.post("/projects/{project_id}/manual-elements", status_code=201, tags=["architecture"])
@@ -491,9 +524,9 @@ async def _adr(c, action="view", rid="", **attr):
 
 
 @r.get("/projects/{project_id}/adrs", tags=["decisions"])
-async def adrs_list(c: RequestContext = Depends(project_ctx)):
+async def adrs_list(status: str | None = None, pq: PageQuery = Depends(page_query), c: RequestContext = Depends(project_ctx)):
     await _adr(c)
-    return await decisions.list_(c)
+    return await decisions.page(c, pq, status) if pq.requested else await decisions.list_(c)
 
 
 @r.post("/projects/{project_id}/adrs", status_code=201, tags=["decisions"])
@@ -532,10 +565,12 @@ async def adr_decide(aid: uuid.UUID, decision: str, body: S.AdrDecideIn, c: Requ
 
 # ------------------------------------------------------------------ documents
 @r.get("/projects/{project_id}/documents", tags=["documents"])
-async def documents_list(q: str | None = None, c: RequestContext = Depends(project_ctx)):
+async def documents_list(include_code: bool = False, pq: PageQuery = Depends(page_query), c: RequestContext = Depends(project_ctx)):
     await require(c, "document", "view")
     async with uow(c) as conn:
-        return await docs.list_documents(conn, c, q)
+        if pq.requested:
+            return await docs.page_documents(conn, c, pq, include_code)
+        return await docs.list_documents(conn, c, pq.q or None, include_code=include_code)
 
 
 @r.get("/projects/{project_id}/documents/search", tags=["documents"])
@@ -566,6 +601,12 @@ async def document_upload(file: UploadFile = File(...), c: RequestContext = Depe
                                                   text_body=text, mime=mime, source_kind="upload", connector_id=None, parser=parser)
         await audit.record(conn, c, "document.upload", "document", did, details={"name": file.filename, "mime": mime, "new": created})
     return {"id": did, "created": created, "mime": mime}
+
+
+@r.get("/doc-types", tags=["documents"])
+async def doc_types(c: RequestContext = Depends(get_ctx)):
+    """Document types the Docs tab can generate (evidence = deterministic and cited; ai = drafted from cited evidence)."""
+    return [{"key": d.key, "title": d.title, "audience": d.audience, "description": d.description, "mode": d.mode} for d in DOC_TYPES.values()]
 
 
 @r.get("/projects/{project_id}/generated-docs", tags=["documents"])
@@ -607,9 +648,12 @@ async def gen_manual(doc_id: uuid.UUID, body: S.ManualDocIn, c: RequestContext =
 
 # ------------------------------------------------------------------ drift
 @r.get("/projects/{project_id}/drift", tags=["drift"])
-async def drift_list(status: str | None = None, verdict: str | None = None, c: RequestContext = Depends(project_ctx)):
+async def drift_list(status: str | None = None, verdict: str | None = None, severity: str | None = None, pq: PageQuery = Depends(page_query),
+                     c: RequestContext = Depends(project_ctx)):
     await flags.require(c, "module.drift-engine")
     await require(c, "drift_finding", "view")
+    if pq.requested:
+        return await drift.page_findings(c, pq, status, verdict, severity)
     return await drift.list_findings(c, status, verdict)
 
 
@@ -660,11 +704,64 @@ async def ai_models(c: RequestContext = Depends(get_ctx)):
 
 @r.post("/projects/{project_id}/assistant/ask", tags=["ai"])
 async def ai_ask(body: S.AskIn, c: RequestContext = Depends(project_ctx)):
-    keys = ["module.architecture-assistant", "ai.answers"] + (["module.integration-designer", "ai.integration_design"] if body.mode == "design" else [])
+    keys = ["module.architecture-assistant"] + (["ai.general_chat"] if body.scope == "general" else ["ai.answers"]) \
+        + (["module.integration-designer", "ai.integration_design"] if body.mode == "design" else [])
     await flags.require(c, *keys)
     await require(c, "assistant", "ask")
     model = gateway.resolve_model(body.model, (await iam.get_preferences(c.actor_id)).get("preferred_model"))
-    return await assistant.ask(c, body.question, model, body.mode, body.history)
+    return await assistant.ask(c, body.question, model, body.mode, body.history, scope=body.scope, sources=body.sources,
+                               conversation_id=body.conversation_id)
+
+
+@r.post("/projects/{project_id}/assistant/complete-adr", tags=["ai"])
+async def ai_complete_adr(body: S.CompleteAdrIn, c: RequestContext = Depends(project_ctx)):
+    """One AI suggestion for the whole ADR form (MADR), from everything the author wrote so far."""
+    await flags.require(c, "module.architecture-assistant", "module.adr-workflow", "ai.adr_drafting")
+    await require(c, "assistant", "draft")
+    model = gateway.resolve_model(body.model, (await iam.get_preferences(c.actor_id)).get("preferred_model"))
+    fields = body.model_dump(include={"title", "context", "decision_drivers", "considered_options", "decision_outcome", "consequences"})
+    return await assistant.complete_adr(c, fields, model, instruction=body.instruction, grounded=body.grounded)
+
+
+@r.post("/projects/{project_id}/assistant/extend", tags=["ai"])
+async def ai_extend(body: S.ExtendIn, c: RequestContext = Depends(project_ctx)):
+    await flags.require(c, "module.architecture-assistant", "ai.text_extend")
+    await require(c, "assistant", "draft")
+    model = gateway.resolve_model(body.model, (await iam.get_preferences(c.actor_id)).get("preferred_model"))
+    return await assistant.extend_text(c, body.text, model, mode=body.mode, field=body.field, title=body.title,
+                                       instruction=body.instruction, grounded=body.grounded)
+
+
+@r.get("/projects/{project_id}/assistant/conversations", tags=["ai"])
+async def ai_conversations(c: RequestContext = Depends(project_ctx)):
+    await flags.require(c, "module.architecture-assistant")
+    await require(c, "assistant", "ask")
+    return await assistant.list_conversations(c)
+
+
+@r.get("/projects/{project_id}/assistant/conversations/{cid}", tags=["ai"])
+async def ai_conversation(cid: uuid.UUID, c: RequestContext = Depends(project_ctx)):
+    await flags.require(c, "module.architecture-assistant")
+    await require(c, "assistant", "ask")
+    return await assistant.get_conversation(c, cid)
+
+
+@r.delete("/projects/{project_id}/assistant/conversations/{cid}", status_code=204, tags=["ai"])
+async def ai_conversation_archive(cid: uuid.UUID, c: RequestContext = Depends(project_ctx)):
+    await flags.require(c, "module.architecture-assistant")
+    await require(c, "assistant", "ask")
+    await assistant.archive_conversation(c, cid)
+
+
+@r.get("/projects/{project_id}/assistant/sources", tags=["ai"])
+async def ai_sources(c: RequestContext = Depends(project_ctx)):
+    """Datasources the Data scope can be restricted to (names and kinds only)."""
+    await flags.require(c, "module.architecture-assistant")
+    await require(c, "assistant", "ask")
+    await require(c, "connector", "view")
+    cs = [x for x in await connectors.list_(c) if x["enabled"]]
+    return [{"id": str(x["id"]), "name": x["name"], "kind": x["kind"]} for x in cs] + \
+        [{"id": "uploads", "name": "Uploaded documents", "kind": "uploads"}, {"id": "adrs", "name": "Decision records (ADRs)", "kind": "adrs"}]
 
 
 @r.post("/projects/{project_id}/assistant/draft-adr", tags=["ai"])
@@ -711,3 +808,5 @@ async def notifications_stream(request: Request, p: Principal = Depends(principa
                 yield {"event": "notifications", "data": json.dumps({"unread": len(items), "items": items}, default=str)}
             await asyncio.sleep(3)
     return EventSourceResponse(gen(), ping=15)
+
+

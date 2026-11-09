@@ -29,9 +29,10 @@ class Settings(BaseSettings):
     log_level: str = "info"
     local_source_roots: str = "/sources"
     egress_allow_private_hosts: str = ""
+    egress_insecure_tls_hosts: str = ""   # operator-only: hosts whose TLS certificate is NOT verified (self-signed / bad CN)
     docling_url: str = ""
     max_upload_mb: int = 25
-    default_org_name: str = "Demo Organization"
+    default_org_name: str = "Architecture Twin"
     graph_debounce_s: float = 3.0
 
     @property
@@ -41,6 +42,10 @@ class Settings(BaseSettings):
     @property
     def private_host_allowlist(self) -> set[str]:
         return {h.strip() for h in self.egress_allow_private_hosts.split(",") if h.strip()}
+
+    @property
+    def insecure_tls_hosts(self) -> set[str]:
+        return {h.strip().lower() for h in self.egress_insecure_tls_hosts.split(",") if h.strip()}
 
 
 @lru_cache

@@ -3,6 +3,8 @@
 Denies loopback, link-local (incl. cloud metadata 169.254.169.254), private, multicast and reserved ranges unless the
 host name is explicitly allow-listed by the operator (ARCHTWIN_EGRESS_ALLOW_PRIVATE_HOSTS, e.g. in-cluster services).
 Redirects are never followed automatically: each hop is re-checked. Resolved addresses are checked before connecting.
+TLS certificates are always verified, except for hosts the OPERATOR lists in ARCHTWIN_EGRESS_INSECURE_TLS_HOSTS (e.g. an
+internal tracker with a self-signed certificate); a connector configuration can never turn verification off by itself.
 """
 from __future__ import annotations
 
@@ -56,19 +58,38 @@ def check_url(url: str, allow_hosts: set[str] | None = None, resolver=None) -> N
             raise EgressDenied(f"{host} resolves to a blocked address range")
 
 
+def tls_verify(url: str) -> bool:
+    """False only for operator-listed hosts (ARCHTWIN_EGRESS_INSECURE_TLS_HOSTS)."""
+    return (urlsplit(url).hostname or "").lower().rstrip(".") not in settings().insecure_tls_hosts
+
+
 async def guarded_get(url: str, *, headers: dict | None = None, timeout: float = 20, max_bytes: int = 20_000_000,
-                      allow_hosts: set[str] | None = None) -> httpx.Response:
+                      allow_hosts: set[str] | None = None, params: dict | None = None) -> httpx.Response:
     for _ in range(MAX_REDIRECTS + 1):
         try:
             check_url(url, allow_hosts)
         except EgressDenied as e:
             raise problem(422, "AT-EGRESS-001", "Egress denied", str(e)) from e
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as c:
-            r = await c.get(url, headers=headers or {})
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, verify=tls_verify(url)) as c:
+            r = await c.get(url, headers=headers or {}, params=params)
         if r.is_redirect and "location" in r.headers:
-            url = urljoin(url, r.headers["location"])
+            url, params = urljoin(str(r.url), r.headers["location"]), None
             continue
         if len(r.content) > max_bytes:
             raise problem(422, "AT-EGRESS-002", "Response too large")
         return r
     raise problem(422, "AT-EGRESS-003", "Too many redirects")
+
+
+async def guarded_login(url: str, *, json: dict, headers: dict | None = None, timeout: float = 20) -> httpx.Response:
+    """POST for provider *authentication endpoints only* (e.g. Taiga /auth) — never for writing provider data.
+    Same egress checks as guarded_get; redirects are refused (credentials must never be re-sent to another hop)."""
+    try:
+        check_url(url)
+    except EgressDenied as e:
+        raise problem(422, "AT-EGRESS-001", "Egress denied", str(e)) from e
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, verify=tls_verify(url)) as c:
+        r = await c.post(url, json=json, headers=headers or {})
+    if r.is_redirect:
+        raise problem(422, "AT-EGRESS-003", "Login endpoint redirected", "credentials are not re-sent to a redirect target")
+    return r

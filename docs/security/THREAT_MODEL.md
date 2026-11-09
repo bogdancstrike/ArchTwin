@@ -23,6 +23,9 @@ Architecture diagrams, deployment topology, network boundaries, source code meta
 | Connector token theft | secret envelope encryption, KMS/Vault provider, short-lived tokens, no browser/API returns | Search API/logs/traces for planted canary secret |
 | Webhook spoofing | HMAC/signatures, replay window, provider IDs, exact path mapping | Invalid signature and replayed events rejected |
 | SSRF through connectors/files | DNS rebind defense, IP allow/deny, redirects revalidation, egress proxy | Attempt to fetch IMDS/loopback/RFC1918 targets |
+| Weakened TLS to internal providers | TLS verification can be skipped only for hosts the operator lists (`ARCHTWIN_EGRESS_INSECURE_TLS_HOSTS`); connector config cannot; the connector test warns | Config with an unlisted self-signed host fails verification |
+| Local filesystem disclosure via local-directory datasources | Only operator-mounted roots (read-only); paths resolved before the root check (no `..`/symlink escape); folder picker returns names only and needs Cerbos `connector:create`; secret files never read | Browse `/etc`, `../`, symlink out of a root → 422; viewer → 403 |
+| Credential replay on provider login (Taiga) | `guarded_login` refuses redirects; password sealed, exchanged per scan, never stored in observations | Login 302 to another host is refused |
 | Malicious document | MIME/content validation, AV scan, sandbox Docling, decompression limits | Zip bomb / malformed PDF cannot exhaust worker |
 | XSS and diagram injection | CSP, sanitized Markdown/HTML, no untrusted Mermaid HTML labels | HTML/script in issue title not executed |
 | Supply chain compromise | SBOM, signature verification, dependency pinning, CI scanning, plugin sandbox | Unapproved connector plugin fails activation |

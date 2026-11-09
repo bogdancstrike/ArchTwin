@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import { X } from "lucide-react";
-import { useEffect, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type PointerEvent as ReactPointerEvent, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 
 export const cn = clsx;
 
@@ -53,15 +53,19 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 }
 
 export function Dialog({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
-    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const k = (e: KeyboardEvent) => {            // stacked dialogs: Escape closes only the top-most one
+      const all = document.querySelectorAll('[role="dialog"]');
+      if (e.key === "Escape" && all[all.length - 1] === ref.current) onClose();
+    };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, [open, onClose]);
   if (!open) return null;
   return <div className="fixed inset-0 z-50 grid place-items-center bg-ink/35 p-4 backdrop-blur-[2px]" onMouseDown={onClose}>
-    <div role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => e.stopPropagation()}
+    <div ref={ref} role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => e.stopPropagation()}
       className={cn("fade-up max-h-[90vh] w-full overflow-auto rounded-xl border border-rule bg-card shadow-lift", wide ? "max-w-3xl" : "max-w-lg")}>
       <header className="flex items-center justify-between border-b border-rule px-4 py-3"><h2 className="serif text-xl">{title}</h2>
         <button aria-label="Close" onClick={onClose} className="text-muted hover:text-ink"><X size={18} /></button></header>
@@ -133,8 +137,43 @@ export function ErrorBox({ error }: { error: unknown }) {
   return <div role="alert" className="rounded-md border border-bad/30 bg-bad/10 p-3 text-sm text-bad">{e.message ?? String(error)}{e.problem?.code && <span className="ml-2 font-mono text-xs opacity-70">{e.problem.code}</span>}</div>;
 }
 
+/** Columns start equally split and can be resized by dragging the right edge of a header cell (keyboard: ←/→ on the handle). */
 export function Table({ head, children }: { head: ReactNode[]; children: ReactNode }) {
-  return <div className="overflow-auto"><table className="w-full text-sm"><thead><tr className="border-b border-rule text-left">{head.map((h, i) => <th key={i} className="eyebrow px-2 py-2 font-medium">{h}</th>)}</tr></thead><tbody>{children}</tbody></table></div>;
+  const [widths, setWidths] = useState<number[] | null>(null);       // percentages; null = equal split
+  const ref = useRef<HTMLTableElement>(null);
+  const n = head.length;
+  const w = widths && widths.length === n ? widths : Array.from({ length: n }, () => 100 / n);
+  useLayoutEffect(() => {          // Chrome does not always re-run fixed table layout on a cell width change: force it (pre-paint)
+    const t = ref.current;
+    if (!t || !widths) return;
+    t.style.display = "none";
+    void t.offsetWidth;
+    t.style.display = "";
+  }, [widths]);
+  const resize = (i: number, deltaPct: number) => {
+    if (i >= n - 1) return;
+    setWidths((prev) => {                         // functional: successive pointer moves accumulate
+      const next = prev && prev.length === n ? [...prev] : Array.from({ length: n }, () => 100 / n);
+      const d = Math.max(-(next[i] - 5), Math.min(next[i + 1] - 5, deltaPct));     // keep every column >= 5 %
+      next[i] += d; next[i + 1] -= d;
+      return next;
+    });
+  };
+  const start = (i: number) => (e: ReactPointerEvent) => {
+    e.preventDefault();
+    const total = ref.current?.getBoundingClientRect().width || 1;
+    let last = e.clientX;
+    const move = (ev: PointerEvent) => { resize(i, ((ev.clientX - last) / total) * 100); last = ev.clientX; };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
+  return <div className="overflow-auto"><table ref={ref} className="w-full table-fixed text-sm">
+    <thead><tr className="border-b border-rule text-left">{head.map((h, i) => <th key={i} style={{ width: `${w[i]}%` }} className="eyebrow relative truncate px-2 py-2 font-medium">{h}
+      {i < n - 1 && <span role="separator" aria-orientation="vertical" aria-label="Resize column" tabIndex={0} onPointerDown={start(i)}
+        onKeyDown={(e) => { if (e.key === "ArrowLeft") resize(i, -2); if (e.key === "ArrowRight") resize(i, 2); }}
+        onDoubleClick={() => setWidths(null)}
+        className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize select-none hover:bg-accent/40 focus:bg-accent/40 focus:outline-none" />}</th>)}</tr></thead>
+    <tbody className="[&_td]:break-words">{children}</tbody></table></div>;
 }
 
 export const ago = (iso?: string | null) => {

@@ -9,6 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from archtwin.api.routers import ROUTERS
 from archtwin.api.routes import r as v1
 from archtwin.common import authz
 from archtwin.common.db import dispose, engine
@@ -78,3 +79,5 @@ async def ready():
 
 
 app.include_router(v1)
+for router in ROUTERS:
+    app.include_router(router)

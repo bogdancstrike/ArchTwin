@@ -4,11 +4,12 @@ import { Background, Controls, MarkerType, MiniMap, ReactFlow, ReactFlowProvider
 import { ChevronRight, GitCompare, RotateCcw, Table2, Workflow } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Badge, Button, Card, cn, Empty, ErrorBox, OriginBadges, Select, Spinner, Table } from "@/components/ui";
+import { Badge, Button, Card, Empty, ErrorBox, Input, OriginBadges, Select, Spinner, Table, cn } from "@/components/ui";
 import { api, download } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
-import type { Evidence, Snapshot, View } from "@/lib/types";
-import { C4Edge, C4Node, type EdgeData, type NodeData } from "@/diagram/elements";
+import { ElementDetail, EvidenceList } from "@/components/ElementInspector";
+import type { Snapshot, View } from "@/lib/types";
+import { C4Edge, C4Node, ZoomContext, type EdgeData, type NodeData } from "@/diagram/elements";
 import { layoutView, NODE_H, NODE_W } from "@/diagram/layout";
 
 const nodeTypes = { c4: C4Node };
@@ -25,13 +26,28 @@ function viewPath(projectId: string, key: string, s: Search) {
   return `/projects/${projectId}/views/${key}${q.toString() ? "?" + q : ""}`;
 }
 
+function ElementSearch({ projectId, onPick }: { projectId: string; onPick: (h: { key: string; parent_view: string }) => void }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const r = useApi<any[]>(["el-search", projectId, q], q.trim().length >= 2 ? `/projects/${projectId}/elements/search?q=${encodeURIComponent(q.trim())}` : null);
+  return <div className="relative">
+    <Input aria-label="Search the architecture" placeholder="Search services, code, tables…" className="!w-64 text-xs" value={q}
+      onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
+      onKeyDown={(e) => { if (e.key === "Enter" && r.data?.[0]) { onPick(r.data[0]); setOpen(false); } if (e.key === "Escape") setOpen(false); }} />
+    {open && q.trim().length >= 2 && <ul role="listbox" aria-label="Search results" className="absolute left-0 z-30 mt-1 max-h-80 w-96 overflow-auto rounded-lg border border-rule bg-card p-1 shadow-lift">
+      {r.data?.length === 0 && <li className="p-2 text-xs text-soft">Nothing matches.</li>}
+      {r.data?.map((h) => <li key={h.key}><button role="option" aria-selected={false} onMouseDown={() => { onPick(h); setOpen(false); }}
+        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-paper-2">
+        <Badge tone="muted">{h.kind}</Badge><span className="truncate">{h.name}</span><span className="ml-auto truncate font-mono text-[10px] text-soft">{h.path || h.technology}</span></button></li>)}
+    </ul>}
+  </div>;
+}
+
 function EvidencePanel({ projectId, sel, onClose, onZoom }: { projectId: string; sel: { kind: "node" | "edge"; data: NodeData | EdgeData } | null; onClose: () => void; onZoom: (k: string) => void }) {
   const key = !sel ? null : sel.kind === "node" ? ((sel.data as NodeData).kind === "group" ? null : sel.data.id) : (sel.data as EdgeData).members[0];
-  const obs = useApi<{ id: string; origin: string; source_ref: string; source_revision: string; observed_at: string; parser_version: string; confidence: string; evidence: Evidence["span"]; attributes: Record<string, unknown> }[]>(
-    ["obs", projectId, key], key ? `/projects/${projectId}/observations?key=${encodeURIComponent(key)}` : null);
   if (!sel) return null;
   const d = sel.data;
-  return <aside aria-label="Evidence" className="absolute right-3 top-3 bottom-3 z-10 w-96 overflow-auto rounded-lg border border-rule bg-card shadow-lg">
+  return <aside aria-label="Evidence" className="absolute right-3 top-3 bottom-3 z-10 w-96 overflow-auto rounded-lg border border-rule bg-card shadow-lg xl:w-[34rem]">
     <header className="flex items-start justify-between border-b border-rule p-3">
       <div><div className="eyebrow">{sel.kind === "node" ? (d as NodeData).kind : `${(d as EdgeData).kind} relationship`}</div>
         <h3 className="font-semibold">{sel.kind === "node" ? (d as NodeData).name : (d as EdgeData).label}</h3>
@@ -44,13 +60,8 @@ function EvidencePanel({ projectId, sel, onClose, onZoom }: { projectId: string;
       {sel.kind === "node" && (d as NodeData).zoom && <Button size="sm" onClick={() => onZoom((d as NodeData).zoom!)}>Zoom in ›</Button>}
       {sel.kind === "node" && (d as NodeData).kind === "group" && <div><div className="eyebrow mb-1">Members</div>
         <ul className="list-disc pl-5 text-xs">{(d as NodeData).member_keys?.map((m) => <li key={m} className="font-mono">{m}</li>)}</ul></div>}
-      {key && <div><div className="eyebrow mb-1">Evidence ({obs.data?.length ?? "…"} observations)</div>
-        {obs.isLoading && <Spinner />}
-        <ul className="space-y-2">{obs.data?.slice(0, 12).map((o) => <li key={o.id} className="rounded border border-rule p-2 text-xs">
-          <div className="flex justify-between"><OriginBadges origins={[o.origin]} /><span className="text-soft">{new Date(o.observed_at).toLocaleString()}</span></div>
-          <div className="mt-1 break-all font-mono">{o.source_ref || "—"}{o.evidence?.line_start ? `:${o.evidence.line_start}${o.evidence.line_end && o.evidence.line_end !== o.evidence.line_start ? "-" + o.evidence.line_end : ""}` : ""}</div>
-          <div className="mt-1 text-soft">rev <span className="font-mono">{(o.source_revision || "live").slice(0, 12)}</span> · {o.parser_version} · conf {Number(o.confidence).toFixed(2)}</div>
-        </li>)}</ul></div>}
+      {sel.kind === "node" && key && <ElementDetail projectId={projectId} elementKey={key} />}
+      {key && <EvidenceList projectId={projectId} elementKey={key} />}
     </div>
   </aside>;
 }
@@ -70,6 +81,7 @@ function Canvas({ projectId }: { projectId: string }) {
   const [sel, setSel] = useState<{ kind: "node" | "edge"; data: NodeData | EdgeData } | null>(null);
   const [lint, setLint] = useState<{ ok: boolean; violations: { rule: string; detail: string }[] } | null>(null);
   const zooming = useRef(false);
+  const focus = useRef<string | null>(null);
   const moved = useRef<Record<string, { x: number; y: number }>>({});
 
   useEffect(() => {
@@ -98,6 +110,13 @@ function Canvas({ projectId }: { projectId: string }) {
           markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: e.focal ? "#eb6c36" : e.kind === "calls" ? "#2e5aa8" : "#4f5d75" } };
       });
       setNodes(ns); setEdges(es);
+      const f = focus.current ? ns.find((n) => n.id === focus.current) : undefined;
+      focus.current = null;
+      if (f) {
+        setSel({ kind: "node", data: f.data as unknown as NodeData });
+        requestAnimationFrame(() => rf.setCenter(f.position.x + NODE_W / 2, f.position.y + NODE_H / 2, { zoom: 1.4, duration: 300 }));
+        return;
+      }
       requestAnimationFrame(() => {
         if (zooming.current && !reduced()) {      // shared-element zoom: arrive slightly zoomed-in, then settle
           rf.setViewport({ x: 0, y: 0, zoom: 1.8 });
@@ -166,6 +185,9 @@ function Canvas({ projectId }: { projectId: string }) {
           {i < v.breadcrumbs.length - 1 ? <button className="text-link hover:underline" onClick={() => setSearch({ view: b.key })}>{b.title}</button> : <span className="font-semibold">{b.title}</span>}</span>)}
       </nav>
       <Badge tone="muted">L{v.level}</Badge>
+      <ElementSearch projectId={projectId} onPick={(h) => { focus.current = h.key; if (h.parent_view === viewKey) { const n = nodes.find((x) => x.id === h.key);
+        if (n) { setSel({ kind: "node", data: n.data as unknown as NodeData }); rf.setCenter(n.position.x + NODE_W / 2, n.position.y + NODE_H / 2, { zoom: 1.4, duration: 300 }); focus.current = null; return; } }
+        setSearch({ view: h.parent_view }); }} />
       <Badge tone={v.budget.primary <= v.budget.max ? "ok" : "warn"} title="primary nodes / budget">{v.budget.primary}/{v.budget.max} primary</Badge>
       {(v as any).hidden_edges > 0 && <Badge tone="muted" title={(v as any).hidden_reason}>{(v as any).hidden_edges} weak deps hidden</Badge>}
       {lint && <Badge tone={lint.ok ? "ok" : "bad"} title={lint.violations.map((x) => `${x.rule}: ${x.detail}`).join("\n")}>lint {lint.ok ? "pass" : `${lint.violations.length} issues`}</Badge>}
@@ -200,7 +222,7 @@ function Canvas({ projectId }: { projectId: string }) {
       </Table><h3 className="eyebrow mt-6 mb-2">Relationships</h3><Table head={["From", "Relation", "To", "Confidence"]}>
         {v.edges.map((e) => <tr key={e.id} className="border-b border-rule"><td className="px-2 py-1">{v.nodes.find((n) => n.id === e.source)?.name}</td><td className="px-2 font-mono text-xs">{e.label}</td><td className="px-2">{v.nodes.find((n) => n.id === e.target)?.name}</td><td className="px-2">{e.confidence.toFixed(2)}</td></tr>)}</Table></div>
       : <div className="relative min-h-0 flex-1">
-        <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={0.1} maxZoom={3} proOptions={{ hideAttribution: true }}
+        <ZoomContext.Provider value={zoomInto}><ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={0.1} maxZoom={3} proOptions={{ hideAttribution: true }}
           onNodesChange={(chs) => setNodes((ns) => ns.map((n) => { const c = chs.find((x) => x.type === "position" && x.id === n.id) as { position?: { x: number; y: number } } | undefined;
             if (c?.position) { moved.current[n.id] = c.position; return { ...n, position: c.position }; } const s = chs.find((x) => x.type === "select" && x.id === n.id) as { selected?: boolean } | undefined; return s ? { ...n, selected: s.selected } : n; }))}
           onNodeClick={(_, n) => setSel({ kind: "node", data: n.data as unknown as NodeData })} onEdgeClick={(_, e) => setSel({ kind: "edge", data: e.data as unknown as EdgeData })}
@@ -208,7 +230,7 @@ function Canvas({ projectId }: { projectId: string }) {
           <Background gap={24} color="var(--color-rule)" />
           <Controls showInteractive={false} />
           <MiniMap pannable zoomable nodeColor={(n) => ((n.data as unknown as NodeData).focal ? "#eb6c36" : "#bfc0c0")} />
-        </ReactFlow>
+        </ReactFlow></ZoomContext.Provider>
         <EvidencePanel projectId={projectId} sel={sel} onClose={() => setSel(null)} onZoom={(k) => zoomInto(k, sel?.data.id)} />
         <div className="pointer-events-none absolute bottom-3 left-14 rounded bg-card/90 px-2 py-1 font-mono text-[9px] text-soft">
           double-click / Enter to zoom · Backspace up · solid = observed · dashed = depends-on / inferred · accent = focal</div>
@@ -220,6 +242,6 @@ export function ArchitecturePage({ projectId }: { projectId: string }) {
   const snaps = useApi<Snapshot[]>(["snapshots", projectId], `/projects/${projectId}/snapshots`, { refetchInterval: 10_000 });
   if (snaps.isLoading) return <Spinner />;
   if (snaps.error) return <div className="p-6"><ErrorBox error={snaps.error} /></div>;
-  if (!snaps.data?.length) return <div className="p-6"><Card><Empty title="No architecture yet">Add a connector in <b>Inventory</b> and run a scan — the graph, C4 diagrams and docs are generated from the evidence.</Empty></Card></div>;
+  if (!snaps.data?.length) return <div className="p-6"><Card><Empty title="No architecture yet">Add a datasource in <b>Datasources</b> and run a scan — the graph, C4 diagrams and docs are generated from the evidence.</Empty></Card></div>;
   return <ReactFlowProvider><div className={cn("h-full")}><Canvas projectId={projectId} /></div></ReactFlowProvider>;
 }
