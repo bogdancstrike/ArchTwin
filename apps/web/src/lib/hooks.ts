@@ -18,3 +18,18 @@ export function useAction<TIn, TOut = unknown>(fn: (v: TIn) => Promise<TOut>, in
     onError: (e: Error) => toast.error(e.message),
   });
 }
+
+
+/** Starred projects (per user, stored in preferences): the sidebar lists only these. Optimistic toggle. */
+export function useFavorites() {
+  const me = useMe();
+  const qc = useQueryClient();
+  const favs: string[] = (me.data?.preferences as { favorite_projects?: string[] } | undefined)?.favorite_projects ?? [];
+  const toggle = async (id: string) => {
+    const next = favs.includes(id) ? favs.filter((x) => x !== id) : [...favs, id];
+    qc.setQueryData(["me"], (old: Me | undefined) => old ? { ...old, preferences: { ...old.preferences, favorite_projects: next } } : old);
+    try { await api("/me/preferences", { method: "PUT", json: { favorite_projects: next } }); }
+    catch (e) { void qc.invalidateQueries({ queryKey: ["me"] }); toast.error((e as Error).message); }
+  };
+  return { favs, isFav: (id: string) => favs.includes(id), toggle };
+}

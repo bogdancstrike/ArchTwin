@@ -129,6 +129,7 @@ class TokensIn(Strict):
 class PrefsIn(Strict):
     preferred_model: str | None = None
     theme: Literal["light", "dark", "system"] | None = None
+    favorite_projects: list[uuid.UUID] | None = Field(default=None, max_length=200)    # starred projects (sidebar)
 
 
 class SpendLimitItem(Strict):
@@ -152,3 +153,7 @@ class ExtendIn(Strict):
     instruction: str = Field(default="", max_length=1000)
     grounded: bool = True
     model: str | None = None
+
+
+class DeleteProjectIn(Strict):
+    confirm: str = Field(min_length=1, max_length=120)      # must equal the project slug (server-side double confirmation)

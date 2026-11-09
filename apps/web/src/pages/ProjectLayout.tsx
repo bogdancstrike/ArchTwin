@@ -1,6 +1,7 @@
 import { Link, Outlet, useParams } from "@tanstack/react-router";
 import { AlertTriangle, Bot, FileText, LayoutDashboard, Network, Radar, ScrollText, Settings } from "lucide-react";
 import { Avatar, Badge, ErrorBox, Spinner } from "@/components/ui";
+import { FavoriteStar } from "@/components/FavoriteStar";
 import { useApi } from "@/lib/hooks";
 import type { Project } from "@/lib/types";
 
@@ -22,6 +23,7 @@ export function ProjectLayout() {
           <div className="flex items-center gap-2"><Link to="/projects" className="eyebrow hover:text-link">Projects</Link><span className="eyebrow">/</span>
             <span className="eyebrow">{d.my_role?.replace("_", " ") ?? "member"}</span></div>
           <div className="flex items-baseline gap-3"><h1 className="serif truncate text-3xl leading-tight">{d.title}</h1>
+            <FavoriteStar projectId={d.id} title={d.title} size={18} className="self-center" />
             <span className="hidden gap-1 md:flex">{d.tags.map((t) => <Badge key={t} tone="link">{t}</Badge>)}</span></div>
         </div>
         {d.purpose && <p className="ml-auto hidden max-w-md text-right text-sm text-muted lg:block">{d.purpose}</p>}

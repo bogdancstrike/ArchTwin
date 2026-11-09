@@ -261,7 +261,7 @@ class RepoAnalyzer:
                                        [f"component:{s}/" for s in systems] + [f"endpoint:{s}/" for s in systems] +
                                        [f"code:{s}/" for s in systems] + [f"table:{s}/code/" for s in systems]}
         # kafka topics are only covered where the code was analyzed: declared topics absent in code are UNKNOWN, not drift
-        self.r.stats = {"files": len(self.files), "compose_files": len(compose_files), "services": len(self.services),
+        self.r.stats = {**self.r.stats, "files": len(self.files), "compose_files": len(compose_files), "services": len(self.services),
                         "observations": len(self.r.observations), "documents": len(self.r.documents)}
         return self.r
 

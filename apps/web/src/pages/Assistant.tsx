@@ -43,10 +43,10 @@ function SourcePicker({ projectId, value, onChange }: { projectId: string; value
     return () => window.removeEventListener("mousedown", h);
   }, [open]);
   return <div className="relative" ref={ref}>
-    <Button size="sm" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-haspopup="listbox"><Database size={13} /> {value.length ? `${value.length} source(s)` : "All sources"}</Button>
+    <Button size="sm" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-haspopup="listbox"><Database size={13} /> {value.length ? `${value.length} source(s)` : "All project sources"}</Button>
     {open && <div role="listbox" aria-multiselectable="true" aria-label="Datasources for this answer" className="absolute right-0 z-20 mt-1 w-72 rounded-lg border border-rule bg-card p-1.5 shadow-lift">
       <button className={cn("mb-1 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm", !value.length ? "bg-paper-2 font-medium" : "hover:bg-paper-2")}
-        onClick={() => onChange([])}>{!value.length && <Check size={14} className="text-ok" />}<span className="flex-1">All datasources</span></button>
+        onClick={() => onChange([])}>{!value.length && <Check size={14} className="text-ok" />}<span className="flex-1">All datasources in this project</span></button>
       {(src.data ?? []).map((s) => { const on = value.includes(s.id);
         return <button key={s.id} role="option" aria-selected={on} onClick={() => onChange(on ? value.filter((x) => x !== s.id) : [...value, s.id])}
           className={cn("flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-paper-2", on && "bg-paper-2")}>

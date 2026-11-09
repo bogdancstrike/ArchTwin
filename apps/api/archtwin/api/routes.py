@@ -53,7 +53,7 @@ async def me(c: RequestContext = Depends(get_ctx)):
 
 @r.put("/me/preferences", tags=["identity"])
 async def set_prefs(body: S.PrefsIn, c: RequestContext = Depends(get_ctx)):
-    prefs = body.model_dump(exclude_none=True)
+    prefs = body.model_dump(exclude_none=True, mode="json")
     if "preferred_model" in prefs:
         gateway.resolve_model(prefs["preferred_model"], None)       # validate server-side
     return await iam.set_preferences(c.actor_id, prefs)
@@ -141,6 +141,12 @@ async def create_project(body: S.ProjectIn, request: Request, c: RequestContext 
 @r.get("/projects/{project_id}", tags=["projects"])
 async def get_project(c: RequestContext = Depends(project_ctx)):
     return await projects.get_project(c)
+
+
+@r.delete("/projects/{project_id}", tags=["projects"])
+async def delete_project(body: S.DeleteProjectIn, c: RequestContext = Depends(project_ctx)):
+    await require(c, "project", "delete", str(c.project_id))
+    return await projects.delete_project(c, body.confirm)
 
 
 @r.patch("/projects/{project_id}", tags=["projects"])

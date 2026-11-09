@@ -1,5 +1,5 @@
 export interface Me { id: string; username: string; display_name: string; org_id: string; org_role: string; project_roles: Record<string, string>;
-  orgs: { id: string; name: string; role: string }[]; preferences: { preferred_model?: string; theme?: string } }
+  orgs: { id: string; name: string; role: string }[]; preferences: { preferred_model?: string; theme?: string; favorite_projects?: string[] } }
 export interface Project { id: string; slug: string; title: string; purpose: string; tags: string[]; status: string; revision: number;
   created_at: string; my_role?: string | null; environments?: { id: string; name: string }[] }
 export interface Freshness { status: "current" | "stale" | "incomplete" | "unknown"; reason?: string; age_s?: number }

@@ -1,7 +1,7 @@
 /** Small, dependency-free SVG charts following the dataviz method: categorical hues in fixed order (never cycled; extra
  * series fold into "Other"), thin marks with a 2px surface gap, recessive axes, a legend for >= 2 series, a hover tooltip
  * per mark, and a table view next to every chart (contrast relief). Status colors are reserved and ship with a label. */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/components/ui";
 
 export const SERIES = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--series-6)"];
@@ -28,9 +28,23 @@ function topPath(x: number, y: number, w: number, h: number, r: number): string 
 }
 
 /** Stacked bars over a categorical x (days). `format` renders values in the tooltip and on the y-axis. */
-export function StackedBars({ rows, keys, labels, height = 220, format, ariaLabel }: {
+/** Width of an element, tracked with ResizeObserver (charts draw in real pixels: no viewBox scaling, fixed height). */
+function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
+  const ref = useRef<T>(null);
+  const [w, setW] = useState(640);
+  useEffect(() => {
+    if (!ref.current) return;
+    const ro = new ResizeObserver(([e]) => setW(Math.max(240, Math.floor(e.contentRect.width))));
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, w];
+}
+
+export function StackedBars({ rows, keys, labels, height = 180, format, ariaLabel }: {
   rows: StackRow[]; keys: string[]; labels?: Record<string, string>; height?: number; format: (v: number) => string; ariaLabel: string;
 }) {
+  const [box, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<{ x: string; key: string; v: number; px: number; py: number } | null>(null);
   const xs = useMemo(() => [...new Set(rows.map((r) => r.x))].sort(), [rows]);
   const top = keys.slice(0, SERIES.length);
@@ -47,15 +61,15 @@ export function StackedBars({ rows, keys, labels, height = 220, format, ariaLabe
   }, [rows, top.join("|")]);                                   // eslint-disable-line react-hooks/exhaustive-deps
   const total = (x: string) => Object.values(stack[x] ?? {}).reduce((a, b) => a + b, 0);
   const max = Math.max(0, ...xs.map(total));
-  const W = 720, H = height, L = 56, B = 22, T = 8;
+  const W = width, H = height, L = 52, B = 20, T = 8;
   const step = xs.length ? (W - L - 8) / xs.length : 0;
-  const bw = Math.max(3, Math.min(28, step - 4));
+  const bw = Math.max(3, Math.min(22, step * 0.7));
   const y = (v: number) => H - B - (max ? (v / max) * (H - B - T) : 0);
   const ticks = max ? [0, max / 2, max] : [0];
-  if (!xs.length) return <p className="py-10 text-center text-sm text-soft">No AI calls in this period.</p>;
+  if (!xs.length) return <div ref={box}><p className="py-10 text-center text-sm text-soft">No AI calls in this period.</p></div>;
   const label = (k: string) => (k === "__other" ? "Other" : labels?.[k] ?? k);
-  return <div className="relative">
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={ariaLabel} onMouseLeave={() => setHover(null)}>
+  return <div className="relative" ref={box}>
+    <svg width={W} height={H} className="block" role="img" aria-label={ariaLabel} onMouseLeave={() => setHover(null)}>
       {ticks.map((t) => <g key={t}><line x1={L} x2={W - 4} y1={y(t)} y2={y(t)} stroke="var(--color-rule)" />
         <text x={L - 6} y={y(t) + 3} textAnchor="end" fontSize={10} fill="var(--color-soft)">{format(t)}</text></g>)}
       {xs.map((x, i) => {
@@ -75,14 +89,14 @@ export function StackedBars({ rows, keys, labels, height = 220, format, ariaLabe
               opacity={hover && (hover.x !== x || hover.key !== k) ? 0.55 : 1} onMouseEnter={show} onFocus={show}
               tabIndex={0} aria-label={`${x} ${label(k)}: ${format(v)}`} />;
           })}
-          {(i % Math.ceil(xs.length / 8) === 0 || i === xs.length - 1) &&
+          {(i % Math.max(1, Math.ceil(xs.length / Math.max(2, Math.floor(W / 70)))) === 0 || i === xs.length - 1) &&
             <text x={cx + bw / 2} y={H - 6} textAnchor="middle" fontSize={10} fill="var(--color-soft)">{x.slice(5)}</text>}
         </g>;
       })}
       <line x1={L} x2={W - 4} y1={H - B} y2={H - B} stroke="var(--color-muted)" strokeOpacity={0.4} />
     </svg>
     {hover && <div role="tooltip" className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border border-rule bg-card px-2 py-1 text-xs shadow-lift"
-      style={{ left: `${(hover.px / W) * 100}%`, top: `${(hover.py / H) * 100}%` }}>
+      style={{ left: hover.px, top: hover.py - 4 }}>
       <div className="font-medium text-ink">{hover.x}</div>
       <div className="flex items-center gap-1.5 text-muted"><span className="inline-block h-2 w-2 rounded-sm" style={{ background: colors[hover.key] }} />
         {label(hover.key)}: <b className="text-ink">{format(hover.v)}</b></div>
@@ -106,3 +120,17 @@ export function CapBar({ pct, warnAt = 0.8 }: { pct: number; warnAt?: number }) 
 
 export const usd = (v: number) => (v === 0 ? "$0" : v < 0.01 ? `$${v.toFixed(4)}` : v < 10 ? `$${v.toFixed(2)}` : `$${Math.round(v).toLocaleString()}`);
 export const compact = (v: number) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : String(Math.round(v)));
+
+
+/** Ranked horizontal bars (magnitude by one categorical: sorted, single hue, value labels). */
+export function RankBars({ items, format, max = 6 }: { items: { key: string; label: string; value: number; hint?: string }[]; format: (v: number) => string; max?: number }) {
+  const top = items.slice(0, max);
+  const rest = items.slice(max).reduce((a, b) => a + b.value, 0);
+  const all = rest > 0 ? [...top, { key: "__other", label: `Other (${items.length - max})`, value: rest }] : top;
+  const hi = Math.max(0, ...all.map((i) => i.value));
+  if (!all.length) return <p className="py-4 text-sm text-soft">No data.</p>;
+  return <ul className="space-y-2">{all.map((i) => <li key={i.key} className="text-sm">
+    <div className="flex items-baseline justify-between gap-2"><span className="truncate" title={i.label}>{i.label}</span><span className="num shrink-0 text-xs text-muted">{format(i.value)}</span></div>
+    <div className="mt-1 h-1.5 rounded-full bg-paper-2"><div className="h-1.5 rounded-full" style={{ width: `${hi ? Math.max(2, (i.value / hi) * 100) : 0}%`, background: "var(--series-1)" }} /></div>
+  </li>)}</ul>;
+}
