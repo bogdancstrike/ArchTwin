@@ -21,3 +21,4 @@ playwright-report/
 coverage.xml
 htmlcov/
 .e2e-sources/
+.claude/worktrees/
