@@ -1,4 +1,4 @@
-import { Database, GitFork, Network, Radio, Search, Workflow } from "lucide-react";
+import { Database, GitFork, Globe, Network, Radio, Search, Workflow } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Card, Empty, ErrorBox, Input, OriginBadges, Skeleton, Table, cn } from "@/components/ui";
 import { useApi } from "@/lib/hooks";
@@ -6,11 +6,12 @@ import { useApi } from "@/lib/hooks";
 interface Step { from: string; to: string; kind: string; edge: string; label: string; protocol: string; origins: string[]; confidence: number;
   inferred_only: boolean; documented: boolean; evidence: number }
 interface Participant { key: string; name: string; kind: string; subtype: string; system: string; technology: string }
-interface Flow { id: string; kind: "request" | "event" | "data"; name: string; entry: string | null; steps: Step[]; participants: Participant[];
+interface Flow { id: string; kind: "request" | "endpoint" | "event" | "data"; name: string; entry: string | null; steps: Step[]; participants: Participant[];
   systems: string[]; distributed: boolean; confidence: number; inferred: boolean; documented: boolean; length: number }
 
 const KIND: Record<Flow["kind"], { label: string; icon: typeof Network }> = { request: { label: "Request", icon: Network },
-  event: { label: "Event", icon: Radio }, data: { label: "Data", icon: Database } };
+  endpoint: { label: "Endpoint", icon: Globe }, event: { label: "Event", icon: Radio }, data: { label: "Data", icon: Database } };
+const kindOf = (k: string) => KIND[k as Flow["kind"]] ?? { label: k, icon: Workflow };      // unknown kinds never crash the page
 
 /** Sequence diagram in real pixels: lifelines per participant (grouped by system), numbered arrows top-down. */
 function Sequence({ flow, active, onStep }: { flow: Flow; active: number | null; onStep: (i: number) => void }) {
@@ -78,13 +79,13 @@ export function FlowsPage({ projectId }: { projectId: string }) {
     <Card eyebrow={f.data ? `${f.data.total} recognized automatically` : "Recognizing…"} title={<span className="flex items-center gap-2"><Workflow size={16} /> Flows</span>}>
       <div className="relative mb-2"><Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-soft" />
         <Input aria-label="Search flows" placeholder="Search flows or participants" className="!pl-7" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-      <div role="radiogroup" aria-label="Flow kind" className="mb-2 flex flex-wrap gap-1">{[["", "All"], ["request", "Request"], ["event", "Event"], ["data", "Data"]].map(([k, l]) =>
+      <div role="radiogroup" aria-label="Flow kind" className="mb-2 flex flex-wrap gap-1">{[["", "All"], ["endpoint", "Endpoint"], ["request", "Request"], ["event", "Event"], ["data", "Data"]].map(([k, l]) =>
         <button key={k} role="radio" aria-checked={kind === k} onClick={() => setKind(k)}
           className={cn("rounded-full border px-2.5 py-0.5 text-xs", kind === k ? "border-ink bg-ink text-paper" : "border-rule hover:border-muted")}>
           {l}{k && f.data ? ` ${f.data.counts[k] ?? 0}` : ""}</button>)}</div>
       <label className="mb-2 flex items-center gap-1.5 text-xs text-muted"><input type="checkbox" checked={onlyDist} onChange={(e) => setOnlyDist(e.target.checked)} /> Only distributed (spanning systems)</label>
       {!f.data ? <Skeleton className="h-64" /> : flows.length === 0 ? <p className="py-6 text-center text-sm text-soft">No flow matches. Flows appear once datasources show calls, topics or data access.</p> :
-        <ul className="max-h-[65vh] space-y-1 overflow-auto">{flows.map((x) => { const K = KIND[x.kind];
+        <ul className="max-h-[65vh] space-y-1 overflow-auto">{flows.map((x) => { const K = kindOf(x.kind);
           return <li key={x.id}><button onClick={() => setSel(x.id)} className={cn("w-full rounded-lg px-2.5 py-2 text-left", cur?.id === x.id ? "bg-paper-2" : "hover:bg-paper-2")}>
             <span className="flex items-center gap-1.5 text-sm"><K.icon size={13} className="shrink-0 text-soft" /><span className="truncate">{x.name}</span></span>
             <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-soft">{x.length} steps · {x.participants.length} participants
@@ -93,7 +94,7 @@ export function FlowsPage({ projectId }: { projectId: string }) {
     </Card>
     <div className="min-w-0 space-y-4">
       {!cur ? (f.data ? <Empty title="No flows yet">Add datasources and scan them: request flows come from calls between services, event flows from topics, data flows from database access.</Empty> : <Skeleton className="h-96 !rounded-xl" />) : <>
-        <Card eyebrow={`${KIND[cur.kind].label} flow · confidence ${cur.confidence.toFixed(2)}${cur.distributed ? ` · across ${cur.systems.join(", ")}` : ""}`} title={cur.name}>
+        <Card eyebrow={`${kindOf(cur.kind).label} flow · confidence ${cur.confidence.toFixed(2)}${cur.distributed ? ` · across ${cur.systems.join(", ")}` : ""}`} title={cur.name}>
           <Sequence flow={cur} active={step} onStep={setStep} />
           <p className="mt-2 text-xs text-soft">Solid = observed in code or runtime; dashed = documented in a diagram, inferred, or low confidence. Click a step for its evidence.</p>
         </Card>
