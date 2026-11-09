@@ -20,8 +20,8 @@ function saveRecent(p: string) {
 }
 
 /** Browse the mounted source roots on the server and choose a directory: places, recent, typed/pasted paths, filter, keyboard. */
-export function FolderPicker({ projectId, open, value, onClose, onChoose }: {
-  projectId: string; open: boolean; value: string; onClose: () => void; onChoose: (path: string, info: FolderListing) => void;
+export function FolderPicker({ endpoint, open, value, onClose, onChoose, title = "Choose a local directory" }: {
+  endpoint: string; open: boolean; value: string; onClose: () => void; onChoose: (path: string, info: FolderListing) => void; title?: string;
 }) {
   const [path, setPath] = useState(value);
   const [filter, setFilter] = useState("");
@@ -31,7 +31,7 @@ export function FolderPicker({ projectId, open, value, onClose, onChoose }: {
   const listRef = useRef<HTMLDivElement>(null);
   const clickTimer = useRef<number | undefined>(undefined);      // a click opens a folder, unless a double-click (choose) follows
   useEffect(() => () => window.clearTimeout(clickTimer.current), []);
-  const q = useApi<FolderListing>(["source-folders", projectId, path], open ? `/projects/${projectId}/source-folders${path ? `?path=${encodeURIComponent(path)}` : ""}` : null);
+  const q = useApi<FolderListing>(["source-folders", endpoint, path], open ? `${endpoint}${path ? `?path=${encodeURIComponent(path)}` : ""}` : null);
   const data = q.data;
 
   useEffect(() => { if (open) { setPath(value); setRecent(loadRecent()); } }, [open, value]);
@@ -66,7 +66,7 @@ export function FolderPicker({ projectId, open, value, onClose, onChoose }: {
         path === to && "bg-paper-2 font-medium text-ink")}>
       <I size={14} className="shrink-0 opacity-70" /><span className="truncate">{label}</span></button>;
 
-  return <Dialog open={open} onClose={onClose} title="Choose a local directory" wide>
+  return <Dialog open={open} onClose={onClose} title={title} wide>
     <div className="flex flex-col gap-3 sm:flex-row" onKeyDown={onKey}>
       <nav aria-label="Places" className="flex gap-1 overflow-x-auto pb-1 sm:w-48 sm:shrink-0 sm:flex-col sm:overflow-visible sm:pb-0">
         <div className="eyebrow hidden px-2.5 pb-1 sm:block">Places</div>
@@ -114,7 +114,7 @@ export function FolderPicker({ projectId, open, value, onClose, onChoose }: {
         </div>
         {data?.truncated && <p className="mt-1 text-[11px] text-warn-ink">Only the first 500 folders are listed — type a path or filter.</p>}
         <p className="mt-2 text-[11px] text-soft">Click a folder to open it, double-click (or Ctrl+Enter) to choose it. ↑ ↓ to move, Enter to open, Backspace to go up. Click the path to paste one.
-          Only folders mounted read-only for ArchTwin are visible (<code className="font-mono">ARCHTWIN_SOURCE_WORKSPACE</code>).</p>
+          Only folders mounted read-only for ArchTwin and whitelisted in System › Source roots are visible.</p>
       </div>
     </div>
     <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-rule pt-3">

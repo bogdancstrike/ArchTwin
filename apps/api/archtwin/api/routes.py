@@ -4,11 +4,11 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile
 from fastapi.responses import PlainTextResponse
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, or_, select, text
 from sse_starlette.sse import EventSourceResponse
 
 from archtwin.api import schemas as S
@@ -246,6 +246,87 @@ async def audit_list(project_id: uuid.UUID | None = None, actor: str | None = No
         if action:
             q = q.where(audit_events.c.action.like(f"{action}%"))
         return rows(await conn.execute(q.order_by(audit_events.c.seq.desc()).limit(limit)))
+
+
+AUDIT_CATEGORIES = {   # category -> action prefixes (Audit page chips)
+    "datasources": ("connector.", "document.", "source_roots."),
+    "architecture": ("architecture.", "baseline.", "diagram.", "drift.", "suppression."),
+    "decisions": ("adr.",),
+    "ai": ("ai.", "usage.", "spend_limits."),
+    "access": ("project.member", "member.", "access.", "flag.", "org."),
+    "exports": ("export", "usage.export", "audit.export", "diagram.export"),
+}
+AUDIT_SORT = {"when": audit_events.c.seq, "who": audit_events.c.actor_name, "what": audit_events.c.action, "result": audit_events.c.decision}
+AUDIT_VERBS = [("connector.create", "added datasource"), ("connector.delete", "removed datasource"), ("connector.test", "tested datasource"),
+               ("connector.scan.request", "requested a scan of"), ("connector.scan.complete", "finished scanning"), ("connector.scan.fail", "failed scanning"),
+               ("connector.webhook", "received a webhook for"), ("ai.general", "asked a general AI question"), ("ai.ask", "asked the assistant about"),
+               ("ai.design", "requested an integration design in"), ("ai.text_extend", "extended text with AI in"),
+               ("ai.architecture_draft", "drafted architecture with AI in"), ("ai.conversation.archive", "deleted a conversation"),
+               ("adr.", "changed decision record"), ("baseline.", "changed a baseline in"), ("flag.update", "changed feature flag"),
+               ("spend_limits.update", "changed AI spend limits"), ("source_roots.update", "changed local source roots"),
+               ("usage.export", "exported AI usage"), ("access.inspect", "inspected roles & permissions"), ("project.create", "created project")]
+
+
+def _audit_summary(e: dict, projects_by_id: dict[str, str]) -> str:
+    verb = next((v for p_, v in AUDIT_VERBS if e["action"].startswith(p_)), e["action"].replace(".", " "))
+    target = (e.get("details") or {}).get("name") or (e["resource_kind"] if e["resource_kind"] not in ("org", "assistant") else "")
+    where = projects_by_id.get(str(e.get("project_id")), "")
+    s_ = f"{e['actor_name']} {verb}" + (f" {target}" if target and target not in verb else "") + (f" · {where}" if where else "")
+    return ("DENIED: " + s_) if e["decision"] != "allow" else s_
+
+
+@r.get("/audit/search", tags=["audit"])
+async def audit_search(page: int = Query(1, ge=1), page_size: int = Query(25), sort: str = "when", dir: str = Query("desc", pattern="^(asc|desc)$"),
+                       q: str | None = Query(None, max_length=200), actor: str | None = None, result: str | None = Query(None, pattern="^(allow|deny)$"),
+                       category: str | None = None, since: datetime | None = None, until: datetime | None = None,
+                       project_id: uuid.UUID | None = None, c: RequestContext = Depends(get_ctx)):
+    """Audit page: filters, categories, sort and pagination, plus a one-sentence summary per event."""
+    if page_size not in (10, 25, 50, 100):
+        raise problem(422, "AT-AUDIT-002", "Invalid page size", "10, 25, 50 or 100")
+    if not await authz.allowed(c.principal, "audit", "view", "", {"org_id": str(c.org_id), "project_id": ""}):
+        await audit.record_denial(c, "audit.view", "audit")
+        raise problem(403, "AT-AUTHZ-001", "Forbidden")
+
+    cond = [audit_events.c.org_id == c.org_id]
+    if project_id:
+        cond.append(audit_events.c.project_id == project_id)
+    if actor:
+        cond.append(audit_events.c.actor_name == actor)
+    if result:
+        cond.append(audit_events.c.decision == result if result == "allow" else audit_events.c.decision != "allow")
+    if category:
+        prefixes = AUDIT_CATEGORIES.get(category)
+        if not prefixes:
+            raise problem(422, "AT-AUDIT-003", "Unknown category", ", ".join(AUDIT_CATEGORIES))
+        cond.append(or_(*[audit_events.c.action.like(f"{p_}%") for p_ in prefixes]))
+    if since:
+        cond.append(audit_events.c.occurred_at >= since)
+    if until:
+        cond.append(audit_events.c.occurred_at < until + timedelta(days=1) if until.hour == 0 and until.minute == 0 else audit_events.c.occurred_at <= until)
+    if q:
+        like = f"%{q.lower()}%"
+        cond.append(or_(func.lower(audit_events.c.action).like(like), func.lower(audit_events.c.actor_name).like(like),
+                        func.lower(audit_events.c.resource_id).like(like), func.lower(audit_events.c.resource_kind).like(like)))
+    order = AUDIT_SORT.get(sort, audit_events.c.seq)
+    async with uow(c) as conn:
+        total = (await conn.execute(select(func.count()).select_from(audit_events).where(and_(*cond)))).scalar() or 0
+        items = rows(await conn.execute(select(audit_events).where(and_(*cond)).order_by(order.desc() if dir == "desc" else order.asc(),
+                                                                                           audit_events.c.seq.desc())
+                                        .offset((page - 1) * page_size).limit(page_size)))
+        actors = [r_[0] for r_ in (await conn.execute(select(audit_events.c.actor_name).where(audit_events.c.org_id == c.org_id)
+                                                      .group_by(audit_events.c.actor_name).order_by(audit_events.c.actor_name).limit(200))).all()]
+    pids = {i["project_id"] for i in items if i["project_id"]}
+    titles: dict[str, str] = {}
+    if pids:
+        async with unscoped() as conn:
+            await conn.execute(text("SELECT set_config('app.org_id', :o, true)"), {"o": str(c.org_id)})
+            from archtwin.common.schema import projects as projects_t
+            titles = {str(r_.id): r_.title for r_ in (await conn.execute(select(projects_t.c.id, projects_t.c.title).where(projects_t.c.id.in_(pids)))).all()}
+    for i in items:
+        i["summary"] = _audit_summary(i, titles)
+        i["project_title"] = titles.get(str(i["project_id"]), "")
+    return {"items": items, "total": total, "page": page, "page_size": page_size, "pages": max(1, -(-total // page_size)),
+            "categories": list(AUDIT_CATEGORIES), "actors": actors}
 
 
 @r.get("/audit/verify", tags=["audit"])

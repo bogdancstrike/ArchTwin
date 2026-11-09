@@ -96,7 +96,7 @@ function AddConnector({ projectId, open, onClose }: { projectId: string; open: b
           {(["auto", "code", "docs"] as const).map((m) => <button type="button" key={m} onClick={() => setCfgKey({ content: m })} aria-pressed={(parseCfg(config).content ?? "auto") === m}
             className={cn("rounded-full border px-2 py-0.5", (parseCfg(config).content ?? "auto") === m ? "border-ink bg-ink text-paper" : "border-rule hover:border-muted")}>{m}</button>)}
           <span className="text-soft">auto = code + docs folders + ADRs · docs = every document, diagram and ADR</span></div>
-        <FolderPicker projectId={projectId} open={picking} value={String(parseCfg(config).path ?? "")} onClose={() => setPicking(false)}
+        <FolderPicker endpoint={`/projects/${projectId}/source-folders`} open={picking} value={String(parseCfg(config).path ?? "")} onClose={() => setPicking(false)}
           onChoose={(path, info) => { setCfgKey({ path, content: info.suggested_content ?? "auto" }); setName(path.split("/").filter(Boolean).pop() || name); setPicking(false); }} />
       </Field>}
       {k.kind === "git" && k.source_roots?.length ? <p className="rounded-lg bg-paper/70 p-2 text-xs text-muted">Local directories must be under a mounted source root:{" "}
