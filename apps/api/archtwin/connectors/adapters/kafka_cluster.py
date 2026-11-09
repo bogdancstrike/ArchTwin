@@ -31,8 +31,10 @@ def _brokers(cfg: dict[str, Any]) -> list[tuple[str, int]]:
     for b in str(cfg.get("bootstrap_servers") or "").split(","):
         b = b.strip().removeprefix("PLAINTEXT://").removeprefix("SASL_SSL://").removeprefix("SSL://")
         if b:
-            host, _, port = b.rpartition(":")
-            out.append((host or b, int(port or 9092)))
+            host, sep, port = b.rpartition(":")
+            if not sep or not port.isdigit():          # "kafka" / "[::1]" without a port => default listener
+                host, port = b, "9092"
+            out.append((host, int(port)))
     if not out:
         raise ValueError("bootstrap_servers is required")
     return out

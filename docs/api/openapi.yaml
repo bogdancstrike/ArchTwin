@@ -99,7 +99,7 @@ paths:
       operationId: personalHome
       responses:
         '200':
-          description: Totals, needs-attention items, recent activity and project health
+          description: Totals, needs-attention items, recent activity and health for the 60 most recently active visible projects (totals.visible_projects / totals.truncated report the cap)
           content:
             application/json:
               schema:

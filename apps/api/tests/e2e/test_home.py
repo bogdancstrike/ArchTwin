@@ -13,8 +13,10 @@ def project(users, run_id):
 def test_home_lists_only_visible_projects(users, project):
     admin = users["admin"].ok("GET", "/home")
     ids = {p["id"] for p in admin["projects"]}
-    assert project["id"] in ids
-    assert admin["totals"]["projects"] == len(admin["projects"])
+    assert project["id"] in ids, "the newest project is shown even when the caller can see more than the home cap"
+    assert admin["totals"]["projects"] == len(admin["projects"]) <= 60
+    visible = users["admin"].ok("GET", "/projects")
+    assert admin["totals"]["visible_projects"] == len(visible) and admin["totals"]["truncated"] == (len(visible) > 60)
     p = next(x for x in admin["projects"] if x["id"] == project["id"])
     assert {"snapshot", "drift", "adrs", "freshness", "last_activity"} <= set(p)
     assert all(a["project_id"] in ids for a in admin["attention"] + admin["activity"])

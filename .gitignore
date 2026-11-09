@@ -16,3 +16,7 @@ test-results/
 playwright-report/
 *.tsbuildinfo
 .coverage
+.coverage.*
+.coverage-data/
+coverage.xml
+htmlcov/

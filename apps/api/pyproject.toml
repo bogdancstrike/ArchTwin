@@ -52,6 +52,22 @@ addopts = "-m 'not integration and not e2e'"
 markers = ["integration: needs the compose PostgreSQL + Cerbos (make test-integration)",
            "e2e: needs the full running stack (make test-e2e)"]
 
+[tool.coverage.run]
+source = ["archtwin"]
+parallel = true
+sigterm = true
+concurrency = ["thread", "greenlet"]
+
+[tool.coverage.paths]
+source = ["archtwin", "/app/archtwin"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+skip_empty = true
+precision = 1
+exclude_also = ["if __name__ == .__main__.:", "if TYPE_CHECKING:", "raise NotImplementedError", "@(abc\\.)?abstractmethod"]
+
 [tool.ruff]
 line-length = 130
 target-version = "py313"
@@ -65,6 +81,7 @@ dev = [
     "hypothesis>=6.170.15",
     "pytest>=9.2.0",
     "pytest-asyncio>=1.4.1.post1",
+    "pytest-cov>=7.1.0",
     "respx>=0.23.1",
     "ruff>=0.17.4",
 ]

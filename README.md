@@ -63,7 +63,7 @@ baseline** (a different user approves) → **Drift** → **Assistant**.
 | `archtwin-thirdparty-docling` | PDF/DOCX parsing (profile `documents`) | — |
 
 Tests: `make test` (unit) · `make test-integration` (RLS) · `make test-e2e` (API journeys on the live stack) · `make test-ui` (Playwright + axe) ·
-`make policy-test` (Cerbos) · `make spec-validate` (OpenSpec).
+`make policy-test` (Cerbos) · `make spec-validate` (OpenSpec) · `make coverage` (all suites with the API and worker instrumented; fails under 90 %).
 
 ## ✨ What it is
 

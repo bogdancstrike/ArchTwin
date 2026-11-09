@@ -15,7 +15,16 @@ jobs:
       - name: env (fake LLM, zero tokens)
         run: ./scripts/init-env.sh && mkdir -p ../horizon
       - run: docker compose up -d --build --wait --wait-timeout 900
-      - run: cd apps/api && uv sync --frozen && uv run pytest -q -m "integration or e2e" tests/integration tests/e2e
-      - run: cd apps/web && npm ci && npx playwright install --with-deps chromium && npx playwright test
+      - name: reference fixture (Kafka, PostgreSQL, MySQL, OTel) for the connector e2e tests
+        run: |
+          docker compose -f fixtures/shop/compose.yaml up -d --build
+          timeout 300 sh -c 'until curl -sf http://127.0.0.1:9390/-/ready >/dev/null; do sleep 3; done'
+      - run: cd apps/api && uv sync --frozen
+      - run: cd apps/web && npm ci && npx playwright install --with-deps chromium
+      - name: whole-system coverage gate (unit + integration + e2e + UI; API and worker instrumented) >= 90%
+        run: ./scripts/coverage.sh 90
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: {name: coverage, path: apps/api/.coverage-data/coverage.xml, if-no-files-found: ignore}
       - if: failure()
         run: docker compose logs --tail=300 api worker

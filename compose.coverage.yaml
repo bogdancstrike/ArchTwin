@@ -1,0 +1,19 @@
+# Overlay: run the API and worker under coverage.py so the e2e suite measures server-side code.
+#   make coverage   (builds archtwin/backend:coverage, runs every suite, combines, enforces >= 90%)
+# Data lands in apps/api/.coverage-data/ (git-ignored). Never use this overlay in production.
+x-cov: &cov
+  image: archtwin/backend:coverage
+  build: {context: ./apps/api, args: {WITH_COVERAGE: "1"}}
+  volumes:
+    - ./apps/api/.coverage-data:/cov
+    - ${ARCHTWIN_SOURCE_HORIZON:-../horizon}:/sources/horizon:ro
+    - ./:/sources/archtwin:ro
+
+services:
+  api:
+    <<: *cov
+    command: ["coverage", "run", "--rcfile=/app/pyproject.toml", "--data-file=/cov/.coverage", "-m", "uvicorn", "archtwin.api.app:app",
+              "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*", "--timeout-keep-alive", "75"]
+  worker:
+    <<: *cov
+    command: ["coverage", "run", "--rcfile=/app/pyproject.toml", "--data-file=/cov/.coverage", "-m", "archtwin.worker"]

@@ -95,7 +95,9 @@ async def _project(c: RequestContext, p: dict[str, Any]) -> dict[str, Any]:
 
 
 async def home(c: RequestContext) -> dict[str, Any]:
-    ps = (await projects.list_projects(c))[:MAX_PROJECTS]
+    visible = await projects.list_projects(c)
+    # beyond the cap, keep the most recently touched projects (never silently drop the newest ones)
+    ps = sorted(visible, key=lambda p: p.get("updated_at") or p["created_at"], reverse=True)[:MAX_PROJECTS]
     sem = asyncio.Semaphore(6)
 
     async def one(p):
@@ -105,7 +107,7 @@ async def home(c: RequestContext) -> dict[str, Any]:
     attention = sorted((a for x in parts for a in x["attention"]), key=lambda a: SEV_RANK.get(a["severity"], 4))
     activity = sorted((a for x in parts for a in x["activity"]), key=lambda a: a["at"], reverse=True)[:25]
     prj = sorted((x["project"] for x in parts), key=lambda p: p["last_activity"], reverse=True)
-    totals = {"projects": len(prj), "connectors": sum(p["connectors"] for p in prj),
+    totals = {"projects": len(prj), "visible_projects": len(visible), "truncated": len(visible) > len(ps), "connectors": sum(p["connectors"] for p in prj),
               "elements": sum((p["snapshot"] or {}).get("nodes", 0) for p in prj),
               "relationships": sum((p["snapshot"] or {}).get("edges", 0) for p in prj),
               "drift_open": sum((p["drift"] or {}).get("open", 0) for p in prj),

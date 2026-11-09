@@ -9,9 +9,10 @@ branch `feat/walking-skeleton-m1` (CI: python, integration, policies, web, spec,
 ## Verification evidence (2026-11-09, local Compose stack + shop fixture)
 | Suite | Command | Result |
 |---|---|---|
-| Unit (incl. fixture ground truth, webhook HMAC, Kafka detection, OTel/GitHub with mocked HTTP) | `make test` | 99 passed |
+| Unit (incl. fixture ground truth, webhook HMAC, Kafka detection, OTel/GitHub/OpenAPI with mocked HTTP, Cerbos fail-closed, egress redirects, git path policy) | `make test` | 120 passed |
 | RLS isolation (as `archtwin_app`) | `make test-integration` | 8 passed |
-| API journeys on the live stack (+ `/home`, live fixture connectors, signed webhooks, live GitHub) | `make test-e2e` | 24 passed (GitHub live test skips when unauthenticated rate limit is exhausted) |
+| API journeys on the live stack (+ `/home`, live fixture connectors, signed webhooks, live GitHub, full API surface incl. negative paths) | `make test-e2e` | 45 passed (GitHub live test skips when unauthenticated rate limit is exhausted) |
+| **Whole-system Python coverage** (unit + integration + e2e + UI, API/worker/CLI run under coverage.py via `compose.coverage.yaml`) | `make coverage` | **93.4 %** (gate: 90 %; nightly `e2e` workflow) |
 | Browser (PKCE login, home, C4 zoom, evidence, axe WCAG AA on home + projects) | `make test-ui` | 2 passed |
 | Cerbos policy tests | `make policy-test` | 44 passed |
 | OpenSpec | `make spec-validate` | 7/7 valid (strict) |
@@ -120,6 +121,7 @@ against the approved baseline produced 12 findings (unplanned `backup`/`demo-see
 Specified, not started.
 
 ## Changelog
+- 2026-11-09 — Test coverage: `make coverage` measures the API/worker inside the containers (coverage.py, `concurrency = thread, greenlet` for SQLAlchemy async) and combines it with unit/integration/e2e → 93.4 %, gated at 90 % in the nightly workflow. New `test_api_surface.py` (21 e2e: every route's negative branches, every webhook outcome) and `test_guards_and_adapters.py` (21 unit). Bugs found: Kafka bootstrap server without a port crashed; `/home` dropped the newest projects once more than 60 were visible (now keeps the most recent 60, reports `visible_projects`/`truncated`, Projects page lists the rest).
 - 2026-11-09 — M1 data-source connectors (GitHub, MySQL, Kafka + Schema Registry, OTel service graph), webhook ingress, shop fixture with ground truth; analyzer fixes (services keyed by system/name, deterministic grammar loading).
 - 2026-11-09 — `/home` dashboard + UI refresh (fonts, shell, overview, projects); axe AA clean.
 - 2026-11-08 — walking skeleton + M1/M2 slice, web UI, full test pyramid, CI; live verification against Horizon (see above).

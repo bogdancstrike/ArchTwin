@@ -1,4 +1,4 @@
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Plus, Search } from "lucide-react";
 import { useState } from "react";
 import { Button, Dialog, Empty, ErrorBox, Field, Input, PageHeader, Select, Skeleton, Textarea } from "@/components/ui";
@@ -29,6 +29,11 @@ export function NewProjectDialog({ open, onClose }: { open: boolean; onClose: ()
 export function ProjectsPage() {
   const me = useMe();
   const h = useApi<HomeData>(["home", me.data?.org_id], me.data ? "/home" : null);
+  const truncated = !!h.data?.totals.truncated;
+  const all = useApi<Project[]>(["projects", me.data?.org_id], truncated ? "/projects" : null);   // home caps at the 60 most recent
+  const shown = new Set((h.data?.projects ?? []).map((p) => p.id));
+  const rest = (all.data ?? []).filter((p) => !shown.has(p.id) && (!q || `${p.title} ${p.purpose} ${p.tags.join(" ")}`.toLowerCase().includes(q.toLowerCase())))
+    .sort((a, b) => a.title.localeCompare(b.title));
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<"activity" | "name" | "drift">("activity");
@@ -43,7 +48,7 @@ export function ProjectsPage() {
         <Input aria-label="Search projects" placeholder="Search projects, purposes, tags…" value={q} onChange={(e) => setQ(e.target.value)} className="pl-8" /></div>
       <Select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}>
         <option value="activity">Recent activity</option><option value="name">Name</option><option value="drift">Most drift</option></Select>
-      {h.data && <span className="ml-auto text-sm text-soft">{list.length} of {h.data.projects.length}</span>}
+      {h.data && <span className="ml-auto text-sm text-soft">{list.length + rest.length} of {h.data.totals.visible_projects ?? h.data.projects.length}</span>}
     </div>
     <ErrorBox error={h.error} />
     {h.data?.projects.length === 0 && <Empty title="No projects yet">Create one, connect a repository and the platform builds the architecture from evidence.</Empty>}
@@ -51,6 +56,13 @@ export function ProjectsPage() {
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
       {!h.data ? [0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-48 !rounded-xl" />) : list.map((p) => <ProjectHealthCard key={p.id} p={p} />)}
     </div>
+    {rest.length > 0 && <section aria-label="Other projects" className="space-y-2">
+      <h2 className="text-sm font-semibold text-soft">Other projects <span className="font-normal">(no recent activity)</span></h2>
+      <ul className="divide-y divide-rule overflow-hidden rounded-xl border border-rule bg-card">
+        {rest.map((p) => <li key={p.id}><Link to="/projects/$projectId" params={{ projectId: p.id }} className="flex items-baseline gap-3 px-4 py-2.5 hover:bg-paper-2">
+          <span className="font-medium">{p.title}</span><span className="truncate text-sm text-soft">{p.purpose}</span></Link></li>)}
+      </ul>
+    </section>}
     <NewProjectDialog open={open} onClose={() => setOpen(false)} />
   </div></div>;
 }

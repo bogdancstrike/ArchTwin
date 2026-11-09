@@ -14,7 +14,7 @@ export interface HomeProject {
 interface Item { kind: string; severity?: string; status?: string; project_id: string; project: string; title: string; detail: string; link?: string; at?: string }
 export interface HomeData {
   generated_at: string; projects: HomeProject[]; attention: Item[]; activity: Item[];
-  totals: { projects: number; connectors: number; elements: number; relationships: number; drift_open: number; unknown: number; adrs: number; stale_connectors: number };
+  totals: { projects: number; visible_projects?: number; truncated?: boolean; connectors: number; elements: number; relationships: number; drift_open: number; unknown: number; adrs: number; stale_connectors: number };
 }
 
 const KIND_ICON: Record<string, typeof Boxes> = { scan: Radar, drift: AlertTriangle, adr: ScrollText, baseline: ShieldCheck, connector: GitBranch };
@@ -102,7 +102,8 @@ export function HomePage() {
       <ErrorBox error={h.error} />
       <section aria-label="Totals" className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         {!d ? Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-[104px] !rounded-xl" />) : <>
-          <StatTile label="Projects" value={d.totals.projects} icon={<Boxes size={16} />} hint={`${d.totals.connectors} connectors`} />
+          <StatTile label="Projects" value={d.totals.visible_projects ?? d.totals.projects} icon={<Boxes size={16} />}
+            hint={d.totals.truncated ? `${d.totals.projects} most recent shown` : `${d.totals.connectors} connectors`} />
           <StatTile label="Elements" value={d.totals.elements.toLocaleString()} icon={<Network size={16} />} hint={`${d.totals.relationships.toLocaleString()} relationships`} />
           <StatTile label="Open drift" value={d.totals.drift_open} tone={d.totals.drift_open ? "accent" : "ok"} icon={<AlertTriangle size={16} />} hint="evidence-backed" />
           <StatTile label="Unknown" value={d.totals.unknown} icon={<CircleDashed size={16} />} hint="incomplete evidence, no alert" />

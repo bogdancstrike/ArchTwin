@@ -10,6 +10,9 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-install-project
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
+# Coverage-instrumented builds only (compose.coverage.yaml); production images never carry it.
+ARG WITH_COVERAGE=0
+RUN if [ "$WITH_COVERAGE" = "1" ]; then uv pip install --python /app/.venv/bin/python coverage==7.17.2 && mkdir -p /cov && chown archtwin /cov; fi
 USER archtwin
 # Fail the build if the tree-sitter grammar (compiled into the tree-sitter-python wheel) cannot load.
 RUN python -c "from archtwin.connectors.analyzers.python_code import _parser; assert _parser().parse(b'x = 1').root_node.type == 'module'"
