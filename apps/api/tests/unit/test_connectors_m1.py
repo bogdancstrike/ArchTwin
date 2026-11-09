@@ -100,7 +100,8 @@ def test_fixture_repo_ground_truth():
            and o.attributes.get("target", "").split("/")[-1] not in ("otel-collector",)}
     missing = expected - got
     assert not missing, missing                                     # recall 100% on labelled edges
-    business = {e for e in got if not e.endswith(("/kafka", "/schema-registry")) and "prometheus" not in e and "schema-init" not in e}
+    business = {e for e in got if not e.endswith(("/kafka", "/schema-registry")) and "prometheus" not in e and "schema-init" not in e
+                and "name:" not in e}                                   # name: refs are resolved (or dropped) by the graph builder
     assert business <= expected, business - expected                # precision: no invented application edges
     eps = {(o.attributes["source"].split("/")[-1], o.attributes["target"].split("/", 2)[-1]) for o in r.observations if o.kind == "exposes"}
     for svc, routes in gt["endpoints"].items():

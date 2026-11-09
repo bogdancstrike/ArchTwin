@@ -1,9 +1,7 @@
 import { Bot, Check, Plus, Sparkles } from "lucide-react";
 import { useState } from "react";
-import Markdown from "react-markdown";
-import rehypeSanitize from "rehype-sanitize";
-import remarkGfm from "remark-gfm";
 import { Badge, Button, Card, Dialog, ErrorBox, Field, Input, Spinner, Textarea, ago } from "@/components/ui";
+import { RichMarkdown } from "@/components/RichMarkdown";
 import { api, download } from "@/lib/api";
 import { useAction, useApi, useMe } from "@/lib/hooks";
 import type { Adr } from "@/lib/types";
@@ -106,7 +104,7 @@ function AdrView({ projectId, id }: { projectId: string; id: string }) {
         <Button size="sm" variant="danger" disabled={isAuthor} onClick={() => decide.mutate("reject")}>Reject</Button></>}
         <Button size="sm" onClick={() => download(`/projects/${projectId}/adrs/${id}/markdown`, `ADR-${String(d.number).padStart(4, "0")}.md`)}>Markdown</Button></div></div>
     {isAuthor && d.status === "proposed" && <p className="mb-2 text-xs text-soft">Separation of duties: another approver must accept this ADR.</p>}
-    <article className="prose-at"><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>{md.data ?? ""}</Markdown></article>
+    <RichMarkdown>{md.data ?? ""}</RichMarkdown>
     {d.current?.content?.citations?.length > 0 && <div className="mt-3"><div className="eyebrow">Grounding</div><ul className="text-xs">{d.current!.content.citations.map((c: any) => <li key={c.id} className="font-mono">[{c.id}] {c.key} — {c.source}</li>)}</ul></div>}
   </div>;
 }

@@ -60,6 +60,31 @@ class CodeDef:
     method_list: list[tuple[str, int]] = field(default_factory=list)     # (name, line) of methods, for L4 detail
 
 
+@dataclass(frozen=True)
+class HttpCall:
+    """An outgoing HTTP call: `service` is a host name or a name derived from the config variable holding the host."""
+    method: str
+    service: str
+    path: str
+    line: int
+    via: str                    # the literal host or the variable it came from
+
+
+HTTP_CLIENT = re.compile(r"(?:^|\.)(requests|httpx|session|client|http|aiohttp|_http|_client|_session)\.(get|post|put|patch|delete|request)$")
+URL_TEMPLATE = re.compile(r"^(?:https?://)?(?P<host>\{[^}]+\}|[A-Za-z0-9_.\-]+)(?::(?:\{[^}]+\}|\d+))?(?P<path>/[^?#]*)?")
+CONFIG_AFFIXES = re.compile(r"^(?:ADDRESS|HOST|HOSTNAME|URL|BASE_URL|VITE_APP|REACT_APP|NEXT_PUBLIC|NUXT_PUBLIC)_|_(?:ADDRESS|HOST|HOSTNAME|URL|BASE_URL|ENDPOINT|API|URI|SERVICE)$")
+
+
+def service_from_variable(expr: str) -> str:
+    """'config.Config.ADDRESS_QSINT_GATE' -> 'qsint-gate'; 'settings.qsint_gate_url' -> 'qsint-gate'."""
+    name = re.split(r"[.\[\]'\"]+", expr.strip("{} "))
+    name = [x for x in name if x][-1] if any(name) else ""
+    up = name.upper()
+    for _ in range(3):
+        up = CONFIG_AFFIXES.sub("", up)
+    return up.lower().replace("_", "-").strip("-")
+
+
 @dataclass
 class PyModule:
     name: str
@@ -72,6 +97,7 @@ class PyModule:
     router_calls: dict[str, tuple[str, list[str]]] = field(default_factory=dict)       # var = factory("...") (resolved later)
     router_factories: dict[str, tuple[list[tuple[str, str]], str]] = field(default_factory=dict)   # fn -> (params, template)
     raw_routes: list[tuple[str, str, str, str, int, str]] = field(default_factory=list)  # (method, router var, path, file, line, handler)
+    http_calls: list[HttpCall] = field(default_factory=list)   # outgoing HTTP calls to other services
     source: str = ""
     defs: list[CodeDef] = field(default_factory=list)
     routes: list[Route] = field(default_factory=list)
@@ -315,6 +341,31 @@ def _code_defs(root) -> list[CodeDef]:
     return out
 
 
+def _http_call(n, mod: PyModule) -> None:
+    fn = _text(n.child_by_field_name("function") or n)
+    m = HTTP_CLIENT.search(fn)
+    if not m:
+        return
+    args = n.child_by_field_name("arguments")
+    pos = [a for a in (args.children if args is not None else []) if a.type not in ("(", ")", ",", "keyword_argument", "comment")]
+    method = m.group(2).upper()
+    url_node = pos[0] if pos else None
+    if method == "REQUEST" and len(pos) >= 2:
+        method, url_node = (_string_value(pos[0]) or "GET").upper(), pos[1]
+    url = _template(url_node, mod.consts) if url_node is not None else None
+    if not url or "://" not in url and not url.startswith("{"):
+        return
+    um = URL_TEMPLATE.match(url.split("://", 1)[-1])
+    if not um:
+        return
+    host = um.group("host")
+    service = service_from_variable(host) if host.startswith("{") else host
+    if not service or service in ("localhost", "127.0.0.1", "0.0.0.0") or re.fullmatch(r"[\d.]+", service):
+        return
+    path = re.sub(r"\{[^}]*\}", "{}", um.group("path") or "")
+    mod.http_calls.append(HttpCall(method, service, path, n.start_point[0] + 1, host))
+
+
 def parse_module(name: str, path: Path, is_pkg: bool) -> PyModule:
     src = path.read_bytes()
     tree = _parser().parse(src)
@@ -373,6 +424,7 @@ def parse_module(name: str, path: Path, is_pkg: bool) -> PyModule:
                     mod.router_calls[_text(left)] = (fn, lits)
         elif t == "call":
             _kafka_call(n, mod)
+            _http_call(n, mod)
         elif t == "decorator":
             call = next((c for c in n.children if c.type == "call"), None)
             if call is not None:

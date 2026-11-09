@@ -26,7 +26,8 @@ def test_precision_of_runtime_relationships():
     """Every inferred calls/writes edge between containers must be in the ground truth (no invented wiring)."""
     r = scan()
     gt = set(yaml.safe_load((FIX / "ground-truth.yaml").read_text())["edges"])
-    rels = {o.subject_key for o in r.observations if o.subject_kind == "edge" and o.kind in ("calls", "writes")}
+    rels = {o.subject_key for o in r.observations if o.subject_kind == "edge" and o.kind in ("calls", "writes")
+            and "name:" not in o.subject_key}                    # name: refs are resolved (or dropped) by the graph builder
     assert rels <= gt, rels - gt
 
 

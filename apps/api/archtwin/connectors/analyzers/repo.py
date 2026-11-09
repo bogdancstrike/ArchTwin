@@ -606,6 +606,7 @@ class RepoAnalyzer:
                             ref=_rel(self.root, mods[a].path) if a in mods else "", confidence=1.0)
             self._code_elements(s, mods, reach, comps)
             self._resources(s, mods, reach)
+            self._http_calls(s, mods, reach)
             self._kafka(s, mods, reach)
             cmdline = _cmdline(_argv(s.spec))
             starts_server = any(i.split(".")[0] in ("uvicorn", "gunicorn", "hypercorn", "granian", "daphne") for m in reach for i in mods[m].external_imports)
@@ -646,20 +647,42 @@ class RepoAnalyzer:
         dispatchers = [d for d in declared if d.module in mods and any(t in mods[d.module].source for t in tables)]
         module = dispatchers[0].module if dispatchers else ""
         via = dispatchers[0].path if dispatchers else ""
+        hop = next((c for c in (mods[module].http_calls if module else []) if c.path), None)     # e.g. presenter -> gate /gate/action_sync
+        hop_ref = f"name:{hop.service}#{hop.method} {hop.path}" if hop else ""
         hosts: dict[str, int] = defaultdict(int)
         for rt in routes:
             host = gateway_maps.host_name(rt.host)
             ak = self._endpoint(s, mods, comps, "ACTION", rt.action, module, "", rt.source, rt.line, gateway_maps.V_ROUTES,
-                                {"dispatcher": via, "roles": rt.roles, "description": rt.description, "routes_to": f"{rt.host} {rt.method} {rt.path}"})
+                                {"dispatcher": via, "roles": rt.roles, "description": rt.description, "routes_to": f"{rt.host} {rt.method} {rt.path}",
+                                 **({"forwarded_by": f"{hop.service} {hop.method} {hop.path}"} if hop else {})})
             if not host:
                 continue                                       # local/dev target: not a resolvable service
             hosts[host] += 1
             self.r.edge("static", ak, "calls", f"name:{host}#{rt.method} {rt.path}", gateway_maps.V_ROUTES, ref=rt.source,
                         span={"path": rt.source, "line_start": rt.line}, confidence=0.85,
-                        attrs={"protocol": "http", "method": rt.method, "path": rt.path, "action": rt.action, "resolved_by": "name"})
+                        attrs={"protocol": "http", "method": rt.method, "path": rt.path, "action": rt.action, "resolved_by": "name",
+                               **({"via": hop_ref} if hop_ref else {})})
         for host, n in hosts.items():
             self.r.edge("static", s.key, "calls", f"name:{host}", gateway_maps.V_ROUTES, attrs={"protocol": "http", "routes": n, "resolved_by": "name"},
                         confidence=0.85)
+
+    def _http_calls(self, s: Service, mods: dict, reach: set[str]) -> None:
+        """Outgoing HTTP calls to other services (host literal or config variable): component -> `name:<svc>#<METHOD> <path>`,
+        resolved by the graph builder to the service's endpoint in any datasource; the container rolls the call up."""
+        seen: set[tuple[str, str]] = set()
+        for m in sorted(reach):
+            for c in mods[m].http_calls:
+                if c.service in self.by_system.get(s.system, {}) and c.service != s.name:
+                    continue                                       # same-compose services are wired from configuration already
+                rel = _rel(self.root, mods[m].path)
+                target = f"name:{c.service}#{c.method} {c.path}" if c.path else f"name:{c.service}"
+                comp = f"component:{s.system}/{s.name}/{python_code.component_of(m)}"
+                attrs = {"protocol": "http", "method": c.method, "path": c.path, "via": c.via[:120], "resolved_by": "name", "module": m}
+                self.r.edge("static", comp, "calls", target, V_XREPO, attrs=attrs, ref=rel, span={"path": rel, "line_start": c.line}, confidence=0.8)
+                if (c.service, "") not in seen:
+                    seen.add((c.service, ""))
+                    self.r.edge("static", s.key, "calls", f"name:{c.service}", V_XREPO, ref=rel, span={"path": rel, "line_start": c.line},
+                                attrs={"protocol": "http", "via": c.via[:120], "resolved_by": "name"}, confidence=0.8)
 
     def _resources(self, s: Service, mods: dict, reach: set[str]) -> None:
         """What each component uses (SaaS APIs, embedded databases, stores, ML runtimes, external tools), from its imports."""

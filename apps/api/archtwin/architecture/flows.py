@@ -207,6 +207,15 @@ def _endpoint_flows(g: dict[str, Any], system_of: dict[str, str]) -> list[dict[s
                 if not remote or tgt in seen:
                     continue
                 label = nodes[tgt]["name"] if nodes[tgt]["kind"] == "api-endpoint" else e["attributes"].get("path", "")
+                via = e["attributes"].get("via_resolved")
+                if via in nodes and via != tgt:            # the request really travels through a forwarder (e.g. a gate)
+                    fwd = handler_of(via) if nodes[via]["kind"] == "api-endpoint" else via
+                    if fwd:
+                        steps.append({**_synthetic(handler, fwd, "calls", nodes[via]["name"], 0.8), "protocol": "http"})
+                        steps.append({**_step(g, e, src=fwd, dst=remote), "label": label, "kind": "forwards"})
+                        if nodes[tgt]["kind"] == "api-endpoint":
+                            steps += trace(tgt, hop + 1, seen | {tgt})
+                        continue
                 steps.append({**_step(g, e, src=handler, dst=remote), "label": label})
                 if nodes[tgt]["kind"] == "api-endpoint":
                     steps += trace(tgt, hop + 1, seen | {tgt})

@@ -1,12 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { Bot, Check, Copy, Database, FileSignature, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Send, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import Markdown from "react-markdown";
-import rehypeSanitize from "rehype-sanitize";
-import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
 import { Badge, Button, ErrorBox, Select, ago, cn } from "@/components/ui";
 import { usd } from "@/components/charts";
+import { RichMarkdown } from "@/components/RichMarkdown";
 import { api } from "@/lib/api";
 import { useApi, useMe } from "@/lib/hooks";
 import type { View } from "@/lib/types";
@@ -168,7 +166,7 @@ export function AssistantPage({ projectId }: { projectId: string }) {
               <div className="mb-1 flex flex-wrap items-center gap-2"><Bot size={15} className="text-accent" />
                 {t.scope === "general" ? <Badge tone="muted">general · not grounded in project data</Badge> : <Badge tone={t.meta?.grounded ? "ok" : "warn"}>{t.meta?.grounded ? "grounded" : "not grounded"}</Badge>}
                 {t.meta?.invalid_citations?.length ? <Badge tone="bad">{t.meta.invalid_citations.length} invalid citations removed</Badge> : null}</div>
-              <article className="prose-at text-sm"><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>{t.content}</Markdown></article>
+              <RichMarkdown className="text-sm">{t.content}</RichMarkdown>
               {t.meta?.diagram && <MiniDiagram view={t.meta.diagram} projectId={projectId} />}
               {t.meta?.evidence?.length ? <details className="mt-2"><summary className="cursor-pointer text-xs text-link">Evidence ({t.meta.evidence.length})</summary>
                 <ul className="mt-1 space-y-1 text-xs">{t.meta.evidence.map((e) => <li key={e.id} className="rounded border border-rule p-1.5"><b className="font-mono">[{e.id}]</b> <Badge>{e.type}</Badge> {e.text.slice(0, 220)}

@@ -1,9 +1,7 @@
 import { FileText, Upload } from "lucide-react";
 import { useRef, useState } from "react";
-import Markdown from "react-markdown";
-import rehypeSanitize from "rehype-sanitize";
-import remarkGfm from "remark-gfm";
 import { Badge, Button, Card, ErrorBox, Select, Spinner, Table } from "@/components/ui";
+import { RichMarkdown } from "@/components/RichMarkdown";
 import { api, download } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { DataTable } from "@/components/DataTable";
@@ -47,7 +45,7 @@ export function DocsPage({ projectId }: { projectId: string }) {
     <Card title={docSel ? doc.data?.title : sel ? `${titleOf(cur.data?.template ?? "")} v${cur.data?.version ?? ""}` : "Preview"} actions={sel && cur.data && <Button size="sm" onClick={() => download(`/projects/${projectId}/generated-docs/${sel}/markdown`, `${cur.data.template}-v${cur.data.version}.md`)}>Export Markdown</Button>}>
       {(cur.isLoading || doc.isLoading) && <Spinner />}
       {diff && <details className="mb-3"><summary className="cursor-pointer text-sm text-link">Changes since previous version</summary><pre className="mt-2 max-h-72 overflow-auto rounded bg-paper-2 p-2 text-xs">{diff}</pre></details>}
-      {sel && cur.data && <article className="prose-at"><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>{cur.data.content}</Markdown></article>}
+      {sel && cur.data && <RichMarkdown>{cur.data.content}</RichMarkdown>}
       {docSel && doc.data && <div><p className="mb-2 font-mono text-xs text-soft">{doc.data.path} · v{doc.data.version} · rev {doc.data.revision?.slice(0, 10)} · {doc.data.parser_version}</p>
         <Table head={["Lines", "Section", "Passage"]}>{doc.data.passages.map((p: any) => <tr key={p.id} className="border-b border-rule align-top"><td className="px-2 py-1 font-mono text-[10px]">{p.line_start}–{p.line_end}</td><td className="px-2 text-xs font-medium">{p.heading}</td><td className="px-2 text-xs whitespace-pre-wrap">{p.text.slice(0, 600)}</td></tr>)}</Table></div>}
       {!sel && !docSel && <p className="text-sm text-soft">Generate a document or open a source document.</p>}

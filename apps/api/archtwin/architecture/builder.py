@@ -76,7 +76,8 @@ def _fuzzy_container(host: str, nodes: dict[str, dict[str, Any]], exclude: str) 
         c, sysn = _norm(cname), _norm(system)
         system_and_container = h in (f"{sysn}-{c}", f"{c}-{sysn}")
         container_suffix_with_system_token = h.endswith("-" + c) and len(c) >= 3 and bool((ht - _tokens(c)) & _tokens(sysn))
-        single_container_system_named_like_host = c == sysn and len(ht) >= 2 and ht <= _tokens(sysn)
+        distinctive = len(ht) >= 2 or (len(ht) == 1 and len(next(iter(ht))) >= 6)     # 'presenter' alone is distinctive; 'api' is not
+        single_container_system_named_like_host = c == sysn and distinctive and ht <= _tokens(sysn)
         if system_and_container or container_suffix_with_system_token or single_container_system_named_like_host:
             hits.add(k)
     return next(iter(hits)) if len(hits) == 1 else None
@@ -122,20 +123,52 @@ def _resolve_name(name: str, idx: dict[str, dict[str, set[str]]], exclude: str) 
     return None
 
 
+def _action_index(nodes: dict[str, dict[str, Any]]) -> dict[str, list[str]]:
+    """RPC action name -> the gateway endpoints that handle it ('ACTION investigations_get')."""
+    idx: dict[str, list[str]] = defaultdict(list)
+    for k, n in nodes.items():
+        if n["kind"] == "api-endpoint" and n["attributes"].get("method") == "ACTION":
+            idx[str(n["attributes"].get("path"))].append(k)
+    return idx
+
+
+def _ref(key: str, idx: dict[str, dict[str, set[str]]], exclude: str, nodes: dict[str, dict[str, Any]],
+         actions: dict[str, list[str]]) -> str | None:
+    """A relation end: a concrete key, `name:<host>[#<METHOD> <path>]` or `action:<name>[@<service>]` (an RPC action
+    sent to a gateway, optionally naming the gateway service, e.g. from VITE_APP_PRESENTER)."""
+    if key.startswith("name:"):
+        return _resolve(key[5:], idx, exclude, nodes)
+    if key.startswith("action:"):
+        name, _, service = key[7:].partition("@")
+        cands = actions.get(name, [])
+        if service and len(cands) > 1:
+            gw = _resolve(service, idx, exclude, nodes)
+            cands = [c for c in cands if gw and c.startswith("endpoint:" + gw.split(":", 1)[1] + "/")]
+        return cands[0] if len(cands) == 1 else None
+    return key
+
+
 def resolve_names(nodes: dict[str, dict[str, Any]], edges: dict[str, dict[str, Any]]) -> list[str]:
     """Edges whose endpoint is `name:<x>` (cross-repository config URLs, diagrams in docs) are re-pointed to the unique element
     with that name in ANY datasource; ambiguous or unknown names are dropped (and reported), never invented."""
-    pending = [k for k, e in edges.items() if e["source"].startswith("name:") or e["target"].startswith("name:")]
+    idx = _name_index(nodes)
+    for e in edges.values():                    # a relation may say which hop carries it (gateway -> forwarder -> backend)
+        via = e["attributes"].get("via")
+        if isinstance(via, str) and via.startswith("name:"):
+            hit = _resolve(via[5:], idx, e["source"], nodes)
+            if hit:
+                e["attributes"]["via_resolved"] = hit
+    actions = _action_index(nodes)
+    pending = [k for k, e in edges.items() if e["source"].startswith(("name:", "action:")) or e["target"].startswith(("name:", "action:"))]
     if not pending:
         return []
-    idx = _name_index(nodes)
     unresolved: set[str] = set()
     for k in pending:
         e = edges.pop(k)
-        src = e["source"] if not e["source"].startswith("name:") else _resolve(e["source"][5:], idx, "", nodes)
-        dst = e["target"] if not e["target"].startswith("name:") else _resolve(e["target"][5:], idx, src or "", nodes)
+        src = _ref(e["source"], idx, "", nodes, actions)
+        dst = _ref(e["target"], idx, src or "", nodes, actions)
         if not src or not dst or src == dst:
-            unresolved.update(x[5:] for x, r in ((e["source"], src), (e["target"], dst)) if x.startswith("name:") and not r)
+            unresolved.update(x.split(":", 1)[1] for x, r in ((e["source"], src), (e["target"], dst)) if x.startswith(("name:", "action:")) and not r)
             continue
         nk = f"{src}|{e['kind']}|{dst}"
         cur = edges.get(nk)

@@ -40,6 +40,17 @@ GATEWAY = {
                                ' "missing": {"service": "acme-backend-query:8080", "endpoint": "/api/nothing/here", "method": "post"},'
                                ' "local": {"service": "localhost:5000", "endpoint": "/x", "method": "post"}}',
 }
+BFF = {      # a presenter/BFF: its own action table, but every request is forwarded through the gateway's dispatcher
+    "Dockerfile": 'FROM python:3.12\nCOPY . .\nCMD ["gunicorn", "app:app"]\n',
+    "app.py": "from flask import Flask\napp = Flask(__name__)\n",
+    "config.py": "import os\n\nclass Config:\n    ADDRESS_ACME_GATEWAY = os.getenv('ADDRESS_ACME_GATEWAY')\n",
+    "service/handler.py": "import json\nimport requests\nimport config\nactions = json.load(open('maps/action_map.json'))\n\n"
+                          "def handle():\n    return requests.post(f'http://{config.Config.ADDRESS_ACME_GATEWAY}/api/action', json={})\n",
+    "maps/endpoint.json": '{"namespaces": [{"name": "bff"}], "endpoints": [{"namespace": "bff", "operation_name": "do",'
+                          ' "request_method": ["post"], "exec_method": {"module_name": "service.handler", "method_name": "handle"}}]}',
+    "maps/action_map.json": '{"list_files": {"service": "acme-backend-query:8080", "endpoint": "/api/cases/{case_id}/files", "method": "get"},'
+                            ' "other": {"service": "acme-backend-query:8080", "endpoint": "/api/other", "method": "get"}}',
+}
 
 
 def _write(root: Path, files: dict[str, str]) -> Path:
@@ -52,7 +63,7 @@ def _write(root: Path, files: dict[str, str]) -> Path:
 @pytest.fixture(scope="module")
 def graph(tmp_path_factory):
     obs = []
-    for name, files in (("acme-backend", BACKEND), ("acme-gateway", GATEWAY)):
+    for name, files in (("acme-backend", BACKEND), ("acme-gateway", GATEWAY), ("acme-bff", BFF)):
         r = analyze_repository(_write(tmp_path_factory.mktemp(name), files), "rev", name)
         obs += [{"id": uuid.uuid4(), "connector_id": name, "origin": o.origin, "subject_kind": o.subject_kind, "subject_key": o.subject_key,
                  "kind": o.kind, "name": o.name, "attributes": o.attributes, "source_ref": o.source_ref, "source_revision": "rev",
@@ -88,3 +99,17 @@ def test_distributed_endpoint_flow(graph):
     flow = f["ACTION list_files"]
     assert flow["distributed"] and set(flow["systems"]) == {"acme-gateway", "acme-backend"}
     assert "SQLite (embedded)" in [p["name"] for p in flow["participants"]]
+
+
+def test_http_call_through_a_config_variable_resolves_to_the_gateway(graph):
+    e = graph["edges"]
+    assert "component:acme-bff/acme-bff/service.handler|calls|endpoint:acme-gateway/acme-gateway/POST /api/action" in e
+
+
+def test_forwarded_flow_keeps_the_real_order(graph):
+    """bff -> gateway dispatcher -> backend endpoint: the request travels through the forwarder, not directly."""
+    flow = next(x for x in flows.recognize(graph)["flows"] if x.get("endpoint") == "endpoint:acme-bff/acme-bff/ACTION list_files")
+    sys_of = {p["key"]: p["system"] for p in flow["participants"]}
+    hops = [(sys_of.get(s["from"]), sys_of.get(s["to"])) for s in flow["steps"] if sys_of.get(s["from"]) != sys_of.get(s["to"])]
+    assert hops[:2] == [("acme-bff", "acme-gateway"), ("acme-gateway", "acme-backend")]
+    assert any(s["kind"] == "forwards" for s in flow["steps"])
