@@ -111,6 +111,7 @@ Design → ADR → plan → issues / commits → runtime observation → drift �
 ### Discovery and evidence
 - Connectors for **local directories (single repos, folders of repos, docs/architecture folders), GitHub, GitLab, Taiga, Docker, PostgreSQL/MySQL, Kafka + Schema Registry, OpenAPI, OpenTelemetry service graph** and uploaded documents (Docling); Kubernetes and Jira are planned in the [connector matrix](docs/connectors/CONNECTOR_MATRIX.md).
 - Code extraction from declared artifacts first (OpenAPI, AsyncAPI, Helm, Backstage `catalog-info.yaml`, CODEOWNERS), plus tree-sitter detectors and Syft SBOMs — every finding with file, line and commit.
+- **Distributed systems end to end**: service-to-service HTTP calls (literal hosts or config variables), API gateway routing tables, BFF → gateway forwarding, and **RPC-style web UIs** (one presenter URL from `VITE_*` env, the action named in the body: action literals, constant maps and their use sites) — e.g. *UI → presenter → gate → backend → stores* in the real order. A Compose service built from a sibling repository (`build: ../svc`) is the same element as that repository's container. **Scan all** datasources of a project with one click.
 - Webhooks + watches + scheduled reconciliation; partial scans never cause false deletions.
 
 ### Living architecture
@@ -123,6 +124,7 @@ Design → ADR → plan → issues / commits → runtime observation → drift �
 ### Drift and delivery
 - **Three-way drift**: desired (baseline/ADR) vs code vs runtime, with `unknown` / `incomplete` states, grace windows and an observe-only rollout to keep false positives down.
 - Triage workflow, scoped and expiring suppressions (reasons optional), **delete** a finding you consider untrue (dismissed as a false positive, never resurrected by re-evaluation, restorable) — one at a time or every open finding of a rule. Re-keyed elements and inferred external dependencies never raise "X is no longer observed".
+- **Contract drift across services** (no baseline needed): a UI action its gateway does not route, a gateway route to an endpoint the backend does not expose (framework probe paths excluded).
 - Notifications to email, Slack, Teams or webhooks (Apprise).
 - **Traceability** from initiative → issue → PR → commit → build → image digest → running workload: *Done in Jira* is never confused with *deployed*.
 - Architecture checks for CI as signed **SARIF** reports — report-only first, blocking only with deterministic rules and owner approval.
