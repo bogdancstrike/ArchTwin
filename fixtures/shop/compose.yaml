@@ -140,6 +140,7 @@ services:
 
   schema-init:
     image: archtwin-fixture-shop:local
+    build: ./services                 # same image as the shop services; never pulled
     container_name: archtwin-fixture-schema-init
     restart: "no"
     depends_on: { schema-registry: { condition: service_healthy } }

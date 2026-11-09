@@ -29,15 +29,15 @@ export function NewProjectDialog({ open, onClose }: { open: boolean; onClose: ()
 export function ProjectsPage() {
   const me = useMe();
   const h = useApi<HomeData>(["home", me.data?.org_id], me.data ? "/home" : null);
-  const truncated = !!h.data?.totals.truncated;
-  const all = useApi<Project[]>(["projects", me.data?.org_id], truncated ? "/projects" : null);   // home caps at the 60 most recent
-  const shown = new Set((h.data?.projects ?? []).map((p) => p.id));
-  const rest = (all.data ?? []).filter((p) => !shown.has(p.id) && (!q || `${p.title} ${p.purpose} ${p.tags.join(" ")}`.toLowerCase().includes(q.toLowerCase())))
-    .sort((a, b) => a.title.localeCompare(b.title));
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<"activity" | "name" | "drift">("activity");
-  const list = (h.data?.projects ?? []).filter((p) => !q || `${p.title} ${p.purpose} ${p.tags.join(" ")}`.toLowerCase().includes(q.toLowerCase()))
+  const matches = (p: { title: string; purpose: string; tags: string[] }) => !q || `${p.title} ${p.purpose} ${p.tags.join(" ")}`.toLowerCase().includes(q.toLowerCase());
+  const truncated = !!h.data?.totals.truncated;
+  const all = useApi<Project[]>(["projects", me.data?.org_id], truncated ? "/projects" : null);   // home caps at the 60 most recent
+  const shown = new Set((h.data?.projects ?? []).map((p) => p.id));
+  const rest = (all.data ?? []).filter((p) => !shown.has(p.id) && matches(p)).sort((a, b) => a.title.localeCompare(b.title));
+  const list = (h.data?.projects ?? []).filter(matches)
     .sort((a, b) => sort === "name" ? a.title.localeCompare(b.title) : sort === "drift" ? (b.drift?.open ?? 0) - (a.drift?.open ?? 0) : b.last_activity.localeCompare(a.last_activity));
   return <div className="hero-wash min-h-full"><div className="mx-auto max-w-7xl space-y-6 p-8">
     <PageHeader eyebrow={me.data?.orgs.find((o) => o.id === me.data?.org_id)?.name} title="Projects"
