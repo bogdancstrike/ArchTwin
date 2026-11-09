@@ -7,9 +7,9 @@ Legend: **[MVP]** required for M3 · **[Later]** may slip. Check a task only wit
 - [ ] 0.2 [MVP] Fake-LLM mode covers every pipeline path in CI; nightly real-model eval for each selectable model.
 
 ## 1. Architecture assistant — AT-ARCHITECTURE_ASSISTANT-001..004
-- [ ] 1.1 [MVP] Evidence-pack builder with deterministic tools, scope pre-filtering, manifest hash.
-- [ ] 1.2 [MVP] Structured responses + citation validator; unsupported-claim marking; UNKNOWN with last observation time.
-- [ ] 1.3 [MVP] Model picker (Luna default, Terra, Sol) wired to `/ai/models`; chosen model shown with each answer.
+- [x] 1.1 [MVP] Evidence-pack builder with deterministic tools, scope pre-filtering, manifest hash.
+- [x] 1.2 [MVP] Structured responses + citation validator; unsupported-claim marking; UNKNOWN with last observation time.
+- [x] 1.3 [MVP] Model picker (Luna default, Terra, Sol) wired to `/ai/models`; chosen model shown with each answer.
 - [ ] 1.4 [MVP] Budgets, rate limits, cancellation, SSE streaming, Langfuse trace correlation.
 - [ ] 1.5 [Later] Draft ADR / review / task suggestions as proposals with preview + Apply.
 
@@ -19,7 +19,7 @@ Legend: **[MVP]** required for M3 · **[Later]** may slip. Check a task only wit
 - [ ] 2.3 [MVP] Integration-point discovery (APIs, topics, contracts, network zones) with unknowns.
 
 ## 3. Integration designer — AT-INTEGRATION_DESIGNER-001..003
-- [ ] 3.1 [MVP] Option generation schema and trade-off matrix; ≥2 options when viable, explanation otherwise.
+- [x] 3.1 [MVP] Option generation schema and trade-off matrix; ≥2 options when viable, explanation otherwise.
 - [ ] 3.2 [MVP] AI-drafted C4/sequence diagrams as view specs rendered by the diagram-design renderer; linter must pass.
 - [ ] 3.3 [Later] ADR + task drafts with remote write only via phase-05 approval flow.
 
