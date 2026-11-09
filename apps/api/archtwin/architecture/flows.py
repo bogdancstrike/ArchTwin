@@ -136,6 +136,12 @@ def recognize(g: dict[str, Any]) -> dict[str, Any]:
             if wf:
                 flows.append(wf)
             continue
+        if n["attributes"].get("in_process"):          # an application event inside one runtime (module -> module)
+            prod = [e for e in edges.values() if e["kind"] == "publishes" and e["target"] == k]
+            steps = [{**_step(g, e), "label": e["attributes"].get("label", "publishes")} for e in prod[:4]] + listener_steps(g, k, depth=2)
+            if steps:
+                flows.append(_finish(g, _fid("event", k), "event", f"Event: {n.get('name', k)}", steps[:MAX_STEPS], system_of, entry=k))
+            continue
         prod = [e for e in edges.values() if e["kind"] == "publishes" and e["target"] == k and nodes.get(e["source"], {}).get("kind") != "component"]
         cons = [e for e in edges.values() if e["kind"] == "consumes" and e["target"] == k and nodes.get(e["source"], {}).get("kind") != "component"]
         if not prod and not cons:
@@ -229,10 +235,7 @@ def _endpoint_flows(g: dict[str, Any], system_of: dict[str, str]) -> list[dict[s
         steps: list[dict[str, Any]] = []
         owner_c = owner.get(ek, handler)
         if "effects" in a:          # handler-level evidence: what this route's code does (not every import of its module)
-            for fx in a["effects"][:6]:
-                t = fx.get("target")
-                if t in nodes and t != owner_c:
-                    steps.append(_synthetic(handler, t, fx.get("kind", "calls"), fx.get("label", ""), 0.9))
+            steps += effect_steps(g, handler, a["effects"], owner_c, depth=2)
         else:
             for comp in a.get("uses", [])[:6]:
                 if comp in nodes and comp not in shared_kernel:
@@ -355,3 +358,39 @@ def owner_of(g: dict[str, Any], endpoint: str) -> str | None:
         if e["kind"] == "exposes" and e["target"] == endpoint:
             return e["source"]
     return None
+
+
+def listener_steps(g: dict[str, Any], ck: str, depth: int = 2) -> list[dict[str, Any]]:
+    """An in-process event delivered to each listener (as its own entry point), then what that listener does."""
+    nodes = g["nodes"]
+    out: list[dict[str, Any]] = []
+    for x, xn in sorted(nodes.items()):
+        a = xn["attributes"]
+        if xn["kind"] != "api-endpoint" or ck not in a.get("listens", []) or a.get("method") != "EVENT":
+            continue
+        comp = a.get("component")
+        if comp not in nodes:
+            continue
+        out.append({**_synthetic(ck, comp, "delivers", a.get("handler", ""), 0.95), "protocol": "in-process event"})
+        out += effect_steps(g, comp, a.get("effects", []), comp, depth - 1)
+        if len(out) >= MAX_STEPS:
+            break
+    return out
+
+
+def effect_steps(g: dict[str, Any], src: str, effects: list[dict[str, str]], skip: str | None, depth: int = 2) -> list[dict[str, Any]]:
+    """Steps for a handler's effects; events continue into their listeners and channels into their subscribers."""
+    nodes = g["nodes"]
+    out: list[dict[str, Any]] = []
+    for fx in effects[:8]:
+        t = fx.get("target")
+        if t not in nodes or t == skip:
+            continue
+        out.append(_synthetic(src, t, fx.get("kind", "calls"), fx.get("label", ""), 0.9))
+        tn = nodes[t]
+        if tn["kind"] == "message-channel" and depth > 0:
+            if tn["attributes"].get("in_process"):
+                out += listener_steps(g, t, depth)
+            else:
+                out += channel_delivery(g, t)
+    return out

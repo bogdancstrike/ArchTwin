@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 
-from archtwin.connectors.analyzers import async_flows, db_schema, gateway_maps, python_code, resources, webui
+from archtwin.connectors.analyzers import async_flows, db_schema, gateway_maps, java_code, python_code, resources, webui
 from archtwin.connectors.analyzers.common import HOSTPORT_RX, SCHEME_REL, URL_RX, classify, read, safe_url, scheme_base, walk
 from archtwin.connectors.sdk import DocumentOut, ScanResult
 
@@ -512,6 +512,8 @@ class RepoAnalyzer:
             if host in names and host != svc.name:
                 rel, proto = SCHEME_REL.get(scheme, ("calls", scheme))
                 attrs = {"protocol": proto, "port": port, "via": var or "config", "url": safe_url(m.group(0))[:200]}
+                if re.search(r"/(?:health\w*|ready\w*|live\w*|ping|status|actuator/health)\b", m.group("path") or ""):
+                    attrs["purpose"] = "health check"        # a liveness probe, not a functional dependency
                 if rel == "writes":
                     attrs["access"] = "read-write (inferred from connection URL)"
                 conf = getattr(self, "_conf_override", None) or (0.9 if rel == "calls" else 0.8)
@@ -530,6 +532,15 @@ class RepoAnalyzer:
                 self.r.edge("static", svc.key, rel, nr, V_XREPO, attrs={"protocol": proto, "port": port, "via": var or "config",
                             "url": safe_url(m.group(0))[:200], "resolved_by": "name"}, ref=ref, span=span, confidence=0.7)
                 found = True
+        bare = value.strip()
+        if not found and var and re.search(r"_(?:HOST|HOSTNAME|SERVER|ADDR)$", var) and bare in names and bare != svc.name:
+            tgt = names[bare]                       # VALKEY_HOST=valkey: a bare host name of a service here
+            hint = f"{var} {tgt.name} {tgt.spec.get('image', '')}".lower()
+            proto = next((p for k, p in (("redis", "redis"), ("valkey", "redis"), ("postgres", "postgresql"), ("mysql", "mysql"),
+                                         ("mongo", "mongodb"), ("kafka", "kafka"), ("rabbit", "amqp"), ("elastic", "http")) if k in hint), "tcp")
+            rel_kind = "writes" if proto in ("postgresql", "mysql", "mongodb") else "calls"
+            self.r.edge("static", svc.key, rel_kind, tgt.key, V_CONFIG, attrs={"protocol": proto, "via": var}, ref=ref, span=span, confidence=0.85)
+            found = True
         if not found:
             hm = HOSTPORT_RX.match(value.strip())
             if hm and hm.group("host") in names and hm.group("host") != svc.name:
@@ -562,6 +573,8 @@ class RepoAnalyzer:
             self.manifests(ctx, ctx_files, svcs)
             if any(f.suffix == ".py" for f in ctx_files):
                 self.python(ctx, ctx_files, svcs)
+            if any(f.suffix == ".java" for f in ctx_files):
+                self.java(ctx, ctx_files, svcs)
             if (ctx / "package.json").exists():
                 self.typescript(ctx, ctx_files, svcs)
             self.web_ui(ctx, ctx_files, svcs)
@@ -1250,6 +1263,169 @@ class RepoAnalyzer:
                 if a in comps and b in comps:
                     self.r.edge("static", f"component:{s.system}/{s.name}/{a}", "depends-on",
                                 f"component:{s.system}/{s.name}/{b}", V_TS, attrs={"imports": n, "protocol": "in-process"})
+
+    # ------------------------------------------------------------------ Java / Spring
+    def _store_host(self, s: Service, rx: str) -> str | None:
+        """A container of this system whose name/image matches `rx` and that the service is configured to reach (or the only one)."""
+        cands = [o for o in self.by_system.get(s.system, {}).values() if re.search(rx, f"{o.name} {o.spec.get('image', '')}", re.IGNORECASE)]
+        env = " ".join(v for _, v in _env_items(s.spec))
+        for o in cands:
+            if re.search(rf"\b{re.escape(o.name)}\b", env):
+                return o.key
+        return cands[0].key if len(cands) == 1 else None
+
+    def java(self, ctx: Path, files: list[Path], svcs: list[Service]) -> None:
+        errors: list[str] = []
+        cb = java_code.analyze(ctx, files, lambda f: f.read_bytes(), errors)
+        if errors:
+            self.r.complete = False
+            self.r.warnings += [f"java parse failed (file skipped): {e}" for e in errors[:20]]
+        if cb is None:
+            return
+        V = java_code.V_JAVA
+        deps = java_code.module_dependencies(cb)
+        cyc = java_code.cycles({k for k in deps})
+        routes = java_code.routes(cb)
+        listeners = java_code.listeners(cb)
+        self.r.stats["java_classes"] = self.r.stats.get("java_classes", 0) + len(cb.classes)
+        for s in svcs:
+            sysn, base = s.system, f"{s.system}/{s.name}"
+            comp = lambda fq, base=base: f"component:{base}/{cb.module_of.get(fq) or 'app'}"  # noqa: E731
+            redis = self._store_host(s, r"redis|valkey|dragonfly|keydb")
+            s3 = self._store_host(s, r"s3|seaweed|minio|ceph|garage")
+            for name, mod in sorted(cb.modules.items()):
+                members = [c for f, c in cb.classes.items() if cb.module_of.get(f) == name]
+                rel = _rel(self.root, members[0].path.parent) if members else ""
+                ck = f"component:{base}/{name}"
+                self.r.node("static", ck, "component", mod.display, V, ref=rel, span={"path": rel},
+                            attrs={"module": mod.package, "language": "java", "classes": len(members), "path": rel,
+                                   "modulith": mod.explicit, "named_interfaces": sorted(mod.named_interfaces.values()),
+                                   "allowed_dependencies": mod.allowed,
+                                   "stereotypes": dict(sorted({c.stereotype: sum(1 for x in members if x.stereotype == c.stereotype)
+                                                               for c in members if c.stereotype}.items()))})
+                self.r.edge("static", s.key, "contains", ck, V, ref=rel)
+            for (a, b), d in sorted(deps.items()):
+                attrs = {"imports": d["count"], "protocol": "in-process", "types": d["types"], "allowed": d["allowed"]}
+                if d["internal"]:
+                    attrs["boundary_violation"] = "internal types used: " + ", ".join(t.split(".")[-1] for t in d["internal"][:6])
+                    attrs["internal_access"] = d["internal"]
+                if not d["allowed"]:
+                    attrs["boundary_violation"] = (attrs.get("boundary_violation", "") + "; not in allowedDependencies").lstrip("; ")
+                if (a, b) in cyc:
+                    attrs["cycle"] = True
+                self.r.edge("static", f"component:{base}/{a}", "depends-on", f"component:{base}/{b}", V, attrs=attrs, confidence=1.0)
+            # L4: classes with a role (controllers, services, repositories, listeners, configuration, entities, records used across)
+            chosen = {f for f, c in cb.classes.items() if c.stereotype or any(a in c.annotations for a in ("Entity", "Table"))
+                      or any(set(m.annotations) & (java_code.EVENT_LISTENERS | set(java_code.MQ_LISTENERS) | {"Scheduled"}) for m in c.methods)}
+            chosen |= {f for f, c in cb.classes.items() if c.kind in ("record", "interface") and "Event" in c.name or c.name.endswith(("Api", "Port"))}
+            for f in sorted(chosen)[: self.MAX_CODE_PER_SERVICE]:
+                c = cb.classes[f]
+                rel = _rel(self.root, c.path)
+                end = max([m.end for m in c.methods] + [c.line])
+                self.r.node("static", f"code:{base}/{f}", "code", c.name, V, ref=rel, span={"path": rel, "line_start": c.line, "line_end": end},
+                            attrs={"element": c.kind, "module": c.package, "path": rel, "line_start": c.line, "line_end": end, "language": "java",
+                                   "stereotype": c.stereotype, "annotations": sorted(c.annotations)[:12], "bases": c.extends[:10],
+                                   "methods": len(c.methods), "method_list": [{"name": m.name, "line": m.line} for m in c.methods[:80]],
+                                   "technology": f"java {c.stereotype or c.kind}"})
+                self.r.edge("static", comp(f), "contains", f"code:{base}/{f}", V, ref=rel)
+            for f in sorted(chosen):
+                c = cb.classes[f]
+                for t in sorted(set(c.fields.values()) | set(c.extends))[:20]:
+                    tgt = cb.resolve(t, c)
+                    if tgt is not None and tgt.fqcn in chosen and tgt.fqcn != f:
+                        rel = "inherits" if t in c.extends else "injects"
+                        self.r.edge("static", f"code:{base}/{f}", "depends-on", f"code:{base}/{tgt.fqcn}", V,
+                                    attrs={"relation": rel, "protocol": "in-process"}, ref=_rel(self.root, c.path), confidence=0.95)
+
+            def effects_list(c: java_code.JClass, m: java_code.Method, sysn: str = sysn, base: str = base, s3: str | None = s3) -> list[dict[str, str]]:
+                fx = java_code.method_effects(cb, c, m)
+                out: list[dict[str, str]] = []
+                out += [{"target": f"table:{sysn}/code/{t}", "kind": "writes", "label": f"writes {t}"} for t in sorted(fx.writes)[:6]]
+                out += [{"target": f"table:{sysn}/code/{t}", "kind": "reads", "label": f"reads {t}"} for t in sorted(fx.reads)[:6]]
+                out += [{"target": f"channel:{sysn}/event/{e}", "kind": "publishes", "label": f"publishes {e}"} for e in sorted(fx.events)[:4]]
+                out += [{"target": f"channel:{sysn}/{p}", "kind": "publishes", "label": f"PUBLISH {p}"} for p in sorted(fx.pubsub)[:3]]
+                out += [{"target": f"channel:{sysn}/{p}", "kind": "publishes", "label": f"XADD {p}"} for p in sorted(fx.streams)[:3]]
+                out += [{"target": f"kafka-topic:{sysn}/{t}", "kind": "publishes", "label": f"produces {t}"} for t in sorted(fx.topics)[:3]]
+                if fx.storage:
+                    out.append({"target": s3 or "external:s3", "kind": "writes", "label": "object storage (S3 API)"})
+                out += [{"target": f"component:{base}/{mname}", "kind": "uses", "label": "module API"} for mname in sorted(fx.modules)[:4]]
+                return out
+
+            for r in routes:
+                c = cb.classes.get(r.cls)
+                if c is None:
+                    continue
+                m = next((x for x in c.methods if x.name == r.handler), None)
+                rel = _rel(self.root, c.path)
+                ek = f"endpoint:{base}/{r.method} {r.path}"
+                attrs: dict[str, Any] = {"method": r.method, "path": r.path, "handler": f"{c.name}.{r.handler}", "module": c.package,
+                                         "component": comp(r.cls), "language": "java", "kind": r.kind}
+                if r.kind == "ws":
+                    attrs["protocol"] = "websocket"
+                if m is not None:
+                    attrs["effects"] = effects_list(c, m)
+                self.r.node("static", ek, "api-endpoint", f"{r.method} {r.path}", V, attrs=attrs, ref=rel,
+                            span={"path": rel, "line_start": r.line, "line_end": r.line})
+                self.r.edge("static", s.key, "exposes", ek, V, ref=rel, span={"path": rel, "line_start": r.line})
+            # messaging: in-process application events, Redis pub/sub + streams, Kafka/Rabbit/JMS
+            publishers: dict[str, set[str]] = defaultdict(set)
+            for f, c in cb.classes.items():
+                for m in c.methods:
+                    fx = java_code.method_effects(cb, c, m, depth=0)
+                    for e in fx.events:
+                        publishers[f"event/{e}"].add(f)
+                    for p in fx.pubsub | fx.streams:
+                        publishers[p].add(f)
+            tech = {"spring-event": "Spring application event (in-process)", "redis-pubsub": "Redis pub/sub", "redis-stream": "Redis stream",
+                    "kafka": "Kafka topic", "rabbitmq": "RabbitMQ queue", "jms": "JMS destination", "sqs": "SQS queue", "stream": "stream"}
+            consumers: dict[str, list[java_code.Listener]] = defaultdict(list)
+            for li in listeners:
+                key = f"event/{li.channel}" if li.technology == "spring-event" else li.channel
+                consumers[key].append(li)
+            for key in sorted(set(publishers) | set(consumers)):
+                kinds = {li.technology for li in consumers.get(key, [])}
+                is_event = key.startswith("event/")
+                if not is_event and not (kinds & {"redis-pubsub", "redis-stream"}) and not any(cb.classes[f] for f in publishers.get(key, ())):
+                    continue
+                t = "spring-event" if is_event else (next(iter(kinds)) if kinds else "redis-pubsub")
+                ck = f"channel:{sysn}/{key}" if t != "kafka" else f"kafka-topic:{sysn}/{key}"
+                name = key.split("/", 1)[1] if is_event else key
+                kind = "kafka-topic" if t == "kafka" else "message-channel"
+                self.r.node("static", ck, kind, name, V, attrs={"technology": tech.get(t, t), "subtype": "event" if is_event else "channel",
+                                                                "pattern": name, "in_process": is_event})
+                if not is_event and redis and t.startswith("redis"):
+                    self.r.edge("static", redis, "contains", ck, V)
+                for f in sorted(publishers.get(key, ())):
+                    c = cb.classes[f]
+                    rel = _rel(self.root, c.path)
+                    lbl = f"publishes {name}" if is_event else f"PUBLISH {name}"
+                    self.r.edge("static", comp(f), "publishes", ck, V, attrs={"protocol": tech.get(t, t), "label": lbl, "class": c.name}, ref=rel)
+                    if not is_event:
+                        self.r.edge("static", s.key, "publishes", ck, V, attrs={"protocol": tech.get(t, t), "label": lbl}, ref=rel)
+                for li in consumers.get(key, []):
+                    c = cb.classes.get(li.cls)
+                    if c is None:
+                        continue
+                    rel = _rel(self.root, c.path)
+                    self.r.edge("static", comp(li.cls), "consumes", ck, V, ref=rel, span={"path": rel, "line_start": li.line},
+                                attrs={"protocol": tech.get(t, t), "label": f"{c.name}.{li.method}", "class": c.name})
+                    if not is_event:
+                        self.r.edge("static", s.key, "consumes", ck, V, ref=rel, attrs={"protocol": tech.get(t, t), "label": f"SUBSCRIBE {name}"})
+                    m = next((x for x in c.methods if x.line == li.line), None) or next((x for x in c.methods if x.name == li.method), None)
+                    if m is not None and is_event:     # the listener as an entry point with its own effects (flows, docs)
+                        ek = f"endpoint:{base}/EVENT {name} -> {c.name}.{li.method}:{li.line}"
+                        self.r.node("static", ek, "api-endpoint", f"on {name} → {c.name}.{li.method}", V, ref=rel,
+                                    span={"path": rel, "line_start": li.line},
+                                    attrs={"method": "EVENT", "path": name, "handler": f"{c.name}.{li.method}", "component": comp(li.cls),
+                                           "language": "java", "kind": "listener", "listens": [ck], "effects": effects_list(c, m)})
+                        self.r.edge("static", s.key, "exposes", ek, V, ref=rel)
+            for tname, c in java_code.entities(cb):
+                rel = _rel(self.root, c.path)
+                self.r.node("static", f"table:{sysn}/code/{tname}", "table", tname, V, ref=rel, span={"path": rel, "line_start": c.line},
+                            attrs={"declared_by": ["jpa"], "entity": c.name,
+                                   "columns": [{"name": n, "type": t, "nullable": None, "primary_key": False, "references": ""}
+                                               for n, t in list(c.fields.items())[:80]]})
+                self.r.edge("static", comp(c.fqcn), "references", f"table:{sysn}/code/{tname}", V, attrs={"relation": "maps entity"}, ref=rel)
 
     def manifests(self, ctx: Path, files: list[Path], svcs: list[Service]) -> None:
         libs: list[tuple[str, str, str, str]] = []      # (ecosystem, name, spec, file)
