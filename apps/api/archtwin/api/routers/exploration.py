@@ -8,8 +8,10 @@ from fastapi import APIRouter, Depends, Query
 from archtwin.api.deps import project_ctx, require
 from archtwin.architecture import explore, flows
 from archtwin.architecture import service as arch
-from archtwin.common.db import RequestContext
+from archtwin.common.db import RequestContext, uow
+from archtwin.common.errors import not_found
 from archtwin.common.paging import PageQuery, page_query, paginate_items
+from archtwin.documents import service as docs
 from archtwin.flags import service as flags
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}", tags=["architecture"])
@@ -49,3 +51,17 @@ async def element_search(q: str = Query(..., min_length=1, max_length=120), limi
 async def element_detail(key: str = Query(..., min_length=3, max_length=600), c: RequestContext = Depends(project_ctx)):
     await _view(c)
     return await explore.detail(c, await arch.graph(c), key)
+
+
+@router.get("/source")
+async def source(path: str = Query(..., min_length=1, max_length=600), start: int = Query(1, ge=1), end: int | None = Query(None, ge=1),
+                 around: int | None = Query(None, ge=1), c: RequestContext = Depends(project_ctx)):
+    """Exact lines of an indexed source file of this project (highlighted in the UI); `around` = a line to centre on."""
+    await require(c, "document", "view")
+    if around:
+        start, end = max(1, around - 12), around + 40
+    async with uow(c) as conn:
+        src = await docs.source_lines(conn, c, path, start, end or start + 80)
+    if not src:
+        raise not_found("source (the file is not indexed: scan the datasource with code indexing)")
+    return src

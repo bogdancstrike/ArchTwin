@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import type { Finding } from "@/lib/types";
 import { DataTable, type Column } from "@/components/DataTable";
+import { SplitLayout } from "@/components/SplitLayout";
 
 const SEV: Record<string, string> = { critical: "bad", high: "bad", medium: "warn", low: "muted" };
 const VERDICT: Record<string, string> = { drift: "accent", unknown: "muted", incomplete: "warn" };
@@ -51,8 +52,8 @@ export function DriftPage({ projectId }: { projectId: string }) {
     { key: "status", label: "Status", sortable: true, render: (f) => <span className="text-xs">{f.status}</span> },
     { key: "last_seen", label: "Seen", sortable: true, render: (f) => <span className="text-xs">{ago(f.last_seen)}</span> },
   ];
-  return <div className="grid gap-4 p-6 xl:grid-cols-[1fr_480px]">
-    <Card eyebrow="Deterministic rules · three-way" title="Drift findings" actions={<Button size="sm" onClick={() => ev.mutate(undefined as never)}><RefreshCw size={14} /> Evaluate now</Button>}>
+  return <SplitLayout storageKey="drift" title="Drift findings" sideWidth="xl:w-[58%]" side={(toggle) =>
+    <Card eyebrow="Deterministic rules · three-way" title="Drift findings" actions={<><Button size="sm" onClick={() => ev.mutate(undefined as never)}><RefreshCw size={14} /> Evaluate now</Button>{toggle}</>}>
       <DataTable<Finding> queryKey={["drift", projectId]} endpoint={`/projects/${projectId}/drift`} columns={columns} rowKey={(f) => f.id}
         defaultSort="severity" defaultDir="asc" searchPlaceholder="Search findings, elements, rules" selected={findingId ?? null}
         onRowClick={(f) => nav({ to: "/projects/$projectId/drift/$findingId", params: { projectId, findingId: f.id } })}
@@ -60,7 +61,7 @@ export function DriftPage({ projectId }: { projectId: string }) {
           { key: "verdict", label: "Verdict", options: [["drift", "Drift"], ["unknown", "Unknown"], ["incomplete", "Incomplete"]] },
           { key: "severity", label: "Severity", options: [["critical", "Critical"], ["high", "High"], ["medium", "Medium"], ["low", "Low"]] }]}
         empty="No findings. Approve a baseline in Settings and connect a runtime source; drift appears when evidence disagrees with the baseline or the code." />
-    </Card>
+    </Card>}>
     <Card title="Details">{findingId ? <FindingDetail projectId={projectId} fid={findingId} /> : <p className="text-sm text-soft">Select a finding.</p>}</Card>
-  </div>;
+  </SplitLayout>;
 }

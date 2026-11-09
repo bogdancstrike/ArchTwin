@@ -2,12 +2,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Background, Controls, MarkerType, MiniMap, ReactFlow, ReactFlowProvider, useReactFlow, type Edge, type Node, type NodeMouseHandler } from "@xyflow/react";
 import { ChevronRight, GitCompare, RotateCcw, Table2, Workflow } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge, Button, Card, Empty, ErrorBox, Input, OriginBadges, Select, Spinner, Table, cn } from "@/components/ui";
 import { api, download } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
-import { CodeBlock } from "@/components/CodeBlock";
+import { CodeBlock, type Source } from "@/components/CodeBlock";
 import type { Evidence, Snapshot, View } from "@/lib/types";
 import { C4Edge, C4Node, ZoomContext, type EdgeData, type NodeData } from "@/diagram/elements";
 import { layoutView, NODE_H, NODE_W } from "@/diagram/layout";
@@ -51,10 +51,22 @@ function ElementDetail({ projectId, elementKey }: { projectId: string; elementKe
     {L.documented.length > 0 && <div><div className="eyebrow mb-1">Drawn in documentation</div>
       <ul className="space-y-0.5 text-xs">{L.documented.map((x: any) => <li key={x.edge}>{x.direction === "out" ? "→" : "←"} {x.kind} {x.other} <span className="text-soft">({x.diagram})</span></li>)}</ul></div>}
     {d.data.mentions.length > 0 && <div><div className="eyebrow mb-1">Mentioned in docs &amp; code</div>
-      <ul className="space-y-1 text-xs">{d.data.mentions.map((m: any, i: number) => <li key={i} className="rounded border border-rule p-1.5">
-        <div className="flex items-center gap-1"><Badge tone={m.kind === "code" ? "muted" : "link"}>{m.kind}</Badge><span className="truncate font-mono">{m.path}:{m.line_start}</span></div>
-        <div className="mt-0.5 line-clamp-2 text-soft">{m.snippet}</div></li>)}</ul></div>}
+      <ul className="space-y-1 text-xs">{d.data.mentions.map((m: any, i: number) => <SourceItem key={i} projectId={projectId} path={m.path} line={m.line_start}
+        badge={<Badge tone={m.kind === "code" ? "muted" : "link"}>{m.kind}</Badge>} snippet={m.snippet} />)}</ul></div>}
   </div>;
+}
+
+/** A file:line reference that expands into the highlighted source, fetched on demand (inspect code inside ArchTwin). */
+function SourceItem({ projectId, path, line, badge, snippet }: { projectId: string; path: string; line?: number; badge?: React.ReactNode; snippet?: string }) {
+  const [open, setOpen] = useState(false);
+  const src = useApi<Source>(["source", projectId, path, line], open ? `/projects/${projectId}/source?path=${encodeURIComponent(path)}&around=${line ?? 1}` : null);
+  return <li className="rounded border border-rule p-1.5">
+    <button type="button" className="flex w-full items-center gap-1 text-left hover:text-link" onClick={() => setOpen((o) => !o)} aria-expanded={open}
+      title="Show the source">{badge}<span className="truncate font-mono">{path}{line ? `:${line}` : ""}</span><ChevronRight size={12} className={cn("ml-auto shrink-0 transition", open && "rotate-90")} /></button>
+    {!open && snippet && <div className="mt-0.5 line-clamp-2 text-soft">{snippet}</div>}
+    {open && <div className="mt-1.5">{src.error ? <ErrorBox error={src.error} /> : !src.data ? <Spinner /> :
+      <CodeBlock src={src.data} highlight={line ? [line, line] : undefined} maxHeight={300} title={path} />}</div>}
+  </li>;
 }
 
 function ElementSearch({ projectId, onPick }: { projectId: string; onPick: (h: { key: string; parent_view: string }) => void }) {
@@ -96,11 +108,15 @@ function EvidencePanel({ projectId, sel, onClose, onZoom }: { projectId: string;
       {sel.kind === "node" && key && <ElementDetail projectId={projectId} elementKey={key} />}
       {key && <div><div className="eyebrow mb-1">Evidence ({obs.data?.length ?? "…"} observations)</div>
         {obs.isLoading && <Spinner />}
-        <ul className="space-y-2">{obs.data?.slice(0, 12).map((o) => <li key={o.id} className="rounded border border-rule p-2 text-xs">
-          <div className="flex justify-between"><OriginBadges origins={[o.origin]} /><span className="text-soft">{new Date(o.observed_at).toLocaleString()}</span></div>
-          <div className="mt-1 break-all font-mono">{o.source_ref || "—"}{o.evidence?.line_start ? `:${o.evidence.line_start}${o.evidence.line_end && o.evidence.line_end !== o.evidence.line_start ? "-" + o.evidence.line_end : ""}` : ""}</div>
-          <div className="mt-1 text-soft">rev <span className="font-mono">{(o.source_revision || "live").slice(0, 12)}</span> · {o.parser_version} · conf {Number(o.confidence).toFixed(2)}</div>
-        </li>)}</ul></div>}
+        <ul className="space-y-2 text-xs">{obs.data?.slice(0, 12).map((o) => <Fragment key={o.id}>
+          {o.source_ref && !o.source_ref.includes("://") && o.origin !== "runtime"
+            ? <SourceItem projectId={projectId} path={(o.evidence as any)?.path || o.source_ref} line={o.evidence?.line_start}
+                badge={<OriginBadges origins={[o.origin]} />} snippet={`rev ${(o.source_revision || "live").slice(0, 12)} · ${o.parser_version} · conf ${Number(o.confidence).toFixed(2)}`} />
+            : <li className="rounded border border-rule p-2">
+                <div className="flex justify-between"><OriginBadges origins={[o.origin]} /><span className="text-soft">{new Date(o.observed_at).toLocaleString()}</span></div>
+                <div className="mt-1 break-all font-mono">{o.source_ref || "—"}</div>
+                <div className="mt-1 text-soft">rev <span className="font-mono">{(o.source_revision || "live").slice(0, 12)}</span> · {o.parser_version} · conf {Number(o.confidence).toFixed(2)}</div></li>}
+        </Fragment>)}</ul></div>}
     </div>
   </aside>;
 }

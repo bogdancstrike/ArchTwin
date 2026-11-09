@@ -2,6 +2,7 @@ import { Database, GitFork, Globe, Network, Radio, Workflow } from "lucide-react
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Card, Empty, OriginBadges, Table, cn } from "@/components/ui";
 import { DataTable } from "@/components/DataTable";
+import { SplitLayout } from "@/components/SplitLayout";
 
 interface Step { from: string; to: string; kind: string; edge: string; label: string; protocol: string; origins: string[]; confidence: number;
   inferred_only: boolean; documented: boolean; evidence: number }
@@ -67,8 +68,8 @@ export function FlowsPage({ projectId }: { projectId: string }) {
   const [cur, setCur] = useState<Flow | null>(null);
   const [step, setStep] = useState<number | null>(null);
   useEffect(() => setStep(null), [cur?.id]);
-  return <div className="grid h-full gap-4 p-6 xl:grid-cols-[minmax(380px,1fr)_minmax(0,2fr)]">
-    <Card eyebrow="Recognized automatically" title={<span className="flex items-center gap-2"><Workflow size={16} /> Flows</span>}>
+  return <SplitLayout storageKey="flows" title="Flows" sideWidth="xl:w-[440px]" side={(toggle) => <>
+    <Card eyebrow="Recognized automatically" title={<span className="flex items-center gap-2"><Workflow size={16} /> Flows</span>} actions={toggle}>
       <DataTable<Flow> queryKey={["flows", projectId]} endpoint={`/projects/${projectId}/flows`} rowKey={(x) => x.id} selected={cur?.id ?? null}
         onRowClick={setCur} searchPlaceholder="Search flows or participants" defaultSort="" defaultDir="desc"
         empty="No flows yet. Add datasources and scan them: flows come from endpoints, calls between services, topics and data access."
@@ -81,7 +82,7 @@ export function FlowsPage({ projectId }: { projectId: string }) {
           { key: "length", label: "Steps", sortable: true, render: (x) => <span className="num">{x.length}</span> },
           { key: "participants", label: "Participants", sortable: true, render: (x) => <span className="num">{x.participants.length}</span> }]} />
     </Card>
-    <div className="min-w-0 space-y-4">
+  </>}>
       {!cur ? <Empty title="Select a flow">Pick a flow to see it as a diagram with the evidence for every step.</Empty> : <>
         <Card eyebrow={`${kindOf(cur.kind).label} flow · confidence ${cur.confidence.toFixed(2)}${cur.distributed ? ` · across ${cur.systems.join(", ")}` : ""}`} title={cur.name}>
           <Sequence flow={cur} active={step} onStep={setStep} />
@@ -96,6 +97,5 @@ export function FlowsPage({ projectId }: { projectId: string }) {
               <td className="px-2"><OriginBadges origins={st.origins} /></td><td className="num px-2">{st.confidence.toFixed(2)}</td><td className="num px-2">{st.evidence}</td></tr>; })}</Table>
           {step !== null && <p className="mt-2 break-all font-mono text-[11px] text-soft">relation key: {cur.steps[step].edge}</p>}
         </Card></>}
-    </div>
-  </div>;
+  </SplitLayout>;
 }

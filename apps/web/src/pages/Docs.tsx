@@ -7,6 +7,7 @@ import { Badge, Button, Card, ErrorBox, Select, Spinner, Table } from "@/compone
 import { api, download } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { DataTable } from "@/components/DataTable";
+import { SplitLayout } from "@/components/SplitLayout";
 
 export function DocsPage({ projectId }: { projectId: string }) {
   const gen = useApi<any[]>(["gen", projectId], `/projects/${projectId}/generated-docs`);
@@ -22,9 +23,8 @@ export function DocsPage({ projectId }: { projectId: string }) {
   const titleOf = (k: string) => types.data?.find((t) => t.key === k)?.title ?? k;
   const generate = useAction(() => api<any>(`/projects/${projectId}/generated-docs`, { method: "POST", json: { template: tpl } }), [["gen", projectId]], "Documentation generated");
   const upload = useAction((f: File) => { const fd = new FormData(); fd.append("file", f); return api(`/projects/${projectId}/documents`, { method: "POST", body: fd }); }, [["docs", projectId]], "Document ingested");
-  return <div className="grid gap-4 p-6 xl:grid-cols-[380px_1fr]">
-    <div className="space-y-4">
-      <Card eyebrow="Generated from evidence" title="Documentation">
+  return <SplitLayout storageKey="docs" title="Documentation" sideWidth="xl:w-[420px]" side={(toggle) => <div className="space-y-4">
+      <Card eyebrow="Generated from evidence" title="Documentation" actions={toggle}>
         <div className="flex gap-2"><Select aria-label="Document type" className="flex-1" value={tpl} onChange={(e) => setTpl(e.target.value)}>
           {(["evidence", "ai"] as const).map((m) => <optgroup key={m} label={m === "evidence" ? "Cited from evidence (deterministic)" : "AI drafts (cited, review required)"}>
             {types.data?.filter((t) => t.mode === m).map((t) => <option key={t.key} value={t.key}>{t.title}</option>)}</optgroup>)}</Select>
@@ -43,7 +43,7 @@ export function DocsPage({ projectId }: { projectId: string }) {
           columns={[{ key: "title", label: "Title", sortable: true, render: (d) => <span className="text-xs">{d.title}</span> },
             { key: "path", label: "Path", sortable: true, render: (d) => <span className="font-mono text-[10px] text-soft" title={d.path}>{d.path}</span> }]} />
       </Card>
-    </div>
+    </div>}>
     <Card title={docSel ? doc.data?.title : sel ? `${titleOf(cur.data?.template ?? "")} v${cur.data?.version ?? ""}` : "Preview"} actions={sel && cur.data && <Button size="sm" onClick={() => download(`/projects/${projectId}/generated-docs/${sel}/markdown`, `${cur.data.template}-v${cur.data.version}.md`)}>Export Markdown</Button>}>
       {(cur.isLoading || doc.isLoading) && <Spinner />}
       {diff && <details className="mb-3"><summary className="cursor-pointer text-sm text-link">Changes since previous version</summary><pre className="mt-2 max-h-72 overflow-auto rounded bg-paper-2 p-2 text-xs">{diff}</pre></details>}
@@ -52,5 +52,5 @@ export function DocsPage({ projectId }: { projectId: string }) {
         <Table head={["Lines", "Section", "Passage"]}>{doc.data.passages.map((p: any) => <tr key={p.id} className="border-b border-rule align-top"><td className="px-2 py-1 font-mono text-[10px]">{p.line_start}–{p.line_end}</td><td className="px-2 text-xs font-medium">{p.heading}</td><td className="px-2 text-xs whitespace-pre-wrap">{p.text.slice(0, 600)}</td></tr>)}</Table></div>}
       {!sel && !docSel && <p className="text-sm text-soft">Generate a document or open a source document.</p>}
     </Card>
-  </div>;
+  </SplitLayout>;
 }
