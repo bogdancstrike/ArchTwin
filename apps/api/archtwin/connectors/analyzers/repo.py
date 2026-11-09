@@ -552,9 +552,11 @@ class RepoAnalyzer:
 
     def python(self, ctx: Path, files: list[Path], svcs: list[Service]) -> None:
         errors: list[str] = []
-        declared = gateway_maps.declared_endpoints(ctx, files) if len(svcs) == 1 else []
+        declared = gateway_maps.declared_endpoints(ctx, files)
         routes = gateway_maps.routing_tables(ctx, files) if len(svcs) == 1 else []
-        dynamic_entries = sorted({d.module for d in declared if d.module})      # handlers loaded by name from configuration
+        # handlers loaded by name from configuration: entries of the only service, or (shared image) of every role that runs
+        # the handler's component
+        dynamic_entries = sorted({d.module for d in declared if d.module}) if len(svcs) == 1 else []
         scripts = console_scripts(ctx)
         entries_all = [e for s in svcs for e in _entry_modules(_argv(s.spec), scripts)[0]] + dynamic_entries
         copied = [c for s in svcs for c in s.spec.get("_df", {}).get("copied", [])]
@@ -570,6 +572,10 @@ class RepoAnalyzer:
             role_mods = [m for mod, sub in roles for m in python_code.role_entries(mods, mod, sub)]
             entries = (role_mods or entries) + dynamic_entries                 # a CLI role runs only what its command starts
             reach = python_code.reachable(mods, entries) if entries else set()
+            if len(svcs) > 1 and declared and reach:
+                running = {python_code.component_of(m) for m in reach}
+                handlers = sorted({d.module for d in declared if d.module in mods and python_code.component_of(d.module) in running})
+                reach |= python_code.reachable(mods, handlers)
             if entries and not reach:
                 continue
             if not entries:
@@ -609,6 +615,8 @@ class RepoAnalyzer:
                 for rt in mods[m].routes:
                     self._endpoint(s, mods, comps, rt.method, rt.path, m, rt.handler, _rel(self.root, Path(rt.file)), rt.line, python_code.PARSER_VERSION)
             for d in declared:
+                if len(svcs) > 1 and d.module not in reach:
+                    continue                                   # this role does not run that handler
                 m = d.module if d.module in mods else ""
                 self._endpoint(s, mods, comps, d.method, d.path, m, d.handler, d.source, d.line, gateway_maps.V_DECLARED, {"declared_in": d.source})
             self._gateway_routes(s, mods, comps, routes, declared)
