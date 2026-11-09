@@ -113,7 +113,9 @@ paths:
     post:
       summary: Provider webhook ingress — authenticated by HMAC signature, not by a user token
       description: >
-        GitHub: X-Hub-Signature-256 + X-GitHub-Delivery. Generic: X-ArchTwin-Signature = sha256=HMAC(secret, "{ts}.{body}"),
+        GitHub: X-Hub-Signature-256 + X-GitHub-Delivery. GitLab: X-Gitlab-Token (the webhook secret token) + X-Gitlab-Event-UUID
+        (or Idempotency-Key); push / merge request / issue hooks. Taiga: X-TAIGA-WEBHOOK-SIGNATURE = hex HMAC-SHA1(key, body),
+        delivery id derived from the body; deletes wait for the next reconcile scan. Generic: X-ArchTwin-Signature = sha256=HMAC(secret, "{ts}.{body}"),
         X-ArchTwin-Timestamp within 300 s, X-ArchTwin-Delivery. Deliveries are de-duplicated; a commit is extracted once.
         Every rejection returns the same opaque problem (AT-WEBHOOK-001) and stores nothing. Requires flag connectors.webhooks.
       operationId: receiveWebhook
@@ -132,7 +134,8 @@ paths:
                 type: object
                 properties:
                   duplicate: {type: boolean}
-                  outcome: {type: string, enum: [scan_queued, duplicate_commit, work_item_updated, ignored_untracked_ref, ignored_event, pong]}
+                  outcome: {type: string, enum: [scan_queued, duplicate_commit, work_item_updated, ignored_untracked_ref, ignored_branch_deleted, ignored_unknown_repo,
+                                          ignored_unknown_project, ignored_delete_until_reconcile, ignored_event, pong]}
         '401': {description: Signature or timestamp invalid (opaque)}
         '404': {description: Unknown connector, webhooks not configured or flag off (opaque)}
 components:

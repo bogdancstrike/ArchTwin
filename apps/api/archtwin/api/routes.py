@@ -259,6 +259,9 @@ async def connector_kinds(project_id: uuid.UUID | None = None, c: RequestContext
     for m in registry.manifests():
         out.append({**m, "enabled": await flags.enabled("module.connector-platform", c.org_id, project_id)
                     and await flags.enabled(m["module_flag"], c.org_id, project_id) and await flags.enabled(m["flag"], c.org_id, project_id)})
+        if m["kind"] == "git":          # where local directories may live (mounted read-only); paths only, no contents
+            from archtwin.config import settings
+            out[-1]["source_roots"] = settings().source_roots
     return out
 
 

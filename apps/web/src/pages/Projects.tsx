@@ -39,7 +39,7 @@ export function ProjectsPage() {
   const rest = (all.data ?? []).filter((p) => !shown.has(p.id) && matches(p)).sort((a, b) => a.title.localeCompare(b.title));
   const list = (h.data?.projects ?? []).filter(matches)
     .sort((a, b) => sort === "name" ? a.title.localeCompare(b.title) : sort === "drift" ? (b.drift?.open ?? 0) - (a.drift?.open ?? 0) : b.last_activity.localeCompare(a.last_activity));
-  return <div className="hero-wash min-h-full"><div className="mx-auto max-w-7xl space-y-6 p-8">
+  return <div className="hero-wash min-h-full"><div className="space-y-6 p-8">
     <PageHeader eyebrow={me.data?.orgs.find((o) => o.id === me.data?.org_id)?.name} title="Projects"
       actions={<Button variant="primary" onClick={() => setOpen(true)}><Plus size={16} /> New project</Button>}>
       Each project is a living twin of one architecture: what was designed, what the code says and what is running.</PageHeader>

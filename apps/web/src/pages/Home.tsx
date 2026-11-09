@@ -87,7 +87,7 @@ export function HomePage() {
   const d = h.data;
   const first = me.data?.display_name.split(" ")[0];
   return <div className="hero-wash min-h-full">
-    <div className="mx-auto max-w-7xl space-y-8 p-8">
+    <div className="space-y-8 p-8">
       <div className="fade-up flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="eyebrow">{new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</div>

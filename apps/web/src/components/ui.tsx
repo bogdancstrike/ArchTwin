@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import { X } from "lucide-react";
-import { useEffect, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type PointerEvent as ReactPointerEvent, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 
 export const cn = clsx;
 
@@ -133,8 +133,35 @@ export function ErrorBox({ error }: { error: unknown }) {
   return <div role="alert" className="rounded-md border border-bad/30 bg-bad/10 p-3 text-sm text-bad">{e.message ?? String(error)}{e.problem?.code && <span className="ml-2 font-mono text-xs opacity-70">{e.problem.code}</span>}</div>;
 }
 
+/** Columns start equally split and can be resized by dragging the right edge of a header cell (keyboard: ←/→ on the handle). */
 export function Table({ head, children }: { head: ReactNode[]; children: ReactNode }) {
-  return <div className="overflow-auto"><table className="w-full text-sm"><thead><tr className="border-b border-rule text-left">{head.map((h, i) => <th key={i} className="eyebrow px-2 py-2 font-medium">{h}</th>)}</tr></thead><tbody>{children}</tbody></table></div>;
+  const [widths, setWidths] = useState<number[] | null>(null);       // percentages; null = equal split
+  const ref = useRef<HTMLTableElement>(null);
+  const n = head.length;
+  const w = widths && widths.length === n ? widths : Array.from({ length: n }, () => 100 / n);
+  const resize = (i: number, deltaPct: number) => {
+    if (i >= n - 1) return;
+    const next = [...w];
+    const d = Math.max(-(next[i] - 5), Math.min(next[i + 1] - 5, deltaPct));       // keep every column >= 5 %
+    next[i] += d; next[i + 1] -= d;
+    setWidths(next);
+  };
+  const start = (i: number) => (e: ReactPointerEvent) => {
+    e.preventDefault();
+    const total = ref.current?.getBoundingClientRect().width || 1;
+    let last = e.clientX;
+    const move = (ev: PointerEvent) => { resize(i, ((ev.clientX - last) / total) * 100); last = ev.clientX; };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
+  return <div className="overflow-auto"><table ref={ref} className="w-full table-fixed text-sm">
+    <colgroup>{w.map((x, i) => <col key={i} style={{ width: `${x}%` }} />)}</colgroup>
+    <thead><tr className="border-b border-rule text-left">{head.map((h, i) => <th key={i} className="eyebrow relative truncate px-2 py-2 font-medium">{h}
+      {i < n - 1 && <span role="separator" aria-orientation="vertical" aria-label="Resize column" tabIndex={0} onPointerDown={start(i)}
+        onKeyDown={(e) => { if (e.key === "ArrowLeft") resize(i, -2); if (e.key === "ArrowRight") resize(i, 2); }}
+        onDoubleClick={() => setWidths(null)}
+        className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize select-none hover:bg-accent/40 focus:bg-accent/40 focus:outline-none" />}</th>)}</tr></thead>
+    <tbody className="[&_td]:break-words">{children}</tbody></table></div>;
 }
 
 export const ago = (iso?: string | null) => {

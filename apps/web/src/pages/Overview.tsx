@@ -38,7 +38,7 @@ export function OverviewPage({ projectId }: { projectId: string }) {
   for (const r of dr.by ?? []) if (r.verdict === "drift") sevCounts[r.severity] = (sevCounts[r.severity] ?? 0) + r.n;
   const base = `/projects/${projectId}`;
   const off = (c: any) => !c.configured && <p className="text-sm text-soft">{c.reason ?? "Not configured yet."}</p>;
-  return <div className="mx-auto max-w-7xl space-y-6 p-6">
+  return <div className="space-y-6 p-6">
     <section aria-label="Key figures" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <StatTile label="Elements" value={a.snapshot ? a.snapshot.node_count.toLocaleString() : "—"} icon={<Network size={16} />}
         hint={a.snapshot ? `${a.snapshot.edge_count.toLocaleString()} relationships · v${a.snapshot.version}` : a.reason ?? "no snapshot yet"} />
