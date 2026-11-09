@@ -6,15 +6,15 @@ Legend: ✅ done and verified (automated tests + live run) · 🟡 done, partial
 Rule (AGENTS.md): checkboxes in the OpenSpec `tasks.md` files are ticked only once code is **merged with green CI**. Work is merged
 into `main` through pull requests (CI: python, integration, policies, web, spec, secrets; nightly full-stack e2e + coverage gate).
 
-## Verification evidence (2026-11-09, local Compose stack + shop fixture)
+## Verification evidence (2026-11-10, local Compose stack + shop fixture)
 | Suite | Command | Result |
 |---|---|---|
-| Unit (incl. fixture ground truth, webhook HMAC, Kafka detection, OTel/GitHub/OpenAPI with mocked HTTP, Cerbos fail-closed, egress redirects, git path policy) | `make test` | 120 passed |
+| Unit (incl. fixture ground truth, webhook HMAC, Kafka detection, OTel/GitHub/OpenAPI with mocked HTTP, Cerbos fail-closed, egress redirects, git path policy) | `make test` | 225 passed (+ async flows, Java/Spring, ADR conformance, re-analysis) |
 | RLS isolation (as `archtwin_app`) | `make test-integration` | 8 passed |
-| API journeys on the live stack (+ `/home`, live fixture connectors, signed webhooks, live GitHub, full API surface incl. negative paths) | `make test-e2e` | 45 passed (GitHub live test skips when unauthenticated rate limit is exhausted) |
-| **Whole-system Python coverage** (unit + integration + e2e + UI, API/worker/CLI run under coverage.py via `compose.coverage.yaml`) | `make coverage` | **93.4 %** (gate: 90 %; nightly `e2e` workflow) |
-| Browser (PKCE login, home, C4 zoom, evidence, axe WCAG AA on home + projects) | `make test-ui` | 2 passed |
-| Cerbos policy tests | `make policy-test` | 44 passed |
+| API journeys on the live stack (+ `/home`, live fixture connectors, signed webhooks, live GitHub, full API surface incl. negative paths) | `make test-e2e` | 58 passed (+ guided baselines, ADR conformance → drift) (GitHub live test skips when unauthenticated rate limit is exhausted) |
+| **Whole-system Python coverage** (unit + integration + e2e + UI, API/worker/CLI run under coverage.py via `compose.coverage.yaml`) | `make coverage` | **90.3 %** of 11,665 statements (gate: 90 %; nightly `e2e` workflow) |
+| Browser (PKCE login, home, C4 zoom, evidence, axe WCAG AA on home + projects) | `make test-ui` | 4 passed (stable over 8 consecutive runs) |
+| Cerbos policy tests | `make policy-test` | 76 passed |
 | OpenSpec | `make spec-validate` | 7/7 valid (strict) |
 | Migrations | up → down → up | ok (CI job `integration`) |
 
