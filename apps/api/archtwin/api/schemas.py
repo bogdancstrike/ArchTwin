@@ -115,7 +115,7 @@ class AskIn(Strict):
 
 
 class GenerateIn(Strict):
-    template: Literal["system-overview", "container-catalog", "interface-catalog"]
+    template: str = Field(min_length=3, max_length=60)          # a key of documents.doctypes.DOC_TYPES (validated by the engine)
 
 
 class ManualDocIn(Strict):

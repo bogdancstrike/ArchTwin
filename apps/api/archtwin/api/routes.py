@@ -28,6 +28,7 @@ from archtwin.diagrams import export as dexport
 from archtwin.diagrams import render, views
 from archtwin.documents import engine as docengine
 from archtwin.documents import service as docs
+from archtwin.documents.doctypes import DOC_TYPES
 from archtwin.drift import service as drift
 from archtwin.flags import service as flags
 from archtwin.home import service as home_svc
@@ -590,6 +591,12 @@ async def document_upload(file: UploadFile = File(...), c: RequestContext = Depe
                                                   text_body=text, mime=mime, source_kind="upload", connector_id=None, parser=parser)
         await audit.record(conn, c, "document.upload", "document", did, details={"name": file.filename, "mime": mime, "new": created})
     return {"id": did, "created": created, "mime": mime}
+
+
+@r.get("/doc-types", tags=["documents"])
+async def doc_types(c: RequestContext = Depends(get_ctx)):
+    """Document types the Docs tab can generate (evidence = deterministic and cited; ai = drafted from cited evidence)."""
+    return [{"key": d.key, "title": d.title, "audience": d.audience, "description": d.description, "mode": d.mode} for d in DOC_TYPES.values()]
 
 
 @r.get("/projects/{project_id}/generated-docs", tags=["documents"])

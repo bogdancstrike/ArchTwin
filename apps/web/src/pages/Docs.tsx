@@ -9,6 +9,7 @@ import { useAction, useApi } from "@/lib/hooks";
 
 export function DocsPage({ projectId }: { projectId: string }) {
   const gen = useApi<any[]>(["gen", projectId], `/projects/${projectId}/generated-docs`);
+  const types = useApi<{ key: string; title: string; audience: string; description: string; mode: "evidence" | "ai" }[]>(["doc-types"], "/doc-types");
   const [tpl, setTpl] = useState("system-overview");
   const [sel, setSel] = useState<string | null>(null);
   const [diff, setDiff] = useState("");
@@ -18,16 +19,23 @@ export function DocsPage({ projectId }: { projectId: string }) {
   const doc = useApi<any>(["doc", docSel], docSel ? `/projects/${projectId}/documents/${docSel}` : null);
   const cur = useApi<any>(["gendoc", sel], sel ? `/projects/${projectId}/generated-docs/${sel}` : null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const curType = types.data?.find((t) => t.key === tpl);
+  const titleOf = (k: string) => types.data?.find((t) => t.key === k)?.title ?? k;
   const generate = useAction(() => api<any>(`/projects/${projectId}/generated-docs`, { method: "POST", json: { template: tpl } }), [["gen", projectId]], "Documentation generated");
   const upload = useAction((f: File) => { const fd = new FormData(); fd.append("file", f); return api(`/projects/${projectId}/documents`, { method: "POST", body: fd }); }, [["docs", projectId]], "Document ingested");
   return <div className="grid gap-4 p-6 xl:grid-cols-[380px_1fr]">
     <div className="space-y-4">
       <Card eyebrow="Generated from evidence" title="Documentation">
-        <div className="flex gap-2"><Select aria-label="Template" value={tpl} onChange={(e) => setTpl(e.target.value)}><option value="system-overview">System overview</option><option value="container-catalog">Container catalog</option><option value="interface-catalog">Interface catalog</option></Select>
-          <Button variant="primary" size="sm" onClick={async () => { const r = await generate.mutateAsync(undefined as never); setSel(r.id); setDiff(r.diff ?? ""); }}>Generate</Button></div>
+        <div className="flex gap-2"><Select aria-label="Document type" className="flex-1" value={tpl} onChange={(e) => setTpl(e.target.value)}>
+          {(["evidence", "ai"] as const).map((m) => <optgroup key={m} label={m === "evidence" ? "Cited from evidence (deterministic)" : "AI drafts (cited, review required)"}>
+            {types.data?.filter((t) => t.mode === m).map((t) => <option key={t.key} value={t.key}>{t.title}</option>)}</optgroup>)}</Select>
+          <Button variant="primary" size="sm" disabled={generate.isPending} onClick={async () => { const r = await generate.mutateAsync(undefined as never); setSel(r.id); setDiff(r.diff ?? ""); }}>
+            {generate.isPending ? (curType?.mode === "ai" ? "Drafting…" : "Generating…") : "Generate"}</Button></div>
+        {curType && <p className="mt-1.5 text-xs text-muted">{curType.mode === "ai" && <Badge tone="link">AI draft</Badge>} {curType.description} <span className="text-soft">· for {curType.audience}</span></p>}
         <ErrorBox error={generate.error} />
         <ul className="mt-3 space-y-1 text-sm">{gen.data?.map((g) => <li key={g.id}><button className={"w-full rounded px-2 py-1 text-left hover:bg-paper-2 " + (sel === g.id ? "bg-paper-2" : "")} onClick={() => { setSel(g.id); setDiff(""); setDocSel(null); }}>
-          <FileText size={12} className="mr-1 inline" />{g.template} <span className="text-soft">v{g.version}</span> <Badge tone={g.coverage?.ratio >= 0.95 ? "ok" : "warn"}>{Math.round((g.coverage?.ratio ?? 0) * 100)}% cited</Badge></button></li>)}</ul>
+          <FileText size={12} className="mr-1 inline" />{titleOf(g.template)} <span className="text-soft">v{g.version}</span>{" "}
+          {g.coverage?.ai_draft ? <Badge tone="link">AI draft</Badge> : <Badge tone={g.coverage?.ratio >= 0.95 ? "ok" : "warn"}>{Math.round((g.coverage?.ratio ?? 0) * 100)}% cited</Badge>}</button></li>)}</ul>
       </Card>
       <Card eyebrow="Ingested" title="Source documents" actions={<><input ref={fileRef} type="file" hidden accept=".md,.txt,.pdf,.docx" onChange={(e) => e.target.files?.[0] && upload.mutate(e.target.files[0])} />
         <Button size="sm" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload</Button></>}>
@@ -35,7 +43,7 @@ export function DocsPage({ projectId }: { projectId: string }) {
         <ul className="mt-2 max-h-96 overflow-auto text-xs">{docs.data?.map((d) => <li key={d.id}><button className={"block w-full truncate px-1 py-0.5 text-left hover:bg-paper-2 " + (docSel === d.id ? "bg-paper-2" : "")} onClick={() => { setDocSel(d.id); setSel(null); }} title={d.path}>{d.title} <span className="text-soft">{d.path}</span></button></li>)}</ul>
       </Card>
     </div>
-    <Card title={docSel ? doc.data?.title : sel ? `${cur.data?.template ?? ""} v${cur.data?.version ?? ""}` : "Preview"} actions={sel && cur.data && <Button size="sm" onClick={() => download(`/projects/${projectId}/generated-docs/${sel}/markdown`, `${cur.data.template}-v${cur.data.version}.md`)}>Export Markdown</Button>}>
+    <Card title={docSel ? doc.data?.title : sel ? `${titleOf(cur.data?.template ?? "")} v${cur.data?.version ?? ""}` : "Preview"} actions={sel && cur.data && <Button size="sm" onClick={() => download(`/projects/${projectId}/generated-docs/${sel}/markdown`, `${cur.data.template}-v${cur.data.version}.md`)}>Export Markdown</Button>}>
       {(cur.isLoading || doc.isLoading) && <Spinner />}
       {diff && <details className="mb-3"><summary className="cursor-pointer text-sm text-link">Changes since previous version</summary><pre className="mt-2 max-h-72 overflow-auto rounded bg-paper-2 p-2 text-xs">{diff}</pre></details>}
       {sel && cur.data && <article className="prose-at"><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>{cur.data.content}</Markdown></article>}

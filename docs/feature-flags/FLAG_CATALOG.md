@@ -77,6 +77,7 @@ Which chat model a user may pick (`gpt-6-luna` default, `gpt-6-terra`, `gpt-6-so
 | `ai.general_chat` | `false` | phase-06-intelligence | org/project | Assistant General scope: plain chat via LiteLLM, never receives project evidence |
 | `ai.architecture_draft` | `false` | phase-06-intelligence | org/project | AI proposes elements/relations from docs as a draft; nothing enters the model until an architect accepts |
 | `ai.text_extend` | `false` | phase-06-intelligence | org/project | Extend/improve text the user is writing (ADR editor); suggestion only, user applies it |
+| `ai.doc_drafting` | `false` | phase-06-intelligence | org/project | AI-drafted documents (user guide, PRD, ARF, developer guide) from cited evidence; marked as drafts |
 | `ai.diagram_drafting` | `false` | phase-06-intelligence | org/project | explicit enable; eval thresholds must pass |
 | `ai.integration_design` | `false` | phase-06-intelligence | org/project | explicit enable; eval thresholds must pass |
 | `ai.task_drafting` | `false` | phase-06-intelligence | org/project | explicit enable; eval thresholds must pass |

@@ -28,7 +28,7 @@ profiles:
   general-chat:                          # Assistant "General" scope and text extension: no project evidence is sent
     model_alias: "${selected_model}"
     reasoning_effort: medium
-    allowed_operations: [general_chat, text_extend]
+    allowed_operations: [general_chat, text_extend, doc_drafting]
     max_output_tokens: 6000
     require_citations: false
     sensitive_payload_traces: false

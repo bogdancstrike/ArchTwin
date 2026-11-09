@@ -383,6 +383,13 @@ flags:
   enforcement: Extend/improve text the user is writing (ADR editor); suggestion only,
     user applies it
   immutable: false
+- key: ai.doc_drafting
+  default: false
+  phase: phase-06-intelligence
+  scope: org/project
+  enforcement: AI-drafted documents (user guide, PRD, ARF, developer guide) from cited
+    evidence; marked as drafts
+  immutable: false
 - key: ai.diagram_drafting
   default: false
   phase: phase-06-intelligence

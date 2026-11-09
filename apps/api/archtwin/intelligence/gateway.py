@@ -123,6 +123,9 @@ def _fake(messages: list[dict[str, str]], json_mode: bool, operation: str = "") 
     user = messages[-1]["content"]
     if operation == "general_chat":
         return f"General answer (fake LLM mode, no project evidence): {user[:120]}"
+    if operation == "doc_drafting":
+        ids = re.findall(r"^\[(E\d+)\]", user, re.MULTILINE)[:4]
+        return "# Draft (fake LLM mode)\n\n## Overview\n\nThe system is described by the evidence " + " ".join(f"[{i}]" for i in ids) + ".\n"
     if operation == "text_extend":
         src = re.search(r"<text>\n?(.*?)\n?</text>", user, re.DOTALL)
         base = (src.group(1) if src else user).strip()

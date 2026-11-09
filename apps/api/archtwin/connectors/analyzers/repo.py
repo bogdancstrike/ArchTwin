@@ -192,6 +192,11 @@ def _env_items(spec: dict[str, Any]) -> list[tuple[str, str]]:
     return [(str(k), "" if v is None else str(v)) for k, v in env.items()]
 
 
+def _cmdline(cmd: Any) -> str:
+    """A compose/Dockerfile command as one string: it may be a list (exec form) or a plain string (shell form)."""
+    return cmd if isinstance(cmd, str) else " ".join(map(str, cmd or []))
+
+
 def _entry_modules(spec: dict[str, Any], dockerfile_cmd: list[str]) -> list[str]:
     cmd = spec.get("command") or dockerfile_cmd or []
     if isinstance(cmd, str):
@@ -459,7 +464,7 @@ class RepoAnalyzer:
                             ref=_rel(self.root, mods[a].path) if a in mods else "", confidence=1.0)
             self._code_elements(s, mods, reach, comps)
             self._kafka(s, mods, reach)
-            cmdline = " ".join(map(str, s.spec.get("command") or s.spec.get("_df", {}).get("cmd", []) or []))
+            cmdline = _cmdline(s.spec.get("command") or s.spec.get("_df", {}).get("cmd", []) or [])
             serves_http = bool(re.search(r"uvicorn|gunicorn|hypercorn|granian|flask\s+run|daphne", cmdline))
             for m in sorted(reach) if serves_http else []:
                 for rt in mods[m].routes:
