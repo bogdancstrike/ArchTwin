@@ -12,7 +12,7 @@ interface AskResult { page: string; question: string; answer: string; ai: boolea
 type Page = "flows" | "decisions" | "docs";
 
 const COPY: Record<Page, { title: string; placeholder: string; none: string; noun: string }> = {
-  flows: { title: "Ask the flows", placeholder: "e.g. what is the flow of dissemination documents?", none: "No recognized flow matches these words.", noun: "flows" },
+  flows: { title: "Ask the flows", placeholder: "e.g. what happens when a user places an order?", none: "No recognized flow matches these words.", noun: "flows" },
   decisions: { title: "Ask the decisions", placeholder: "e.g. is caching part of any decision?", none: "No decision record mentions this — it is not covered by any ADR yet.", noun: "decisions" },
   docs: { title: "Ask the docs", placeholder: "e.g. how do I deploy the ingest service?", none: "No documentation passage matches.", noun: "passages" },
 };

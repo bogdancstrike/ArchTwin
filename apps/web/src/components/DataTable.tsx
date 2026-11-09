@@ -7,7 +7,7 @@ export const PAGE_SIZES = [5, 15, 25, 50, 100] as const;
 export const DEFAULT_PAGE_SIZE = 15;
 
 export interface Page<T> { items: T[]; total: number; page: number; page_size: number; pages: number }
-export interface Column<T> { key: string; label: string; sortable?: boolean; render: (row: T) => ReactNode; className?: string }
+export interface Column<T> { key: string; label: string; sortable?: boolean; render: (row: T) => ReactNode; className?: string; weight?: number }
 export interface FilterDef { key: string; label: string; options: [string, string][] }
 
 /** Server-side table: every list in the UI uses this contract (page, page_size, q, sort, dir + endpoint filters). */
@@ -47,7 +47,7 @@ export function DataTable<T>({ queryKey, endpoint, columns, rowKey, filters = []
     <ErrorBox error={res.error} />
     {!d ? <Skeleton className="h-40" /> : <>
       <div className={cn(res.isFetching && "opacity-70 transition-opacity")}>
-        <Table head={head}>{d.items.map((r) => { const k = rowKey(r);
+        <Table head={head} weights={columns.map((c) => c.weight ?? 1)}>{d.items.map((r) => { const k = rowKey(r);
           return <tr key={k} onClick={onRowClick ? () => onRowClick(r) : undefined}
             className={cn("border-b border-rule align-top", onRowClick && "cursor-pointer hover:bg-paper-2", selected === k && "bg-paper-2")}>
             {columns.map((c) => <td key={c.key} className={cn("px-2 py-1.5 text-sm", c.className)}>{c.render(r)}</td>)}</tr>; })}</Table>

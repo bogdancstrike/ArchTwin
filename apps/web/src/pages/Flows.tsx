@@ -62,9 +62,9 @@ function Sequence({ flow, active, onStep, onParticipant, selected }: { flow: Flo
           {self ? <path d={`M${x1},${y} h28 v12 h-28`} fill="none" stroke={on ? "var(--color-accent)" : "var(--color-muted)"} strokeWidth={on ? 2 : 1.25} markerEnd={`url(#${on ? "arr-on" : "arr"})`} />
             : <line x1={x1} x2={x2 + (x2 > x1 ? -2 : 2)} y1={y} y2={y} stroke={on ? "var(--color-accent)" : "var(--color-muted)"} strokeWidth={on ? 2 : 1.25}
               strokeDasharray={dashed ? "5 4" : undefined} markerEnd={`url(#${on ? "arr-on" : "arr"})`} />}
-          <circle cx={x1 + (x2 >= x1 ? 10 : -10)} cy={y - 9} r={7} fill={on ? "var(--color-accent)" : "var(--color-paper-2)"} />
-          <text x={x1 + (x2 >= x1 ? 10 : -10)} y={y - 6} textAnchor="middle" fontSize={8.5} fontWeight={600} fill={on ? "#fff" : "var(--color-ink)"}>{i + 1}</text>
-          <text x={(x1 + x2) / 2 + (self ? 50 : 0)} y={y - 5} textAnchor="middle" fontSize={10} fill="var(--color-muted)">{s.kind}{s.label && s.label !== s.kind ? ` · ${s.label}` : ""}</text>
+          <circle cx={x1 + (x2 >= x1 ? -11 : 11)} cy={y} r={7} fill={on ? "var(--color-accent)" : "var(--color-paper-2)"} />
+          <text x={x1 + (x2 >= x1 ? -11 : 11)} y={y + 3} textAnchor="middle" fontSize={8.5} fontWeight={600} fill={on ? "#fff" : "var(--color-ink)"}>{i + 1}</text>
+          <text x={(x1 + x2) / 2 + (self ? 50 : 0)} y={y - 5} textAnchor="middle" fontSize={10} fill="var(--color-muted)">{s.label && s.label !== s.kind ? (s.label.toLowerCase().startsWith(s.kind) ? s.label : `${s.kind} · ${s.label}`) : s.kind}</text>
         </g>;
       })}
     </svg>
@@ -93,14 +93,14 @@ export function FlowsPage({ projectId }: { projectId: string }) {
       <DataTable<Flow> queryKey={["flows", projectId]} endpoint={`/projects/${projectId}/flows`} rowKey={(x) => x.id} selected={cur?.id ?? null}
         onRowClick={setCur} searchPlaceholder="Search flows or participants" defaultSort="" defaultDir="desc"
         empty="No flows yet. Add datasources and scan them: flows come from endpoints, calls between services, topics and data access."
-        filters={[{ key: "kind", label: "Kind", options: [["endpoint", "Endpoint"], ["request", "Request"], ["event", "Event"], ["data", "Data"]] },
+        filters={[{ key: "kind", label: "Kind", options: [["endpoint", "Endpoint / job / listener"], ["event", "Workflow / event / channel"], ["request", "Request walk"], ["data", "Data store"]] },
           { key: "distributed", label: "Distributed", options: [["true", "Across systems"]] }]}
-        columns={[{ key: "name", label: "Flow", sortable: true, render: (x) => { const K = kindOf(x.kind);
-            return <><span className="flex items-center gap-1.5"><K.icon size={13} className="shrink-0 text-soft" /><span className="truncate">{x.name}</span></span>
+        columns={[{ key: "name", label: "Flow", sortable: true, weight: 5, render: (x) => { const K = kindOf(x.kind);
+            return <><span className="flex items-center gap-1.5"><K.icon size={13} className="shrink-0 self-start mt-0.5 text-soft" /><span className="line-clamp-2 break-words" title={x.name}>{x.name}</span></span>
               <span className="mt-0.5 flex flex-wrap gap-1">{x.distributed && <Badge tone="link"><GitFork size={9} /> {x.systems.length} systems</Badge>}
                 {x.documented && <Badge tone="muted">documented</Badge>}{x.inferred && <Badge tone="warn">inferred</Badge>}</span></>; } },
-          { key: "length", label: "Steps", sortable: true, render: (x) => <span className="num">{x.length}</span> },
-          { key: "participants", label: "Participants", sortable: true, render: (x) => <span className="num">{x.participants.length}</span> }]} />
+          { key: "length", label: "Steps", sortable: true, className: "w-14 text-right", render: (x) => <span className="num">{x.length}</span> },
+          { key: "participants", label: "Parts.", sortable: true, className: "w-14 text-right", render: (x) => <span className="num" title="participants">{x.participants.length}</span> }]} />
     </Card>
   </div>}>
       {!cur ? <Empty title="Select a flow">Pick a flow to see it as a diagram with the evidence for every step.</Empty> : <>

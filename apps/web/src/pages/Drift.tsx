@@ -81,12 +81,12 @@ export function DriftPage({ projectId }: { projectId: string }) {
   const [deleting, setDeleting] = useState<Finding[]>([]);
   const closeDetail = () => nav({ to: "/projects/$projectId/drift", params: { projectId } });
   const columns: Column<Finding>[] = [
-    { key: "verdict", label: "Verdict", sortable: true, render: (f) => <Badge tone={VERDICT[f.verdict]}>{f.verdict}</Badge> },
-    { key: "severity", label: "Severity", sortable: true, render: (f) => <Badge tone={SEV[f.severity]}>{f.severity}</Badge> },
-    { key: "title", label: "Finding", sortable: true, render: (f) => <><div>{f.title}</div><div className="font-mono text-[10px] text-soft">{f.rule_id}</div></> },
+    { key: "verdict", label: "Verdict", sortable: true, className: "w-20", render: (f) => <Badge tone={VERDICT[f.verdict]}>{f.verdict}</Badge> },
+    { key: "severity", label: "Severity", sortable: true, className: "w-20", render: (f) => <Badge tone={SEV[f.severity]}>{f.severity}</Badge> },
+    { key: "title", label: "Finding", sortable: true, weight: 4, render: (f) => <><div>{f.title}</div><div className="font-mono text-[10px] text-soft">{f.rule_id}</div></> },
     { key: "status", label: "Status", sortable: true, render: (f) => <span className="text-xs">{f.status}</span> },
-    { key: "last_seen", label: "Seen", sortable: true, render: (f) => <span className="text-xs">{ago(f.last_seen)}</span> },
-    { key: "actions", label: "", className: "w-10 text-right", render: (f) => f.status === "dismissed" ? null
+    { key: "last_seen", label: "Seen", sortable: true, className: "w-20 whitespace-nowrap", render: (f) => <span className="text-xs">{ago(f.last_seen)}</span> },
+    { key: "actions", label: "", className: "w-10 text-right", weight: 0.4, render: (f) => f.status === "dismissed" ? null
       : <button type="button" aria-label={`Delete finding ${f.title}`} title="Not true — delete" className="rounded p-1 text-soft hover:bg-paper-2 hover:text-bad"
           onClick={(e) => { e.stopPropagation(); setDeleting([f]); }}><Trash2 size={14} /></button> },
   ];

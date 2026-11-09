@@ -169,7 +169,8 @@ def recognize(g: dict[str, Any]) -> dict[str, Any]:
             continue
         flows.append(_finish(g, _fid("data", k), "data", f"Data: {n.get('name', k)}", [_step(g, e) for e in io[:MAX_STEPS]], system_of, entry=k))
 
-    flows.sort(key=lambda f: ({"request": 0, "endpoint": 1, "event": 2, "data": 3}[f["kind"]], -f["length"], f["name"]))
+    # most explanatory first: entry points with their effects, then workflows/events, then generic request walks, then stores
+    flows.sort(key=lambda f: ({"endpoint": 0, "event": 1, "request": 2, "data": 3}[f["kind"]], -f["length"], f["name"]))
     return {"flows": flows[:MAX_FLOWS], "total": len(flows),
             "counts": {k: sum(1 for f in flows if f["kind"] == k) for k in ("request", "endpoint", "event", "data")}}
 
