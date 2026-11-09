@@ -11,6 +11,7 @@ import { ElementDetail, EvidenceList } from "@/components/ElementInspector";
 import type { Snapshot, View } from "@/lib/types";
 import { C4Edge, C4Node, ZoomContext, type EdgeData, type NodeData } from "@/diagram/elements";
 import { layoutView, NODE_H, NODE_W } from "@/diagram/layout";
+import { ExportMenu } from "@/components/ExportMenu";
 
 const nodeTypes = { c4: C4Node };
 const edgeTypes = { c4: C4Edge };
@@ -208,6 +209,7 @@ function Canvas({ projectId }: { projectId: string }) {
           try { await download(`/projects/${projectId}/export/${f}/${viewKey}${search.full ? "?full=true" : ""}`, `${viewKey.replace(/[:/]/g, "_")}.${ext}`); }
           catch (err) { toast.error((err as Error).message); }
         }}><option value="">Export…</option><option value="svg">SVG (linted)</option><option value="html">HTML (linted)</option><option value="mermaid">Mermaid</option><option value="structurizr">Structurizr DSL</option></Select>
+        <ExportMenu projectId={projectId} resource="architecture" label="Export model" />
       </div>
     </div>
     {v.detail_views.length > 0 && <div className="flex flex-wrap items-center gap-2 border-b border-rule px-4 py-1.5 text-xs text-muted">

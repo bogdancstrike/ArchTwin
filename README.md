@@ -119,6 +119,7 @@ Design → ADR → plan → issues / commits → runtime observation → drift �
 - **Animated C4 zoom**: dive from the system context (L1) into a system's containers (L2) and a container's components (L3), with breadcrumbs and reduced-motion support.
 - **Editorial diagram quality**: every generated diagram follows the open-source [diagram-design](https://github.com/cathrynlavery/diagram-design) system — org-branded tokens, at most two focal accents, ≤ 9 primary nodes per view, orthogonal connectors — checked by a linter before export.
 - **ADRs** (MADR) with independent approval and immutable history; **living documentation** where every generated sentence cites its evidence.
+- **Exports** from Architecture, Flows, Drift, Decisions and Docs: Markdown (canonical, diagrams as Mermaid), Word (.docx), PDF or a ZIP bundle (every item, all formats and a `manifest.json` with project, snapshot and source revisions) — same permissions as the page, audited (`GET /api/v1/projects/{id}/export/{resource}?format=md|docx|pdf|zip`).
 
 ### Drift and delivery
 - **Three-way drift**: desired (baseline/ADR) vs code vs runtime, with `unknown` / `incomplete` states, grace windows and an observe-only rollout to keep false positives down.

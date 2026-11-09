@@ -2,12 +2,13 @@ import { FileText, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { Badge, Button, Card, ErrorBox, Select, Spinner, Table } from "@/components/ui";
 import { RichMarkdown } from "@/components/RichMarkdown";
-import { api, download } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { DataTable } from "@/components/DataTable";
 import { SplitLayout } from "@/components/SplitLayout";
 import { CostEstimate } from "@/components/CostEstimate";
 import { PageAsk } from "@/components/PageAsk";
+import { ExportMenu } from "@/components/ExportMenu";
 
 export function DocsPage({ projectId }: { projectId: string }) {
   const gen = useApi<any[]>(["gen", projectId], `/projects/${projectId}/generated-docs`);
@@ -25,7 +26,7 @@ export function DocsPage({ projectId }: { projectId: string }) {
   const upload = useAction((f: File) => { const fd = new FormData(); fd.append("file", f); return api(`/projects/${projectId}/documents`, { method: "POST", body: fd }); }, [["docs", projectId]], "Document ingested");
   return <SplitLayout storageKey="docs" title="Documentation" sideWidth="xl:w-[420px]" side={(toggle) => <div className="space-y-4">
       <PageAsk projectId={projectId} page="docs" selected={docSel} onPick={(m) => { setDocSel(m.id); setSel(null); }} />
-      <Card eyebrow="Generated from evidence" title="Documentation" actions={toggle}>
+      <Card eyebrow="Generated from evidence" title="Documentation" actions={<><ExportMenu projectId={projectId} resource="docs" label="All" />{toggle}</>}>
         <div className="flex gap-2"><Select aria-label="Document type" className="flex-1" value={tpl} onChange={(e) => setTpl(e.target.value)}>
           {(["evidence", "ai"] as const).map((m) => <optgroup key={m} label={m === "evidence" ? "Cited from evidence (deterministic)" : "AI drafts (cited, review required)"}>
             {types.data?.filter((t) => t.mode === m).map((t) => <option key={t.key} value={t.key}>{t.title}</option>)}</optgroup>)}</Select>
@@ -46,7 +47,7 @@ export function DocsPage({ projectId }: { projectId: string }) {
             { key: "path", label: "Path", sortable: true, render: (d) => <span className="font-mono text-[10px] text-soft" title={d.path}>{d.path}</span> }]} />
       </Card>
     </div>}>
-    <Card title={docSel ? doc.data?.title : sel ? `${titleOf(cur.data?.template ?? "")} v${cur.data?.version ?? ""}` : "Preview"} actions={sel && cur.data && <Button size="sm" onClick={() => download(`/projects/${projectId}/generated-docs/${sel}/markdown`, `${cur.data.template}-v${cur.data.version}.md`)}>Export Markdown</Button>}>
+    <Card title={docSel ? doc.data?.title : sel ? `${titleOf(cur.data?.template ?? "")} v${cur.data?.version ?? ""}` : "Preview"} actions={sel && cur.data && <ExportMenu projectId={projectId} resource="docs" id={sel} label="Export document" />}>
       {(cur.isLoading || doc.isLoading) && <Spinner />}
       {diff && <details className="mb-3"><summary className="cursor-pointer text-sm text-link">Changes since previous version</summary><pre className="mt-2 max-h-72 overflow-auto rounded bg-paper-2 p-2 text-xs">{diff}</pre></details>}
       {sel && cur.data && <RichMarkdown>{cur.data.content}</RichMarkdown>}

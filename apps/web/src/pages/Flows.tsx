@@ -5,6 +5,7 @@ import { DataTable } from "@/components/DataTable";
 import { ElementDetail, EvidenceList } from "@/components/ElementInspector";
 import { SplitLayout } from "@/components/SplitLayout";
 import { PageAsk } from "@/components/PageAsk";
+import { ExportMenu } from "@/components/ExportMenu";
 
 interface Step { from: string; to: string; kind: string; edge: string; label: string; protocol: string; origins: string[]; confidence: number;
   inferred_only: boolean; documented: boolean; evidence: number }
@@ -79,7 +80,7 @@ export function FlowsPage({ projectId }: { projectId: string }) {
     setInspect({ kind: "relation", key: st.edge, title: `${name(st.from)} ${st.kind} ${name(st.to)}` }); };
   return <SplitLayout storageKey="flows" title="Flows" sideWidth="xl:w-[440px]" side={(toggle) => <div className="space-y-4">
     <PageAsk projectId={projectId} page="flows" selected={cur?.id ?? null} onPick={(m) => m.flow && setCur(m.flow as Flow)} />
-    <Card eyebrow="Recognized automatically" title={<span className="flex items-center gap-2"><Workflow size={16} /> Flows</span>} actions={toggle}>
+    <Card eyebrow="Recognized automatically" title={<span className="flex items-center gap-2"><Workflow size={16} /> Flows</span>} actions={<><ExportMenu projectId={projectId} resource="flows" label="All" />{toggle}</>}>
       <DataTable<Flow> queryKey={["flows", projectId]} endpoint={`/projects/${projectId}/flows`} rowKey={(x) => x.id} selected={cur?.id ?? null}
         onRowClick={setCur} searchPlaceholder="Search flows or participants" defaultSort="" defaultDir="desc"
         empty="No flows yet. Add datasources and scan them: flows come from endpoints, calls between services, topics and data access."
@@ -94,7 +95,8 @@ export function FlowsPage({ projectId }: { projectId: string }) {
     </Card>
   </div>}>
       {!cur ? <Empty title="Select a flow">Pick a flow to see it as a diagram with the evidence for every step.</Empty> : <>
-        <Card eyebrow={`${kindOf(cur.kind).label} flow · confidence ${cur.confidence.toFixed(2)}${cur.distributed ? ` · across ${cur.systems.join(", ")}` : ""}`} title={cur.name}>
+        <Card eyebrow={`${kindOf(cur.kind).label} flow · confidence ${cur.confidence.toFixed(2)}${cur.distributed ? ` · across ${cur.systems.join(", ")}` : ""}`} title={cur.name}
+          actions={<ExportMenu projectId={projectId} resource="flows" id={cur.id} label="Export flow" />}>
           <Sequence flow={cur} active={step} onStep={pickStep} selected={inspect?.kind === "element" ? inspect.key : null}
             onParticipant={(pp) => { setStep(null); setInspect({ kind: "element", key: pp.key, title: pp.name }); }} />
           <p className="mt-2 text-xs text-soft">Solid = observed in code or runtime; dashed = documented in a diagram, inferred, or low confidence.
