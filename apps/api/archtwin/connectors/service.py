@@ -6,15 +6,17 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import and_, select
+from sqlalchemy import text as sql_text
 
 from archtwin.audit import service as audit
 from archtwin.common import crypto
-from archtwin.common.db import RequestContext, row, rows, uow
+from archtwin.common.db import RequestContext, row, rows, unscoped, uow
 from archtwin.common.errors import not_found, problem
 from archtwin.common.ids import new_id
 from archtwin.common.logging import log, redact
-from archtwin.common.schema import connectors, observations, scan_runs, secrets, source_artifacts
+from archtwin.common.schema import connectors, observations, org_settings, scan_runs, secrets, source_artifacts
 from archtwin.connectors import registry
+from archtwin.connectors.adapters.git_repo import ORG_ROOTS
 from archtwin.connectors.sdk import ScanResult
 from archtwin.documents import service as docs
 from archtwin.flags import service as flags
@@ -26,10 +28,7 @@ SOURCE_ROOTS_KEY = "source_roots"
 
 async def org_source_roots(org_id: uuid.UUID) -> list[str] | None:
     """Admin whitelist of local source roots for this org (System page); None = every mounted boundary."""
-    from sqlalchemy import text as sql_text
 
-    from archtwin.common.db import unscoped
-    from archtwin.common.schema import org_settings
     async with unscoped() as conn:
         await conn.execute(sql_text("SELECT set_config('app.org_id', :o, true)"), {"o": str(org_id)})
         r = (await conn.execute(select(org_settings.c.value).where(and_(org_settings.c.org_id == org_id,
@@ -39,7 +38,6 @@ async def org_source_roots(org_id: uuid.UUID) -> list[str] | None:
 
 async def scoped_roots(org_id: uuid.UUID):
     """Set the org's local-root whitelist for the local-directory connector in this task (contextvar)."""
-    from archtwin.connectors.adapters.git_repo import ORG_ROOTS
     ORG_ROOTS.set(await org_source_roots(org_id))
 
 

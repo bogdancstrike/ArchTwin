@@ -35,6 +35,9 @@ from archtwin.common.logging import log
 from archtwin.common.schema import connectors, scan_runs, webhook_deliveries
 from archtwin.connectors import registry
 from archtwin.connectors import service as csvc
+from archtwin.connectors.adapters.github import GitHubConnector
+from archtwin.connectors.adapters.gitlab import GitLabConnector, split_project
+from archtwin.connectors.adapters.taiga import KINDS, TaigaConnector, parse_target
 from archtwin.connectors.sdk import ScanResult
 from archtwin.flags import service as flags
 
@@ -163,7 +166,6 @@ async def _webhook_scan(ctx: RequestContext, c: dict[str, Any], event: str, ref:
 
 
 async def _handle_gitlab_item(ctx: RequestContext, c: dict[str, Any], event: str, payload: dict[str, Any]) -> tuple[str, uuid.UUID | None, dict]:
-    from archtwin.connectors.adapters.gitlab import GitLabConnector, split_project
     cfg = c["config"] or {}
     path = (payload.get("project") or {}).get("path_with_namespace", "")
     configured = {split_project(str(e), cfg.get("url"))[1] for e in cfg.get("projects") or []}
@@ -183,7 +185,6 @@ async def _handle_gitlab_item(ctx: RequestContext, c: dict[str, Any], event: str
 
 
 async def _handle_taiga(ctx: RequestContext, c: dict[str, Any], event: str, payload: dict[str, Any]) -> tuple[str, uuid.UUID | None, dict]:
-    from archtwin.connectors.adapters.taiga import KINDS, TaigaConnector, parse_target
     web, _, slug = parse_target(c["config"] or {}, check=False)
     typ = event.removeprefix("taiga.")
     data = payload.get("data") or {}
@@ -238,7 +239,6 @@ async def _handle(ctx: RequestContext, c: dict[str, Any], event: str, payload: d
         repo = (payload.get("repository") or {}).get("full_name", "")
         if not item or not repo or repo not in (c["config"] or {}).get("repos", []):
             return "ignored_unknown_repo", None, {"repo": repo}
-        from archtwin.connectors.adapters.github import GitHubConnector
         names = (c["config"] or {}).get("system_names") or {}
         system = names.get(repo) or repo.split("/")[1]
         r = ScanResult(revision=f"webhook:{event}:{item.get('updated_at', '')}", complete=False)

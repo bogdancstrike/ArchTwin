@@ -31,6 +31,7 @@ from openai import (
 from archtwin.common.errors import problem
 from archtwin.common.logging import log
 from archtwin.config import settings
+from archtwin.intelligence import usage
 
 
 @lru_cache
@@ -147,7 +148,6 @@ async def complete(messages: list[dict[str, str]], *, model: str, operation: str
                    json_mode: bool = False, max_tokens: int = 4000, ctx: Any = None) -> Completion:
     """One chat completion through LiteLLM. With `ctx`: monthly spend limits are checked first (402 AT-BUD-001) and the call
     — success or error — is written to the `llm_calls` ledger with tokens and cost."""
-    from archtwin.intelligence import usage
     if ctx is not None:
         await usage.check(ctx)
     t0 = time.monotonic()

@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from sqlalchemy import and_, case, func, select, text
@@ -26,8 +27,10 @@ from archtwin.audit import service as audit
 from archtwin.common import authz
 from archtwin.common.db import Principal, RequestContext, rows, unscoped, uow
 from archtwin.common.errors import problem
-from archtwin.common.schema import connectors, llm_calls, outbox_events, projects, scan_runs, spend_limits, users
+from archtwin.common.schema import connectors, llm_calls, org_settings, outbox_events, projects, scan_runs, spend_limits, users
 from archtwin.config import settings
+from archtwin.connectors import service as csvc
+from archtwin.connectors.adapters import git_repo
 from archtwin.intelligence import usage
 
 GROUPS = {"model": llm_calls.c.model, "operation": llm_calls.c.operation, "user": llm_calls.c.user_id, "project": llm_calls.c.project_id,
@@ -151,6 +154,10 @@ async def _labels(ctx: RequestContext, group_by: str, keys: set[str]) -> dict[st
             and_(projects.c.id.in_(ids), projects.c.org_id == ctx.org_id))))}
 
 
+async def labeled_limits(ctx: RequestContext) -> list[dict[str, Any]]:
+    return await _label_subjects(ctx, await usage.list_limits(ctx))
+
+
 async def _label_subjects(ctx: RequestContext, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     u = await _labels(ctx, "user", {i["subject"].split(":", 1)[1] for i in items if i["subject"].startswith("user:")})
     p = await _labels(ctx, "project", {i["subject"].split(":", 1)[1] for i in items if i["subject"].startswith("project:")})
@@ -245,7 +252,6 @@ async def _temporal() -> str:
 
 
 async def _valkey() -> str:
-    from urllib.parse import urlsplit
     u = urlsplit(settings().valkey_url)
     _, w = await asyncio.open_connection(u.hostname, u.port or 6379)
     w.close()
@@ -359,8 +365,6 @@ def policy_files() -> dict[str, Any]:
 
 # ------------------------------------------------------------------ local source roots (System page)
 async def source_roots(ctx: RequestContext) -> dict[str, Any]:
-    from archtwin.connectors import service as csvc
-    from archtwin.connectors.adapters import git_repo
     wl = await csvc.org_source_roots(ctx.org_id)
     tok = git_repo.ORG_ROOTS.set(wl)
     try:
@@ -372,9 +376,6 @@ async def source_roots(ctx: RequestContext) -> dict[str, Any]:
 
 
 async def set_source_roots(ctx: RequestContext, roots: list[str] | None) -> dict[str, Any]:
-    from archtwin.common.schema import org_settings
-    from archtwin.connectors import service as csvc
-    from archtwin.connectors.adapters import git_repo
     if roots is not None:
         bounds = [Path(b).resolve() for b in settings().source_roots]
         clean: list[str] = []

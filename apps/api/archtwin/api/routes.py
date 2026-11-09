@@ -4,11 +4,11 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile
 from fastapi.responses import PlainTextResponse
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, select
 from sse_starlette.sse import EventSourceResponse
 
 from archtwin.api import schemas as S
@@ -36,7 +36,6 @@ from archtwin.intelligence import assistant, gateway
 from archtwin.inventory import service as inventory
 from archtwin.kernel.idempotency import idempotent
 from archtwin.notifications import service as notify
-from archtwin.operations import service as ops
 from archtwin.projects import service as projects
 
 r = APIRouter(prefix="/api/v1")
@@ -254,87 +253,6 @@ async def audit_list(project_id: uuid.UUID | None = None, actor: str | None = No
         return rows(await conn.execute(q.order_by(audit_events.c.seq.desc()).limit(limit)))
 
 
-AUDIT_CATEGORIES = {   # category -> action prefixes (Audit page chips)
-    "datasources": ("connector.", "document.", "source_roots."),
-    "architecture": ("architecture.", "baseline.", "diagram.", "drift.", "suppression."),
-    "decisions": ("adr.",),
-    "ai": ("ai.", "usage.", "spend_limits."),
-    "access": ("project.member", "member.", "access.", "flag.", "org."),
-    "exports": ("export", "usage.export", "audit.export", "diagram.export"),
-}
-AUDIT_SORT = {"when": audit_events.c.seq, "who": audit_events.c.actor_name, "what": audit_events.c.action, "result": audit_events.c.decision}
-AUDIT_VERBS = [("connector.create", "added datasource"), ("connector.delete", "removed datasource"), ("connector.test", "tested datasource"),
-               ("connector.scan.request", "requested a scan of"), ("connector.scan.complete", "finished scanning"), ("connector.scan.fail", "failed scanning"),
-               ("connector.webhook", "received a webhook for"), ("ai.general", "asked a general AI question"), ("ai.ask", "asked the assistant about"),
-               ("ai.design", "requested an integration design in"), ("ai.text_extend", "extended text with AI in"),
-               ("ai.architecture_draft", "drafted architecture with AI in"), ("ai.conversation.archive", "deleted a conversation"),
-               ("adr.", "changed decision record"), ("baseline.", "changed a baseline in"), ("flag.update", "changed feature flag"),
-               ("spend_limits.update", "changed AI spend limits"), ("source_roots.update", "changed local source roots"),
-               ("usage.export", "exported AI usage"), ("access.inspect", "inspected roles & permissions"), ("project.create", "created project")]
-
-
-def _audit_summary(e: dict, projects_by_id: dict[str, str]) -> str:
-    verb = next((v for p_, v in AUDIT_VERBS if e["action"].startswith(p_)), e["action"].replace(".", " "))
-    target = (e.get("details") or {}).get("name") or (e["resource_kind"] if e["resource_kind"] not in ("org", "assistant") else "")
-    where = projects_by_id.get(str(e.get("project_id")), "")
-    s_ = f"{e['actor_name']} {verb}" + (f" {target}" if target and target not in verb else "") + (f" · {where}" if where else "")
-    return ("DENIED: " + s_) if e["decision"] != "allow" else s_
-
-
-@r.get("/audit/search", tags=["audit"])
-async def audit_search(page: int = Query(1, ge=1), page_size: int = Query(25), sort: str = "when", dir: str = Query("desc", pattern="^(asc|desc)$"),
-                       q: str | None = Query(None, max_length=200), actor: str | None = None, result: str | None = Query(None, pattern="^(allow|deny)$"),
-                       category: str | None = None, since: datetime | None = None, until: datetime | None = None,
-                       project_id: uuid.UUID | None = None, c: RequestContext = Depends(get_ctx)):
-    """Audit page: filters, categories, sort and pagination, plus a one-sentence summary per event."""
-    if page_size not in (10, 25, 50, 100):
-        raise problem(422, "AT-AUDIT-002", "Invalid page size", "10, 25, 50 or 100")
-    if not await authz.allowed(c.principal, "audit", "view", "", {"org_id": str(c.org_id), "project_id": ""}):
-        await audit.record_denial(c, "audit.view", "audit")
-        raise problem(403, "AT-AUTHZ-001", "Forbidden")
-
-    cond = [audit_events.c.org_id == c.org_id]
-    if project_id:
-        cond.append(audit_events.c.project_id == project_id)
-    if actor:
-        cond.append(audit_events.c.actor_name == actor)
-    if result:
-        cond.append(audit_events.c.decision == result if result == "allow" else audit_events.c.decision != "allow")
-    if category:
-        prefixes = AUDIT_CATEGORIES.get(category)
-        if not prefixes:
-            raise problem(422, "AT-AUDIT-003", "Unknown category", ", ".join(AUDIT_CATEGORIES))
-        cond.append(or_(*[audit_events.c.action.like(f"{p_}%") for p_ in prefixes]))
-    if since:
-        cond.append(audit_events.c.occurred_at >= since)
-    if until:
-        cond.append(audit_events.c.occurred_at < until + timedelta(days=1) if until.hour == 0 and until.minute == 0 else audit_events.c.occurred_at <= until)
-    if q:
-        like = f"%{q.lower()}%"
-        cond.append(or_(func.lower(audit_events.c.action).like(like), func.lower(audit_events.c.actor_name).like(like),
-                        func.lower(audit_events.c.resource_id).like(like), func.lower(audit_events.c.resource_kind).like(like)))
-    order = AUDIT_SORT.get(sort, audit_events.c.seq)
-    async with uow(c) as conn:
-        total = (await conn.execute(select(func.count()).select_from(audit_events).where(and_(*cond)))).scalar() or 0
-        items = rows(await conn.execute(select(audit_events).where(and_(*cond)).order_by(order.desc() if dir == "desc" else order.asc(),
-                                                                                           audit_events.c.seq.desc())
-                                        .offset((page - 1) * page_size).limit(page_size)))
-        actors = [r_[0] for r_ in (await conn.execute(select(audit_events.c.actor_name).where(audit_events.c.org_id == c.org_id)
-                                                      .group_by(audit_events.c.actor_name).order_by(audit_events.c.actor_name).limit(200))).all()]
-    pids = {i["project_id"] for i in items if i["project_id"]}
-    titles: dict[str, str] = {}
-    if pids:
-        async with unscoped() as conn:
-            await conn.execute(text("SELECT set_config('app.org_id', :o, true)"), {"o": str(c.org_id)})
-            from archtwin.common.schema import projects as projects_t
-            titles = {str(r_.id): r_.title for r_ in (await conn.execute(select(projects_t.c.id, projects_t.c.title).where(projects_t.c.id.in_(pids)))).all()}
-    for i in items:
-        i["summary"] = _audit_summary(i, titles)
-        i["project_title"] = titles.get(str(i["project_id"]), "")
-    return {"items": items, "total": total, "page": page, "page_size": page_size, "pages": max(1, -(-total // page_size)),
-            "categories": list(AUDIT_CATEGORIES), "actors": actors}
-
-
 @r.get("/audit/verify", tags=["audit"])
 async def audit_verify(c: RequestContext = Depends(get_ctx)):
     if not await authz.allowed(c.principal, "audit", "view", "", {"org_id": str(c.org_id), "project_id": ""}):
@@ -434,70 +352,6 @@ async def architecture(snapshot_id: uuid.UUID | None = None, at: datetime | None
         g["nodes"] = {k: n for k, n in g["nodes"].items() if n["kind"] in ks}
         g["edges"] = {k: e for k, e in g["edges"].items() if e["source"] in g["nodes"] and e["target"] in g["nodes"]}
     return g
-
-
-@r.get("/projects/{project_id}/flows", tags=["architecture"])
-async def project_flows(snapshot_id: uuid.UUID | None = None, c: RequestContext = Depends(project_ctx)):
-    """Automatically recognized request, event and data flows (deterministic, from every datasource's evidence)."""
-    await _arch(c)
-    from archtwin.architecture import flows as flows_mod
-    g = await arch.graph(c, snapshot_id)
-    return {"snapshot_id": str(g["snapshot"]["id"]) if g.get("snapshot") else None, **flows_mod.recognize(g)}
-
-
-@r.get("/projects/{project_id}/elements/search", tags=["architecture"])
-async def element_search(q: str = Query(..., min_length=1, max_length=120), limit: int = Query(30, le=100), c: RequestContext = Depends(project_ctx)):
-    """Search every element of the platform (systems, containers, components, code, tables, endpoints, topics, ADRs, work
-    items) by name/key; each hit says which view shows it (`parent_view`) and what it zooms into (`zoom`)."""
-    await _arch(c)
-    from archtwin.diagrams import views
-    g = await arch.graph(c)
-    ql = q.lower()
-    hits = []
-    for k, n in g["nodes"].items():
-        if n["kind"] == "library":
-            continue
-        name = (n.get("name") or "").lower()
-        score = 3 if name == ql else 2 if name.startswith(ql) else 1 if ql in name or ql in k.lower() else 0
-        if score:
-            hits.append((-score, len(name), k, n))
-    hits.sort(key=lambda h: h[:3])
-    return [{"key": k, "name": n.get("name", k), "kind": n["kind"], "technology": n["attributes"].get("technology") or n["attributes"].get("element") or "",
-             "path": n["attributes"].get("path", ""), "parent_view": views.parent_view(g, k), "zoom": views.zoom_target(g, k)}
-            for _, _, k, n in hits[:limit]]
-
-
-@r.get("/projects/{project_id}/elements/detail", tags=["architecture"])
-async def element_detail(key: str = Query(..., min_length=3, max_length=600), c: RequestContext = Depends(project_ctx)):
-    """Everything linked to one element: attributes (columns, methods, …), ADRs and work items that reference it, relations
-    drawn in documentation diagrams, and documents/code passages that mention it by name."""
-    await _arch(c)
-    g = await arch.graph(c)
-    n = g["nodes"].get(key)
-    if not n:
-        raise not_found("element")
-    linked = {"adrs": [], "work_items": [], "documented": []}
-    for e in g["edges"].values():
-        src = g["nodes"].get(e["source"], {})
-        if e["target"] == key and e["kind"] == "references" and src.get("kind") in ("adr", "work-item"):
-            linked["adrs" if src["kind"] == "adr" else "work_items"].append(
-                {"key": e["source"], "name": src.get("name"), "state": src["attributes"].get("state"), "status": src["attributes"].get("status"),
-                 "url": src["attributes"].get("url") or "", "provider": src["attributes"].get("provider", "")})
-        if e["attributes"].get("documented") and key in (e["source"], e["target"]):
-            other = e["target"] if e["source"] == key else e["source"]
-            linked["documented"].append({"edge": e["key"], "kind": e["kind"], "other": g["nodes"].get(other, {}).get("name", other),
-                                         "diagram": e["attributes"].get("diagram"), "direction": "out" if e["source"] == key else "in"})
-    name = n.get("name") or key.rsplit("/", 1)[-1]
-    mentions: list[dict] = []
-    if len(name) >= 3:
-        async with uow(c) as conn:
-            for kind in ("docs", "code"):
-                for p_ in await docs.search_passages(conn, c, name, limit=5, kind=kind):
-                    mentions.append({"kind": kind, "path": p_["path"], "title": p_["title"], "heading": p_["heading"], "line_start": p_["line_start"],
-                                     "snippet": p_["text"][:240]})
-    a = n["attributes"]
-    return {"key": key, "name": name, "kind": n["kind"], "attributes": {k: v for k, v in a.items() if k not in ("evidence",)},
-            "origins": n["origins"], "confidence": n["confidence"], "linked": linked, "mentions": mentions}
 
 
 @r.get("/projects/{project_id}/snapshots", tags=["architecture"])
@@ -926,99 +780,3 @@ async def notifications_stream(request: Request, p: Principal = Depends(principa
     return EventSourceResponse(gen(), ping=15)
 
 
-# ------------------------------------------------------------------ operations: AI usage & cost, spend limits, system, access
-async def _org_allowed(c: RequestContext, action: str) -> bool:
-    return await authz.allowed(c.principal, "org", action, str(c.org_id), {"org_id": str(c.org_id)})
-
-
-async def _org_require(c: RequestContext, action: str) -> None:
-    if not await _org_allowed(c, action):
-        await audit.record_denial(c, f"org.{action}", "org", c.org_id)
-        raise problem(403, "AT-AUTHZ-001", "Forbidden", f"You may not {action.replace('_', ' ')}.")
-
-
-async def _everyone(c: RequestContext, scope: str) -> bool:
-    await _org_require(c, "view_own_usage")
-    if scope == "all":
-        await _org_require(c, "view_usage_all")
-        return True
-    return False
-
-
-@r.get("/usage/overview", tags=["operations"])
-async def usage_overview(days: int = Query(30, ge=1, le=400), scope: str = Query("me", pattern="^(me|all)$"), c: RequestContext = Depends(get_ctx)):
-    return await ops.overview(c, days, await _everyone(c, scope))
-
-
-@r.get("/usage/breakdown", tags=["operations"])
-async def usage_breakdown(days: int = Query(30, ge=1, le=400), group_by: str = "model", granularity: str = "day",
-                          scope: str = Query("me", pattern="^(me|all)$"), c: RequestContext = Depends(get_ctx)):
-    return await ops.breakdown(c, days, group_by, granularity, await _everyone(c, scope))
-
-
-@r.get("/usage/export", tags=["operations"])
-async def usage_export(days: int = Query(30, ge=1, le=400), scope: str = Query("me", pattern="^(me|all)$"), c: RequestContext = Depends(get_ctx)):
-    body = await ops.export_csv(c, days, await _everyone(c, scope))
-    return Response(body, media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="archtwin-ai-usage-{days}d.csv"'})
-
-
-@r.get("/admin/spend-limits", tags=["operations"])
-async def get_spend_limits(c: RequestContext = Depends(get_ctx)):
-    await _org_require(c, "manage_spend_limits")
-    from archtwin.intelligence import usage
-    return {"items": await ops._label_subjects(c, await usage.list_limits(c)), "warn_at": usage.WARN_AT, "prices": usage.price_table()}
-
-
-@r.put("/admin/spend-limits", tags=["operations"])
-async def put_spend_limits(body: S.SpendLimitsIn, c: RequestContext = Depends(get_ctx)):
-    await _org_require(c, "manage_spend_limits")
-    return {"items": await ops.set_limits(c, [i.model_dump() for i in body.items])}
-
-
-@r.get("/admin/system", tags=["operations"])
-async def admin_system(c: RequestContext = Depends(get_ctx)):
-    await _org_require(c, "view_system")
-    return await ops.system(c)
-
-
-@r.get("/admin/source-roots", tags=["operations"])
-async def admin_source_roots(c: RequestContext = Depends(get_ctx)):
-    await _org_require(c, "view_system")
-    return await ops.source_roots(c)
-
-
-@r.put("/admin/source-roots", tags=["operations"])
-async def admin_set_source_roots(body: S.SourceRootsIn, c: RequestContext = Depends(get_ctx)):
-    await _org_require(c, "manage")
-    return await ops.set_source_roots(c, body.roots)
-
-
-@r.get("/admin/source-folders", tags=["operations"])
-async def admin_source_folders(path: str | None = None, c: RequestContext = Depends(get_ctx)):
-    """Folder picker over the mounted boundaries (not just the whitelist) to choose roots to whitelist; names only."""
-    await _org_require(c, "manage")
-    from archtwin.connectors.adapters.git_repo import ORG_ROOTS, browse
-    ORG_ROOTS.set(None)
-    try:
-        return await asyncio.to_thread(browse, path)
-    except ValueError as e:
-        raise problem(422, "AT-CONN-004", "Folder not available", str(e)) from e
-
-
-@r.get("/admin/access", tags=["operations"])
-async def admin_access(c: RequestContext = Depends(get_ctx)):
-    await _org_require(c, "inspect_access")
-    return await ops.access_matrix(c)
-
-
-@r.get("/admin/policies", tags=["operations"])
-async def admin_policies(c: RequestContext = Depends(get_ctx)):
-    await _org_require(c, "inspect_access")
-    return {**ops.policy_files(), "pdp_healthy": await authz.healthy()}
-
-
-@r.get("/me/permissions", tags=["identity"])
-async def my_org_permissions(c: RequestContext = Depends(get_ctx)):
-    """Which org-level admin pages to show (the UI hides what Cerbos would deny anyway)."""
-    return {a: await _org_allowed(c, a) for a in ("view_own_usage", "view_usage_all", "manage_spend_limits", "view_system",
-                                                  "inspect_access", "view_audit", "manage")}

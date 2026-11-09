@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     egress_insecure_tls_hosts: str = ""   # operator-only: hosts whose TLS certificate is NOT verified (self-signed / bad CN)
     docling_url: str = ""
     max_upload_mb: int = 25
-    default_org_name: str = "Demo Organization"
+    default_org_name: str = "Architecture Twin"
     graph_debounce_s: float = 3.0
 
     @property

@@ -25,6 +25,7 @@ from archtwin.common.errors import not_found, problem
 from archtwin.common.ids import new_id
 from archtwin.common.logging import redact_text
 from archtwin.common.schema import adr_versions, adrs, conversations, prompt_runs
+from archtwin.diagrams import views
 from archtwin.documents import service as docs
 from archtwin.intelligence import gateway
 
@@ -235,7 +236,6 @@ async def ask(ctx: RequestContext, question: str, model: str, mode: str = "ask",
     diagram = None
     if scope == "data":
         try:                                # an interactive diagram of the cited architecture (zoomable into C4 L1-L4)
-            from archtwin.diagrams import views
             async with uow(ctx) as conn:
                 snap = await arch.resolve_snapshot(conn, ctx)
                 g = await arch.load_graph(conn, snap["id"]) if snap else None
