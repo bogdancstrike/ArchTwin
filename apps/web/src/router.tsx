@@ -29,7 +29,8 @@ const architecture = createRoute({ getParentRoute: () => project, path: "archite
   validateSearch: (s: Record<string, unknown>) => ({ view: s.view as string | undefined, snapshot: s.snapshot as string | undefined,
     compare: s.compare as string | undefined, full: s.full ? true : undefined, deps: s.deps ? true : undefined, table: s.table ? true : undefined }) });
 
-const tree = root.addChildren([index, home, projectsList, flags, audit, project.addChildren([sub("/", OverviewPage), architecture, sub("inventory", InventoryPage),
+const tree = root.addChildren([index, home, projectsList, flags, audit, project.addChildren([sub("/", OverviewPage), architecture, sub("datasources", InventoryPage),
+  sub("inventory", InventoryPage) /* old bookmark path */,
   sub("drift", DriftPage), sub("drift/$findingId", DriftPage), sub("decisions", DecisionsPage), sub("docs", DocsPage), sub("assistant", AssistantPage),
   sub("settings", SettingsPage)])]);
 export const router = createRouter({ routeTree: tree, defaultPreload: "intent" });

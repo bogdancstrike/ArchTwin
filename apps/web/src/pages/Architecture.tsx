@@ -220,6 +220,6 @@ export function ArchitecturePage({ projectId }: { projectId: string }) {
   const snaps = useApi<Snapshot[]>(["snapshots", projectId], `/projects/${projectId}/snapshots`, { refetchInterval: 10_000 });
   if (snaps.isLoading) return <Spinner />;
   if (snaps.error) return <div className="p-6"><ErrorBox error={snaps.error} /></div>;
-  if (!snaps.data?.length) return <div className="p-6"><Card><Empty title="No architecture yet">Add a connector in <b>Inventory</b> and run a scan — the graph, C4 diagrams and docs are generated from the evidence.</Empty></Card></div>;
+  if (!snaps.data?.length) return <div className="p-6"><Card><Empty title="No architecture yet">Add a datasource in <b>Datasources</b> and run a scan — the graph, C4 diagrams and docs are generated from the evidence.</Empty></Card></div>;
   return <ReactFlowProvider><div className={cn("h-full")}><Canvas projectId={projectId} /></div></ReactFlowProvider>;
 }

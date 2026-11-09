@@ -43,6 +43,12 @@ KNOWN_EXTERNAL_ENV = {  # env var name -> (key, display name, protocol)
 KNOWN_EXTERNAL_HOSTS = {"api.openai.com": ("external:openai", "OpenAI API"), "api.anthropic.com": ("external:anthropic", "Anthropic API"),
                         "api.github.com": ("external:github", "GitHub API"), "hooks.slack.com": ("external:slack", "Slack")}
 CONFIG_SUFFIXES = {".conf", ".template", ".yaml", ".yml", ".toml", ".ini", ".json", ".env.example", ".cfg", ".properties"}
+CONTENT_MODES = ("auto", "code", "docs")
+DOC_TEXT = {".md", ".mdx", ".markdown", ".txt", ".rst", ".adoc"}
+DIAGRAM_TEXT = {".mmd": "mermaid", ".mermaid": "mermaid", ".puml": "plantuml", ".plantuml": "plantuml", ".dsl": "structurizr"}
+BINARY_DOCS = {".pdf", ".docx"}
+ADR_PATH = re.compile(r"(^|/)(adr|adrs|decisions?)(/|$)", re.IGNORECASE)
+DOC_PREFIXES = ("docs/", "doc/", "openspec/", "adr/", "architecture/")
 
 
 @dataclass
@@ -129,8 +135,10 @@ def _dockerfile_info(path: Path) -> dict[str, Any]:
 
 
 class RepoAnalyzer:
-    def __init__(self, root: Path, revision: str, repo_name: str):
-        self.root, self.repo = root.resolve(), repo_name
+    def __init__(self, root: Path, revision: str, repo_name: str, content: str = "auto"):
+        if content not in CONTENT_MODES:
+            raise ValueError(f"content must be one of {CONTENT_MODES}")
+        self.root, self.repo, self.content = root.resolve(), repo_name, content
         self.r = ScanResult(revision=revision)
         self.files = list(walk(self.root))
         self.services: dict[str, Service] = {}         # "system/name" -> Service (a repo may hold several compose projects)
@@ -140,11 +148,14 @@ class RepoAnalyzer:
     def run(self) -> ScanResult:
         compose_files = [f for f in self.files if re.fullmatch(r"(docker-)?compose(\.[\w\-]+)?\.ya?ml", f.name)
                          and "override" not in f.name and "coverage" not in f.name]
+        if self.content == "docs":          # a documentation / architecture folder: documents, ADRs, contracts — no runtime wiring
+            compose_files = []
         for cf in compose_files:
             self.compose(cf)
-        self.persons()
-        self.code()
-        self.config_mounts()
+        if self.content != "docs":
+            self.persons()
+            self.code()
+            self.config_mounts()
         self.openapi_specs()
         self.catalog_and_owners()
         self.docs()
@@ -578,28 +589,50 @@ class RepoAnalyzer:
                                         ref=rel, span={"path": rel, "line_start": i, "line_end": i})
 
     # ------------------------------------------------------------------ documents
+    def _wants_doc(self, rel: str, f: Path) -> bool:
+        """docs mode: every document anywhere. auto/code: root files, conventional doc folders and ADR folders anywhere."""
+        if self.content == "docs":
+            return True
+        if self.content == "code" and f.parent != self.root and not rel.startswith(DOC_PREFIXES):
+            return False
+        return f.parent == self.root or rel.startswith(DOC_PREFIXES) or bool(ADR_PATH.search(rel))
+
     def docs(self) -> None:
-        count = 0
+        count, limit = 0, 2000 if self.content == "docs" else 400
+        binaries: list[str] = []
         for f in self.files:
-            if f.suffix.lower() not in (".md", ".mdx") or f.stat().st_size > 300_000:
-                continue
+            suf = f.suffix.lower()
             rel = _rel(self.root, f)
-            if not (f.parent == self.root or rel.startswith(("docs/", "doc/", "openspec/", "adr/", "architecture/"))):
+            if suf in BINARY_DOCS and self._wants_doc(rel, f):
+                binaries.append(rel)            # parsed by the connector through docling-serve when available
+                continue
+            is_text = suf in (".md", ".mdx") or (self.content == "docs" and suf in DOC_TEXT)
+            is_diagram = suf in DIAGRAM_TEXT and (self.content == "docs" or rel.startswith(DOC_PREFIXES) or bool(ADR_PATH.search(rel)))
+            if not (is_text or is_diagram) or f.stat().st_size > 300_000 or not self._wants_doc(rel, f):
                 continue
             text = read(f)
-            m = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
-            title = (m.group(1).strip() if m else f.stem)[:200]
-            tags = ["adr"] if re.search(r"(^|/)(adr|adrs|decisions?)(/|$)", rel, re.IGNORECASE) or re.match(r"^\d{3,4}-", f.name) else []
-            self.r.documents.append(DocumentOut(path=rel, title=title, text=text, tags=tags))
-            if tags:
+            if is_diagram:
+                lang = DIAGRAM_TEXT[suf]
+                title = f"{f.stem} ({lang} diagram)"[:200]
+                text = f"# {title}\n\nSource: `{rel}`\n\n```{lang}\n{text}\n```\n"
+                tags = ["diagram", lang]
+            else:
+                m = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
+                title = (m.group(1).strip() if m else f.stem)[:200]
+                tags = ["adr"] if ADR_PATH.search(rel) or re.match(r"^(adr[-_]?)?\d{3,4}[-_]", f.name, re.IGNORECASE) else []
+            mime = "text/markdown" if suf in (".md", ".mdx", ".markdown") or is_diagram else "text/plain"
+            self.r.documents.append(DocumentOut(path=rel, title=title, text=text, mime=mime, tags=tags))
+            if "adr" in tags and suf in (".md", ".mdx", ".markdown"):
                 ak = f"adr:{self.repo}/{rel}"
                 self.r.node("static", ak, "adr", title, V_DOCS, attrs={"path": rel, "imported": True}, ref=rel,
                             span={"path": rel, "line_start": 1})
             count += 1
-            if count >= 400:
-                self.r.warnings.append("document limit (400) reached; remaining Markdown not ingested")
+            if count >= limit:
+                self.r.warnings.append(f"document limit ({limit}) reached; remaining documents not ingested")
                 break
+        if binaries:
+            self.r.artifacts.append({"kind": "binary-documents", "paths": binaries[:200]})
 
 
-def analyze_repository(root: Path, revision: str, repo_name: str) -> ScanResult:
-    return RepoAnalyzer(root, revision, repo_name).run()
+def analyze_repository(root: Path, revision: str, repo_name: str, content: str = "auto") -> ScanResult:
+    return RepoAnalyzer(root, revision, repo_name, content).run()

@@ -4,8 +4,9 @@ import { Avatar, Badge, ErrorBox, Spinner } from "@/components/ui";
 import { useApi } from "@/lib/hooks";
 import type { Project } from "@/lib/types";
 
-const TABS = [["", "Overview", LayoutDashboard], ["architecture", "Architecture", Network], ["inventory", "Inventory", Radar], ["drift", "Drift", AlertTriangle],
-  ["decisions", "Decisions", ScrollText], ["docs", "Docs", FileText], ["assistant", "Assistant", Bot], ["settings", "Settings", Settings]] as const;
+const TABS = [["", "Overview", LayoutDashboard], ["architecture", "Architecture", Network], ["drift", "Drift", AlertTriangle],
+  ["decisions", "Decisions", ScrollText], ["docs", "Docs", FileText], ["assistant", "Assistant", Bot], ["datasources", "Datasources", Radar],
+  ["settings", "Settings", Settings]] as const;
 
 export function ProjectLayout() {
   const { projectId } = useParams({ strict: false }) as { projectId: string };

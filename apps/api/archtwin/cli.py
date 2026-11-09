@@ -20,7 +20,7 @@ PILOT_FLAGS = [  # the demo org is a pilot: modules whose phase is implemented a
     "module.data-topology", "module.document-parsing", "module.normalization-freshness", "module.architecture-graph",
     "module.diagram-studio", "module.documentation-engine", "module.adr-workflow", "module.drift-engine",
     "module.continuous-watchers", "module.drift-triage", "module.architecture-notifications", "module.architecture-assistant",
-    "module.integration-designer", "connector.git", "connector.docker", "connector.postgresql", "connector.http_openapi",
+    "module.integration-designer", "module.work-connectors", "connector.git", "connector.gitlab", "connector.taiga", "connector.docker", "connector.postgresql", "connector.http_openapi",
     "connector.file_upload", "connector.github", "connector.mysql", "connector.kafka", "connector.opentelemetry",
     "ai.answers", "ai.adr_drafting", "ai.integration_design", "connectors.full_reconciliation", "connectors.webhooks",
 ]
