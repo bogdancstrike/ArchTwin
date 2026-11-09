@@ -56,12 +56,11 @@ def render_docx(title: str, md: str) -> bytes:
         elif b.kind == "rule":
             doc.add_paragraph("―" * 30).alignment = WD_ALIGN_PARAGRAPH.CENTER
         elif b.kind == "table" and b.rows:
-            t = doc.add_table(rows=len(b.rows), cols=len(b.rows[0]))
+            # rows are added and filled one by one: table.cell(r, c) walks the whole grid per call (quadratic on big tables)
+            t = doc.add_table(rows=0, cols=len(b.rows[0]))
             t.style = "Light Grid Accent 1"
             for ri, row in enumerate(b.rows):
-                for ci, cell in enumerate(row):
-                    c = t.cell(ri, ci)
-                    c.text = ""
+                for c, cell in zip(t.add_row().cells, row, strict=False):
                     add_runs(c.paragraphs[0], cell)
                     if ri == 0:
                         for r in c.paragraphs[0].runs:
