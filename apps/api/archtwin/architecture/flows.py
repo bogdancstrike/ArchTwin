@@ -4,6 +4,8 @@
   consumes events) along runtime relations (calls, reads, writes, publishes), depth-first, cycles cut, at most MAX_STEPS;
   cross-repository and cross-system hops are included (resolved names), so distributed flows appear end to end.
 * event flows: for each topic, producers -> topic -> consumers -> what each consumer does next (one hop).
+* endpoint flows: for each HTTP endpoint, the caller (user, web UI or another service) -> the handler component -> the
+  components its route module uses -> the resources they touch (databases, SaaS APIs, ML runtime, tools, volumes).
 * data flows: for each database, who writes and who reads.
 Every step carries its relation, protocol, origins, confidence and evidence count; a flow is `documented` when a step comes
 only from a diagram in the docs, and `inferred` when any step is inferred only. Nothing is invented: no edge, no step.
@@ -17,7 +19,9 @@ from typing import Any
 RUNTIME = ("calls", "writes", "reads", "publishes", "consumes")
 ACTORS = ("container", "software-system", "external-system", "person", "database", "kafka-topic", "service")
 MAX_STEPS = 14
-MAX_FLOWS = 60
+MAX_FLOWS = 250
+MAX_ENDPOINT_FLOWS = 150
+RESOURCE_KINDS = ("external-system", "database", "kafka-topic")
 
 
 def _fid(kind: str, key: str) -> str:
@@ -97,6 +101,8 @@ def recognize(g: dict[str, Any]) -> dict[str, Any]:
                 f"{first.get('name', 'User')} → {nodes.get(steps[0]['to'], {}).get('name', '')}"
             flows.append(_finish(g, _fid("request", start), "request", name, steps, system_of, entry=start))
 
+    flows += _endpoint_flows(g, system_of)
+
     # ---- event flows per topic
     for k, n in sorted(nodes.items()):
         if n["kind"] != "kafka-topic":
@@ -122,6 +128,61 @@ def recognize(g: dict[str, Any]) -> dict[str, Any]:
             continue
         flows.append(_finish(g, _fid("data", k), "data", f"Data: {n.get('name', k)}", [_step(g, e) for e in io[:MAX_STEPS]], system_of, entry=k))
 
-    flows.sort(key=lambda f: ({"request": 0, "event": 1, "data": 2}[f["kind"]], -f["length"], f["name"]))
+    flows.sort(key=lambda f: ({"request": 0, "endpoint": 1, "event": 2, "data": 3}[f["kind"]], -f["length"], f["name"]))
     return {"flows": flows[:MAX_FLOWS], "total": len(flows),
-            "counts": {k: sum(1 for f in flows if f["kind"] == k) for k in ("request", "event", "data")}}
+            "counts": {k: sum(1 for f in flows if f["kind"] == k) for k in ("request", "endpoint", "event", "data")}}
+
+
+def _is_resource(g: dict[str, Any], k: str) -> bool:
+    n = g["nodes"].get(k, {})
+    return n.get("kind") in RESOURCE_KINDS or n.get("attributes", {}).get("subtype") in ("storage", "ml", "database", "cache", "queue")
+
+
+def _synthetic(src: str, dst: str, kind: str, label: str, confidence: float = 1.0, origins: list[str] | None = None) -> dict[str, Any]:
+    """A step implied by the endpoint's own evidence (route module imports), not by a single graph edge."""
+    return {"from": src, "to": dst, "kind": kind, "edge": f"{src}|{kind}|{dst}", "label": label, "protocol": "in-process" if kind == "uses" else "",
+            "origins": origins or ["static"], "confidence": confidence, "inferred_only": False, "documented": False, "evidence": 1}
+
+
+def _endpoint_flows(g: dict[str, Any], system_of: dict[str, str]) -> list[dict[str, Any]]:
+    nodes, edges = g["nodes"], g["edges"]
+    callers: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for e in edges.values():
+        if e["kind"] == "calls" and nodes.get(e["target"], {}).get("kind") == "api-endpoint":
+            callers[e["target"]].append(e)
+    entry_of: dict[str, list[dict[str, Any]]] = defaultdict(list)          # who reaches a UI component (the user)
+    for e in edges.values():
+        if e["kind"] == "calls" and nodes.get(e["source"], {}).get("kind") == "person":
+            entry_of[e["target"]].append(e)
+    comp_out: dict[str, list[dict[str, Any]]] = defaultdict(list)       # component -> runtime relations to resources
+    for e in edges.values():
+        if e["kind"] in RUNTIME and nodes.get(e["source"], {}).get("kind") == "component" and _is_resource(g, e["target"]):
+            comp_out[e["source"]].append(e)
+    for es in comp_out.values():
+        es.sort(key=lambda e: (-e.get("confidence", 1), e["target"]))
+    flows = []
+    eps = sorted((k for k, n in nodes.items() if n["kind"] == "api-endpoint" and n["attributes"].get("component") in nodes),
+                 key=lambda k: (nodes[k]["attributes"].get("path", ""), nodes[k]["attributes"].get("method", "")))
+    for ek in eps[:MAX_ENDPOINT_FLOWS]:
+        a = nodes[ek]["attributes"]
+        handler = a["component"]
+        label = f"{a.get('method', '')} {a.get('path', '')}".strip()
+        steps: list[dict[str, Any]] = []
+        for c in callers.get(ek, [])[:1]:
+            for pe in entry_of.get(c["source"], [])[:1]:
+                steps.append(_step(g, pe))
+            steps.append({**_step(g, c, src=c["source"], dst=handler), "label": label, "kind": "calls"})
+        if not steps:
+            steps.append(_synthetic(ek, handler, "handles", label))
+        for comp in a.get("uses", [])[:6]:
+            if comp in nodes:
+                steps.append(_synthetic(handler, comp, "uses", "imports"))
+                steps += [_step(g, e) for e in comp_out.get(comp, [])[:4]]
+        for r in a.get("resources", [])[:4]:
+            if r in nodes:
+                steps.append(_synthetic(handler, r, "calls", r.split(":")[-1], 0.85))
+        if len(steps) >= 2:
+            f = _finish(g, _fid("endpoint", ek), "endpoint", label, steps[:MAX_STEPS], system_of, entry=ek)
+            f["endpoint"] = ek
+            flows.append(f)
+    return flows

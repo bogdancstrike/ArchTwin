@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 
-from archtwin.connectors.analyzers import db_schema, python_code
+from archtwin.connectors.analyzers import db_schema, python_code, resources, webui
 from archtwin.connectors.analyzers.common import HOSTPORT_RX, SCHEME_REL, URL_RX, classify, read, safe_url, scheme_base, walk
 from archtwin.connectors.sdk import DocumentOut, ScanResult
 
@@ -192,6 +192,9 @@ def _env_items(spec: dict[str, Any]) -> list[tuple[str, str]]:
     return [(str(k), "" if v is None else str(v)) for k, v in env.items()]
 
 
+_VAR = re.compile(r"\$\{(?:[^{}]|\{[^{}]*\})*\}")
+
+
 def _cmdline(cmd: Any) -> str:
     """A compose/Dockerfile command as one string: it may be a list (exec form) or a plain string (shell form)."""
     return cmd if isinstance(cmd, str) else " ".join(map(str, cmd or []))
@@ -229,7 +232,12 @@ def _dockerfile_info(path: Path) -> dict[str, Any]:
         except (ValueError, json.JSONDecodeError):
             cmd = last.split()
     expose = re.findall(r"^\s*EXPOSE\s+(.+)$", txt, re.MULTILINE | re.IGNORECASE)
-    return {"base_images": froms, "cmd": cmd, "expose": " ".join(expose).split()}
+    copied = []
+    for cm in re.finditer(r"^\s*(?:COPY|ADD)\s+(?!--from)(?:--\S+\s+)*(.+)$", txt, re.MULTILINE | re.IGNORECASE):
+        parts = shlex.split(cm.group(1)) if not cm.group(1).strip().startswith("[") else json.loads(cm.group(1))
+        if len(parts) >= 2 and parts[-1] in (".", "./", "/app", "/app/", "/srv", "/code", "/src"):
+            copied += [x.rstrip("/") for x in parts[:-1] if x not in (".", "./") and not any(ch in x for ch in "*?")]
+    return {"base_images": froms, "cmd": cmd, "expose": " ".join(expose).split(), "copied": copied}
 
 
 class RepoAnalyzer:
@@ -248,6 +256,8 @@ class RepoAnalyzer:
                          and "override" not in f.name and "coverage" not in f.name]
         if self.content == "docs":          # a documentation / architecture folder: documents, ADRs, contracts — no runtime wiring
             compose_files = []
+        fragments = self._extends_fragments(compose_files)
+        compose_files = [cf for cf in compose_files if cf.resolve() not in fragments]
         for cf in compose_files:
             self.compose(cf)
         if self.content != "docs":
@@ -289,7 +299,7 @@ class RepoAnalyzer:
         self.r.node("static", sys_key, "software-system", system, V_COMPOSE,
                     attrs={"compose_file": rel, "repository": self.repo}, ref=rel, span={"path": rel, "line_start": 1})
         for name, spec in svcs.items():
-            spec = spec or {}
+            spec = self._extended(cf, svcs, spec or {})
             ls, le = lines.get(name, (1, 1))
             key = f"container:{system}/{name}"
             build = spec.get("build")
@@ -307,6 +317,7 @@ class RepoAnalyzer:
                     p = (cf.parent / src).resolve()
                     if str(p).startswith(str(self.root.resolve())) and p.exists():
                         svc.mounts.append(p)
+                self._volume(svc, v, rel, ls)
             df_info = {}
             if ctx and ctx.exists():
                 df = ctx / (build.get("dockerfile", "Dockerfile") if isinstance(build, dict) else "Dockerfile")
@@ -354,6 +365,66 @@ class RepoAnalyzer:
                                 span=span, confidence=0.6)
                     self.r.edge("inferred", svc.key, "calls", ek, V_INFER, attrs={"protocol": proto, "via": k}, ref=rel,
                                 span=span, confidence=0.6)
+
+    def _extends_fragments(self, compose_files: list[Path]) -> set[Path]:
+        """Compose files only used as `extends: {file: ...}` bases: merged into the extending service, never a system."""
+        frags: set[Path] = set()
+        for cf in compose_files:
+            text = read(cf)
+            for m in re.finditer(r"^\s+file:\s*['\"]?([^'\"\n]+)", text, re.MULTILINE):
+                if "extends" not in text:
+                    continue
+                pattern = re.sub(r"\$\{[^}]*\}", "*", m.group(1).strip())
+                frags |= {f.resolve() for f in cf.parent.glob(pattern)}
+        return frags - {cf.resolve() for cf in compose_files if "extends" in read(cf)}
+
+    def _extended(self, cf: Path, svcs: dict, spec: dict) -> dict:
+        """Compose `extends`: the base service (same file or another file) merged under this service's own keys."""
+        ext = spec.get("extends")
+        if not isinstance(ext, dict | str):
+            return spec
+        base_name = ext if isinstance(ext, str) else ext.get("service")
+        base: dict = {}
+        if isinstance(ext, dict) and ext.get("file"):
+            f = (cf.parent / str(ext["file"]).replace("${DEVICE:-cpu}", "cpu")).resolve()
+            f = f if f.exists() else next(iter(sorted(f.parent.glob(re.sub(r"\$\{[^}]*\}", "*", f.name)))), f) if f.parent.exists() else f
+            if f.exists():
+                try:
+                    base = ((yaml.load(read(f), Loader=ComposeLoader) or {}).get("services") or {}).get(base_name) or {}  # noqa: S506
+                except yaml.YAMLError:
+                    base = {}
+        elif base_name in svcs:
+            base = svcs[base_name] or {}
+        merged = {**base, **{k: v for k, v in spec.items() if k != "extends"}}
+        if isinstance(base.get("build"), dict) and isinstance(spec.get("build"), str):
+            merged["build"] = {**base["build"], "context": spec["build"]}
+        merged["_extends"] = f"{(ext.get('file') + ':') if isinstance(ext, dict) and ext.get('file') else ''}{base_name}"
+        return merged
+
+    def _volume(self, svc: Service, v: Any, rel: str, line: int) -> None:
+        """Data volumes (named volumes and host directories, not single config files) become storage elements."""
+        if isinstance(v, str):
+            parts = _VAR.sub("VAR", v).split(":")                # ${A:-${B}} contains colons: mask variables before splitting
+            if len(parts) < 2:
+                return
+            src, dst, mode = parts[0], parts[1], (parts[2] if len(parts) > 2 else "rw")
+            src = "host path" if src == "VAR" else src
+        elif isinstance(v, dict) and v.get("target"):
+            src, dst, mode = str(v.get("source", "")), str(v["target"]), "ro" if v.get("read_only") else "rw"
+        else:
+            return
+        if not dst.startswith("/") or Path(dst.rstrip("/")).suffix:       # a mounted FILE (config, script, schema) is not a data store
+            return
+        if dst in ("/var/run/docker.sock", "/etc/localtime"):
+            return
+        name = dst.rstrip("/").rsplit("/", 1)[-1] or dst
+        key = f"container:{svc.system}/volume-{re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')}"
+        kind = "named volume" if src and not src.startswith((".", "/", "$", "~")) else "host folder"
+        self.r.node("static", key, "container", f"{name} ({kind})", V_COMPOSE, ref=rel, span={"path": rel, "line_start": line},
+                    attrs={"subtype": "storage", "technology": kind, "volume": True, "mount_path": dst, "source": src[:200]})
+        self.r.edge("static", f"system:{svc.system}", "contains", key, V_COMPOSE, ref=rel)
+        self.r.edge("static", svc.key, "reads" if mode.startswith("ro") else "writes", key, V_COMPOSE, ref=rel,
+                    span={"path": rel, "line_start": line}, attrs={"protocol": "filesystem", "mount": dst, "mode": mode}, confidence=0.9)
 
     def _wire_value(self, svc: Service, value: str, ref: str, span: dict, var: str = "") -> None:
         names = self.by_system[svc.system]
@@ -416,6 +487,7 @@ class RepoAnalyzer:
                 self.python(ctx, ctx_files, svcs)
             if (ctx / "package.json").exists():
                 self.typescript(ctx, ctx_files, svcs)
+            self.web_ui(ctx, ctx_files, svcs)
             for f in ctx_files:            # config files inside the context (e.g. nginx templates)
                 rel_parts = f.relative_to(self.root).parts
                 if f.suffix in CONFIG_SUFFIXES and f.stat().st_size < 200_000 and not {"test", "tests"} & set(rel_parts):
@@ -425,7 +497,10 @@ class RepoAnalyzer:
 
     def python(self, ctx: Path, files: list[Path], svcs: list[Service]) -> None:
         errors: list[str] = []
-        mods = python_code.analyze(ctx, files, errors)
+        entries_all = [e for s in svcs for e in _entry_modules(s.spec, s.spec.get("_df", {}).get("cmd", []))]
+        copied = [c for s in svcs for c in s.spec.get("_df", {}).get("copied", [])]
+        roots = python_code.package_roots(ctx, files, entries_all, copied)
+        mods = python_code.analyze(ctx, files, errors, roots)
         if errors:
             self.r.complete = False          # unparsed modules: their evidence is UNKNOWN, so this scan must not tombstone
             self.r.warnings += [f"python parse failed (module skipped): {e}" for e in errors[:20]]
@@ -463,6 +538,7 @@ class RepoAnalyzer:
                             python_code.PARSER_VERSION, attrs={"imports": n, "protocol": "in-process"},
                             ref=_rel(self.root, mods[a].path) if a in mods else "", confidence=1.0)
             self._code_elements(s, mods, reach, comps)
+            self._resources(s, mods, reach)
             self._kafka(s, mods, reach)
             cmdline = _cmdline(s.spec.get("command") or s.spec.get("_df", {}).get("cmd", []) or [])
             serves_http = bool(re.search(r"uvicorn|gunicorn|hypercorn|granian|flask\s+run|daphne", cmdline))
@@ -470,11 +546,69 @@ class RepoAnalyzer:
                 for rt in mods[m].routes:
                     rel = _rel(self.root, Path(rt.file))
                     ek = f"endpoint:{s.system}/{s.name}/{rt.method} {rt.path}"
+                    own = python_code.component_of(m)
+                    uses = sorted({f"component:{s.system}/{s.name}/{python_code.component_of(i)}" for i in mods[m].imports
+                                   if python_code.component_of(i) != own and python_code.component_of(i) in comps})
+                    direct = sorted({res.key.format(system=s.system, service=s.name)
+                                     for res, _ in resources.resources_for(mods[m].external_imports, mods[m].source)})
                     self.r.node("static", ek, "api-endpoint", f"{rt.method} {rt.path}", python_code.PARSER_VERSION,
-                                attrs={"method": rt.method, "path": rt.path, "handler": rt.handler, "module": m},
+                                attrs={"method": rt.method, "path": rt.path, "handler": rt.handler, "module": m,
+                                       "component": f"component:{s.system}/{s.name}/{own}", "uses": uses, "resources": direct},
                                 ref=rel, span={"path": rel, "line_start": rt.line, "line_end": rt.line})
                     self.r.edge("static", s.key, "exposes", ek, python_code.PARSER_VERSION, ref=rel,
                                 span={"path": rel, "line_start": rt.line})
+
+    def _resources(self, s: Service, mods: dict, reach: set[str]) -> None:
+        """What each component uses (SaaS APIs, embedded databases, stores, ML runtimes, external tools), from its imports."""
+        rolled: dict[str, tuple[str, str]] = {}
+        for m in sorted(reach):
+            mod = mods[m]
+            comp_key = f"component:{s.system}/{s.name}/{python_code.component_of(m)}"
+            rel = _rel(self.root, mod.path)
+            for res, hint in resources.resources_for(mod.external_imports, mod.source):
+                key = res.key.format(system=s.system, service=s.name)
+                top = hint.split()[-1]
+                span = {"path": rel, "line_start": resources.import_line(mod.source, top)}
+                self.r.node("static", key, res.kind, res.name, resources.V_RESOURCES, ref=rel, span=span,
+                            attrs={"subtype": res.subtype, "technology": res.technology, "used_by": m})
+                if res.kind == "component":
+                    self.r.edge("static", s.key, "contains", key, resources.V_RESOURCES, ref=rel)
+                if key != comp_key:
+                    self.r.edge("static", comp_key, res.relation, key, resources.V_RESOURCES, ref=rel, span=span,
+                                attrs={"protocol": res.protocol, "via": hint, "module": m}, confidence=0.85)
+                if res.kind != "component":
+                    rolled.setdefault(key, (res.relation, res.protocol))
+        for key, (rel_kind, proto) in rolled.items():           # container-level rollup for L1/L2
+            self.r.edge("static", s.key, rel_kind, key, resources.V_RESOURCES, attrs={"protocol": proto, "rollup": "from components"},
+                        confidence=0.85)
+
+    def web_ui(self, ctx: Path, files: list[Path], svcs: list[Service]) -> None:
+        """A SPA in the build context is the container's Web UI component; its /api calls are matched to the endpoints."""
+        if len(svcs) != 1:
+            return                                        # shared build context: which container serves the UI is unknown
+        s = svcs[0]
+        endpoints: dict[str, list[str]] = defaultdict(list)
+        for o in self.r.observations:
+            if o.kind == "api-endpoint" and o.subject_key.startswith(f"endpoint:{s.system}/{s.name}/") and o.subject_key not in endpoints[webui.normalize(o.attributes["path"])]:
+                endpoints[webui.normalize(o.attributes["path"])].append(o.subject_key)
+        for ui in webui.find_uis(ctx, files):
+            if ui.root.resolve() == ctx.resolve():
+                continue                                  # the container IS the UI (already a webapp container): no duplicate
+            webui.scan_calls(ui, files)
+            key = f"component:{s.system}/{s.name}/web-ui"
+            rel = _rel(self.root, ui.root / "package.json")
+            self.r.node("static", key, "component", f"Web UI ({ui.framework})", webui.V_WEBUI, ref=rel, span={"path": rel},
+                        attrs={"subtype": "webapp", "technology": ui.framework, "path": _rel(self.root, ui.root), "api_calls": len(ui.calls)})
+            self.r.edge("static", s.key, "contains", key, webui.V_WEBUI, ref=rel)
+            self.r.node("inferred", "person:user", "person", "User", V_INFER, attrs={"description": "Person using the system"}, confidence=0.6)
+            self.r.edge("inferred", "person:user", "calls", key, V_INFER, attrs={"protocol": "https"}, ref=rel, confidence=0.6)
+            for call, where in sorted(ui.calls.items()):
+                targets = webui.match_endpoints(call, endpoints)
+                f, line = where[0]
+                frel = _rel(self.root, Path(f))
+                for ek in targets:
+                    self.r.edge("static", key, "calls", ek, webui.V_WEBUI, attrs={"protocol": "https", "path": call, "call_sites": len(where)},
+                                ref=frel, span={"path": frel, "line_start": line}, confidence=0.85 if len(targets) == 1 else 0.7)
 
     MAX_CODE_PER_COMPONENT = 60
     MAX_CODE_PER_SERVICE = 1500

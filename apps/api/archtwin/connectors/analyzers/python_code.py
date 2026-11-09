@@ -65,16 +65,45 @@ class PyModule:
     path: Path
     imports: set[str] = field(default_factory=set)
     names: dict[str, str] = field(default_factory=dict)     # local name -> fully qualified imported name
+    external_imports: set[str] = field(default_factory=set)  # third-party / stdlib imports (resources: openai, sqlite3, ...)
+    source: str = ""
     defs: list[CodeDef] = field(default_factory=list)
     routes: list[Route] = field(default_factory=list)
     kafka: list[KafkaUse] = field(default_factory=list)
     uses_kafka_client: bool = False
 
 
-def module_index(context_dir: Path, files: list[Path]) -> dict[str, Path]:
-    """Map dotted module names to files for packages rooted directly under the build context (or context/src)."""
+def package_roots(context_dir: Path, files: list[Path], entries: list[str] | None = None, copied: list[str] | None = None) -> list[Path]:
+    """Directories Python modules are imported from: the build context, context/src, directories the Dockerfile copies
+    into the working directory (`COPY backend/ ./`), and any directory (depth <= 2) holding the entry module's package."""
+    roots = [context_dir, context_dir / "src"]
+    for c in copied or []:
+        d = (context_dir / c).resolve()
+        if d.is_dir() and str(d).startswith(str(context_dir.resolve())):
+            roots.append(d)
+    tops = {e.split(".")[0] for e in entries or []}
+    for f in files:
+        if f.name != "__init__.py":
+            continue
+        try:
+            rel = f.parent.relative_to(context_dir)
+        except ValueError:
+            continue
+        if 1 <= len(rel.parts) <= 3 and rel.parts[-1] in tops:
+            roots.append(f.parent.parent)
+    seen, out = set(), []
+    for r in roots:
+        k = str(r.resolve())
+        if k not in seen:
+            seen.add(k)
+            out.append(r)
+    return out
+
+
+def module_index(context_dir: Path, files: list[Path], roots: list[Path] | None = None) -> dict[str, Path]:
+    """Map dotted module names to files for packages rooted under the given roots (default: context, context/src)."""
     idx: dict[str, Path] = {}
-    for base in (context_dir, context_dir / "src"):
+    for base in roots or [context_dir, context_dir / "src"]:
         for f in files:
             if f.suffix != ".py":
                 continue
@@ -215,7 +244,7 @@ def _code_defs(root) -> list[CodeDef]:
 def parse_module(name: str, path: Path, is_pkg: bool) -> PyModule:
     src = path.read_bytes()
     tree = _parser().parse(src)
-    mod = PyModule(name, path)
+    mod = PyModule(name, path, source=src.decode("utf-8", "replace")[:400_000])
     prefixes: dict[str, str] = {}
 
     def resolve_relative(level: int, rest: str) -> str:
@@ -296,8 +325,8 @@ def parse_module(name: str, path: Path, is_pkg: bool) -> PyModule:
     return mod
 
 
-def analyze(context_dir: Path, files: list[Path], errors: list[str] | None = None) -> dict[str, PyModule]:
-    idx = module_index(context_dir, files)
+def analyze(context_dir: Path, files: list[Path], errors: list[str] | None = None, roots: list[Path] | None = None) -> dict[str, PyModule]:
+    idx = module_index(context_dir, files, roots)
     out = {}
     for name, path in idx.items():
         try:
@@ -306,9 +335,11 @@ def analyze(context_dir: Path, files: list[Path], errors: list[str] | None = Non
             if errors is not None:
                 errors.append(f"{path.name}: {type(e).__name__}: {str(e)[:120]}")
             continue
-    # keep only imports that resolve to modules in this codebase (prefix match)
+    # keep only imports that resolve to modules in this codebase (prefix match); the rest are kept as external imports
     names = set(out)
+    tops = {n.split(".")[0] for n in names}
     for m in out.values():
+        m.external_imports = {i for i in m.imports if i.split(".")[0] not in tops}
         resolved = set()
         for imp in m.imports:
             cand = imp
