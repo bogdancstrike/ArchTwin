@@ -4,6 +4,7 @@ import { Badge, Button, Card, Empty, OriginBadges, Table, cn } from "@/component
 import { DataTable } from "@/components/DataTable";
 import { ElementDetail, EvidenceList } from "@/components/ElementInspector";
 import { SplitLayout } from "@/components/SplitLayout";
+import { PageAsk } from "@/components/PageAsk";
 
 interface Step { from: string; to: string; kind: string; edge: string; label: string; protocol: string; origins: string[]; confidence: number;
   inferred_only: boolean; documented: boolean; evidence: number }
@@ -76,7 +77,8 @@ export function FlowsPage({ projectId }: { projectId: string }) {
   const name = (k: string) => cur?.participants.find((pp) => pp.key === k)?.name ?? k;
   const pickStep = (i: number) => { setStep(i); const st = cur!.steps[i];
     setInspect({ kind: "relation", key: st.edge, title: `${name(st.from)} ${st.kind} ${name(st.to)}` }); };
-  return <SplitLayout storageKey="flows" title="Flows" sideWidth="xl:w-[440px]" side={(toggle) => <>
+  return <SplitLayout storageKey="flows" title="Flows" sideWidth="xl:w-[440px]" side={(toggle) => <div className="space-y-4">
+    <PageAsk projectId={projectId} page="flows" selected={cur?.id ?? null} onPick={(m) => m.flow && setCur(m.flow as Flow)} />
     <Card eyebrow="Recognized automatically" title={<span className="flex items-center gap-2"><Workflow size={16} /> Flows</span>} actions={toggle}>
       <DataTable<Flow> queryKey={["flows", projectId]} endpoint={`/projects/${projectId}/flows`} rowKey={(x) => x.id} selected={cur?.id ?? null}
         onRowClick={setCur} searchPlaceholder="Search flows or participants" defaultSort="" defaultDir="desc"
@@ -90,7 +92,7 @@ export function FlowsPage({ projectId }: { projectId: string }) {
           { key: "length", label: "Steps", sortable: true, render: (x) => <span className="num">{x.length}</span> },
           { key: "participants", label: "Participants", sortable: true, render: (x) => <span className="num">{x.participants.length}</span> }]} />
     </Card>
-  </>}>
+  </div>}>
       {!cur ? <Empty title="Select a flow">Pick a flow to see it as a diagram with the evidence for every step.</Empty> : <>
         <Card eyebrow={`${kindOf(cur.kind).label} flow · confidence ${cur.confidence.toFixed(2)}${cur.distributed ? ` · across ${cur.systems.join(", ")}` : ""}`} title={cur.name}>
           <Sequence flow={cur} active={step} onStep={pickStep} selected={inspect?.kind === "element" ? inspect.key : null}

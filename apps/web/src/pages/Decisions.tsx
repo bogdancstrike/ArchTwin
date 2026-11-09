@@ -9,6 +9,7 @@ import { usd } from "@/components/charts";
 import { DataTable } from "@/components/DataTable";
 import { SplitLayout } from "@/components/SplitLayout";
 import { CostEstimate, modelLabel } from "@/components/CostEstimate";
+import { PageAsk } from "@/components/PageAsk";
 
 const TONE: Record<string, string> = { proposed: "warn", accepted: "ok", rejected: "bad", superseded: "muted" };
 
@@ -112,9 +113,10 @@ function AdrView({ projectId, id }: { projectId: string; id: string }) {
 }
 
 export function DecisionsPage({ projectId }: { projectId: string }) {
-  const [sel, setSel] = useState<string | null>(null);
+  const [sel, setSel] = useState<string | null>(() => new URLSearchParams(window.location.search).get("adr"));   // deep link from Home
   const [open, setOpen] = useState(false);
-  return <SplitLayout storageKey="decisions" title="Decision records" sideWidth="xl:w-[460px]" side={(toggle) =>
+  return <SplitLayout storageKey="decisions" title="Decision records" sideWidth="xl:w-[460px]" side={(toggle) => <div className="space-y-4">
+    <PageAsk projectId={projectId} page="decisions" selected={sel} onPick={(m) => setSel(m.id)} />
     <Card eyebrow="MADR" title="Decision records" actions={<><Button size="sm" variant="primary" onClick={() => setOpen(true)}><Plus size={14} /> New</Button>{toggle}</>}>
       <DataTable<Adr> queryKey={["adrs", projectId]} endpoint={`/projects/${projectId}/adrs`} rowKey={(a) => a.id} defaultSort="number" defaultDir="desc"
         searchPlaceholder="Search decisions" selected={sel} onRowClick={(a) => setSel(a.id)}
@@ -123,7 +125,7 @@ export function DecisionsPage({ projectId }: { projectId: string }) {
         columns={[{ key: "number", label: "#", sortable: true, render: (a) => <span className="font-mono text-xs">{String(a.number).padStart(4, "0")}</span> },
           { key: "title", label: "Title", sortable: true, render: (a) => <>{a.title}{a.ai_drafted && <Bot size={11} className="ml-1 inline text-link" />}<div className="text-[10px] text-soft">{ago(a.created_at)}</div></> },
           { key: "status", label: "Status", sortable: true, render: (a) => <Badge tone={TONE[a.status]}>{a.status}</Badge> }]} />
-    </Card>}>
+    </Card></div>}>
     <Card title="Record">{sel ? <AdrView projectId={projectId} id={sel} /> : <p className="text-sm text-soft">Select an ADR.</p>}</Card>
     <AdrForm projectId={projectId} open={open} onClose={() => setOpen(false)} />
   </SplitLayout>;

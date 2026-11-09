@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, ArrowRight, BookCheck, Boxes, CheckCircle2, CircleDashed, GitBranch, Network, Plus, Radar, ScrollText, ShieldCheck } from "lucide-react";
 import { useState } from "react";
+import type { ReactNode } from "react";
 import { ago, Avatar, Badge, Button, Card, Empty, ErrorBox, SeverityBar, Skeleton, StatTile, StatusDot } from "@/components/ui";
 import { useApi, useMe } from "@/lib/hooks";
 import { NewProjectDialog } from "./Projects";
@@ -24,13 +25,13 @@ function greeting() {
   return h < 5 ? "Working late" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
 }
 
-export function ProjectHealthCard({ p }: { p: HomeProject }) {
+export function ProjectHealthCard({ p, titleAddon }: { p: HomeProject; titleAddon?: ReactNode }) {
   return <Link to="/projects/$projectId" params={{ projectId: p.id }} aria-label={`${p.title} — open project`} className="group block h-full">
     <article className="flex h-full flex-col rounded-xl border border-rule bg-card p-4 shadow-card transition group-hover:-translate-y-0.5 group-hover:shadow-lift">
       <div className="flex items-start gap-3">
         <Avatar name={p.title} size={36} />
         <div className="min-w-0 flex-1">
-          <h3 className="truncate font-semibold tracking-tight">{p.title}</h3>
+          <div className="flex min-w-0 items-center gap-0.5"><h3 className="truncate font-semibold tracking-tight">{p.title}</h3>{titleAddon}</div>
           <p className="line-clamp-1 text-xs text-muted">{p.purpose || "No purpose stated."}</p>
         </div>
         <ArrowRight size={16} className="mt-1 text-soft opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
@@ -51,12 +52,18 @@ export function ProjectHealthCard({ p }: { p: HomeProject }) {
   </Link>;
 }
 
+/** "/projects/x/decisions?adr=1" -> router props (path + search object), so deep links keep their query. */
+function linkTo(link: string) {
+  const [to, qs] = link.split("?");
+  return { to, search: qs ? Object.fromEntries(new URLSearchParams(qs)) : undefined } as { to: string; search?: Record<string, string> };
+}
+
 function AttentionList({ items }: { items: Item[] }) {
   if (!items.length) return <div className="flex items-center gap-3 rounded-lg bg-ok/8 p-4 text-sm text-ok"><CheckCircle2 size={18} />Nothing needs you right now — evidence is fresh and nothing awaits review.</div>;
   return <ul className="divide-y divide-rule">{items.map((a, i) => {
     const I = KIND_ICON[a.kind] ?? CircleDashed;
     const hot = a.severity === "critical" || a.severity === "high";
-    return <li key={i}><Link to={a.link ?? "/home"} className="-mx-2 flex items-start gap-3 rounded-lg px-2 py-2.5 transition hover:bg-paper/70">
+    return <li key={i}><Link {...linkTo(a.link ?? "/home")} className="-mx-2 flex items-start gap-3 rounded-lg px-2 py-2.5 transition hover:bg-paper/70">
       <span className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg ${hot ? "bg-accent-tint text-accent" : "bg-paper-2 text-muted"}`}><I size={15} /></span>
       <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{a.title}</span>
         <span className="block truncate text-xs text-muted">{a.project}{a.detail ? ` · ${a.detail}` : ""}</span></span>
@@ -69,13 +76,15 @@ function Activity({ items }: { items: Item[] }) {
   if (!items.length) return <p className="text-sm text-soft">No activity yet.</p>;
   return <ol className="relative space-y-3 before:absolute before:bottom-1 before:left-[13px] before:top-1 before:w-px before:bg-rule">{items.map((a, i) => {
     const I = KIND_ICON[a.kind] ?? CircleDashed;
-    return <li key={i} className="relative flex gap-3">
-      <span className="z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full border border-rule bg-card text-muted"><I size={13} /></span>
-      <div className="min-w-0 flex-1 pt-0.5">
-        <div className="flex items-center gap-2"><span className="truncate text-sm">{a.title}</span>{a.status && <StatusDot status={a.status} />}</div>
-        <div className="truncate text-xs text-soft"><Link to="/projects/$projectId" params={{ projectId: a.project_id }} className="hover:text-link">{a.project}</Link>
-          {a.detail ? ` · ${a.detail}` : ""} · {ago(a.at)}</div>
-      </div>
+    return <li key={i} className="relative">
+      <Link {...linkTo(a.link ?? `/projects/${a.project_id}`)} title="Open to investigate" className="group -mx-1 flex gap-3 rounded-lg px-1 py-0.5 transition hover:bg-paper/70">
+        <span className="z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full border border-rule bg-card text-muted group-hover:text-link"><I size={13} /></span>
+        <div className="min-w-0 flex-1 pt-0.5">
+          <div className="flex items-center gap-2"><span className="truncate text-sm group-hover:text-link">{a.title}</span>{a.status && <StatusDot status={a.status} />}
+            <ArrowRight size={12} className="ml-auto shrink-0 text-soft opacity-0 transition group-hover:opacity-100" /></div>
+          <div className="truncate text-xs text-soft">{a.project}{a.detail ? ` · ${a.detail}` : ""} · {ago(a.at)}</div>
+        </div>
+      </Link>
     </li>;
   })}</ol>;
 }

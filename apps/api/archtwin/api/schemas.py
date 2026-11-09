@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Strict(BaseModel):
@@ -94,8 +94,15 @@ class AdrDecideIn(Strict):
 
 
 class DismissIn(Strict):
-    ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+    ids: list[uuid.UUID] = Field(default_factory=list, max_length=500)
+    rule_id: str | None = Field(default=None, max_length=60)        # or: every open finding of this rule
     note: str = Field(default="", max_length=4000)
+
+    @model_validator(mode="after")
+    def _one_target(self) -> DismissIn:
+        if not self.ids and not self.rule_id:
+            raise ValueError("give ids or rule_id")
+        return self
 
 
 class TransitionIn(Strict):
@@ -148,6 +155,12 @@ class SpendLimitsIn(Strict):
 
 class SourceRootsIn(Strict):
     roots: list[str] | None = Field(default=None, max_length=50)   # None = every mounted boundary
+
+
+class PageAskIn(Strict):
+    page: Literal["flows", "decisions", "docs"]
+    question: str = Field(min_length=2, max_length=2000)
+    ai: bool = True
 
 
 class EstimateIn(Strict):

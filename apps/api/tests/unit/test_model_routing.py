@@ -17,7 +17,7 @@ def test_deep_tasks_use_terra_with_high_reasoning_and_cheap_tasks_use_luna_low()
     for op in ("architecture_draft", "flow_explain", "drift_review", "integration_design"):
         r = routing.route(op)
         assert (r.model, r.reasoning_effort) == ("gpt-6-terra", "high"), op
-    for op in ("text_extend", "page_ask", "general_chat"):
+    for op in ("text_extend", "page_ask"):
         r = routing.route(op)
         assert r.model == "gpt-6-luna" and r.reasoning_effort in ("low", "minimal"), op
     assert all(t.model in ("gpt-6-luna", "gpt-6-terra") for t in routing.tasks().values())

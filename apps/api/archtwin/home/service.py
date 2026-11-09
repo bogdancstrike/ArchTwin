@@ -44,7 +44,7 @@ async def _project(c: RequestContext, p: dict[str, Any]) -> dict[str, Any]:
     activity: list[dict[str, Any]] = []
     for s in await connectors.recent_scans(pc, 5):
         activity.append({"kind": "scan", "project_id": p["id"], "project": p["title"], "at": _ts(s["finished_at"] or s["created_at"]),
-                         "title": f"{s['connector']} scan {s['status']}", "status": s["status"],
+                         "title": f"{s['connector']} scan {s['status']}", "status": s["status"], "link": f"/projects/{p['id']}/inventory",
                          "detail": f"{(s['stats'] or {}).get('observations', 0)} observations"
                                    + (f" @ {s['revision'][:10]}" if s["revision"] else "")})
     for x in inv["connectors"]:
@@ -66,7 +66,8 @@ async def _project(c: RequestContext, p: dict[str, Any]) -> dict[str, Any]:
                                   "detail": "You proposed it; another reviewer must approve." if mine else (b["note"] or "Review and approve or reject.")})
             if b["decided_at"]:
                 activity.append({"kind": "baseline", "project_id": p["id"], "project": p["title"], "at": _ts(b["decided_at"]),
-                                 "title": f"Baseline v{b['version']} {b['status']}", "status": b["status"], "detail": b["note"]})
+                                 "title": f"Baseline v{b['version']} {b['status']}", "status": b["status"], "detail": b["note"],
+                                 "link": f"/projects/{p['id']}/settings"})
     if on["module.drift-engine"]:
         st = await drift.stats(pc)
         out["drift"] = {"open": st["open"], "unknown": st["unknown"],
@@ -77,7 +78,8 @@ async def _project(c: RequestContext, p: dict[str, Any]) -> dict[str, Any]:
                 attention.append({"kind": "drift", "severity": f["severity"], "project_id": p["id"], "project": p["title"],
                                   "title": f["title"], "detail": f["subject_key"], "link": f"/projects/{p['id']}/drift/{f['id']}"})
             activity.append({"kind": "drift", "project_id": p["id"], "project": p["title"], "at": _ts(f["first_seen"]),
-                             "title": f"Drift: {f['title']}", "status": f["severity"], "detail": f["subject_key"]})
+                             "title": f"Drift: {f['title']}", "status": f["severity"], "detail": f["subject_key"],
+                             "link": f"/projects/{p['id']}/drift/{f['id']}"})
     if on["module.adr-workflow"]:
         adrs = await decisions.list_(pc)
         out["adrs"] = {"total": len(adrs), "proposed": sum(a["status"] == "proposed" for a in adrs),
@@ -87,9 +89,10 @@ async def _project(c: RequestContext, p: dict[str, Any]) -> dict[str, Any]:
                 attention.append({"kind": "adr", "severity": "medium", "project_id": p["id"], "project": p["title"],
                                   "title": f"ADR-{a['number']:04d} {a['title']} is proposed",
                                   "detail": "AI-drafted — needs a human decision." if a["ai_drafted"] else "Awaiting a decision.",
-                                  "link": f"/projects/{p['id']}/decisions"})
+                                  "link": f"/projects/{p['id']}/decisions?adr={a['id']}"})
             activity.append({"kind": "adr", "project_id": p["id"], "project": p["title"], "at": _ts(a["decided_at"] or a["created_at"]),
-                             "title": f"ADR-{a['number']:04d} {a['title']}", "status": a["status"], "detail": ""})
+                             "title": f"ADR-{a['number']:04d} {a['title']}", "status": a["status"], "detail": "",
+                             "link": f"/projects/{p['id']}/decisions?adr={a['id']}"})
     out["last_activity"] = max((a["at"] for a in activity), default=_ts(p["created_at"]))
     return {"project": out, "attention": attention, "activity": activity}
 
