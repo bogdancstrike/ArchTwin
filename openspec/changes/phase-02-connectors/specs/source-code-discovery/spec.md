@@ -46,3 +46,33 @@ When webhooks are enabled, push/PR/MR events MUST trigger incremental extraction
 - **GIVEN** the same push webhook is delivered twice
 - **WHEN** both deliveries are processed
 - **THEN** one extraction runs and one change record exists for the commit
+
+### Requirement: Local directories
+**Requirement ID:** `AT-SOURCE_CODE_DISCOVERY-004`
+
+The system MUST accept local directories mounted read-only under an operator-configured source root as datasources: one repository (any ref), a folder of repositories (one system each) or a docs/architecture folder (`content=docs`).
+
+#### Scenario: Folder of repositories
+- **GIVEN** a directory that holds several Git repositories and is not itself a repository
+- **WHEN** a scan executes
+- **THEN** each repository is scanned at its HEAD as its own software system and the revision lists every repository commit
+
+#### Scenario: Documentation folder
+- **GIVEN** a folder scanned with `content=docs`
+- **WHEN** the scan executes
+- **THEN** its documents, ADRs and diagram sources are ingested and no runtime containers are derived from it
+
+### Requirement: Local directory confinement
+**Requirement ID:** `AT-SOURCE_CODE_DISCOVERY-005`
+
+Directories outside the source roots, including through symbolic links, MUST be refused; the folder picker MUST return folder names only and only to users allowed to create connectors.
+
+#### Scenario: Path outside the source roots
+- **GIVEN** a path outside the mounted source roots, or a symbolic link pointing outside them
+- **WHEN** a user tests, scans or browses it
+- **THEN** the request is refused and nothing is read
+
+#### Scenario: Viewer cannot browse
+- **GIVEN** a project viewer
+- **WHEN** they open the folder picker
+- **THEN** the request is denied by policy

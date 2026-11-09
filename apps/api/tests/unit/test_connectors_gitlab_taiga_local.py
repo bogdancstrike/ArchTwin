@@ -423,3 +423,13 @@ def test_browse_refuses_paths_outside_roots_and_symlink_escapes(workspace, tmp_p
     assert "link" not in [f["name"] for f in git_repo.browse(str(workspace))["folders"]]
     with pytest.raises(ValueError, match="allowed source root"):
         git_repo.browse(str(workspace / ".." / outside.name))
+
+
+def test_compose_reset_and_override_tags_are_understood(tmp_path):
+    from archtwin.connectors.analyzers.repo import analyze_repository
+    (tmp_path / "compose.yaml").write_text("services:\n  api:\n    image: python:3.12\n")
+    (tmp_path / "docker-compose.scale.yml").write_text(
+        "services:\n  api:\n    ports: !reset []\n    environment: !override\n      A: b\n  worker:\n    image: python:3.12\n")
+    r = analyze_repository(tmp_path, "rev", "svc")
+    assert not any("invalid YAML" in w for w in r.warnings)
+    assert "container:svc/worker" in {o.subject_key for o in r.observations}

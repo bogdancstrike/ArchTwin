@@ -51,6 +51,24 @@ ADR_PATH = re.compile(r"(^|/)(adr|adrs|decisions?)(/|$)", re.IGNORECASE)
 DOC_PREFIXES = ("docs/", "doc/", "openspec/", "adr/", "architecture/")
 
 
+class ComposeLoader(yaml.SafeLoader):
+    """Safe loader that understands Compose's merge tags (`!reset` clears an inherited value, `!override` replaces it)."""
+
+
+def _compose_tag(loader: yaml.SafeLoader, node: yaml.Node) -> Any:
+    if node.tag == "!reset":
+        return None
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node, deep=True)
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node, deep=True)
+    return loader.construct_scalar(node)
+
+
+ComposeLoader.add_constructor("!reset", _compose_tag)
+ComposeLoader.add_constructor("!override", _compose_tag)
+
+
 @dataclass
 class Service:
     system: str
@@ -75,7 +93,7 @@ def _rel(root: Path, p: Path) -> str:
 
 def _service_lines(text: str) -> dict[str, tuple[int, int]]:
     try:
-        node = yaml.compose(text)
+        node = yaml.compose(text, Loader=ComposeLoader)
     except yaml.YAMLError:
         return {}
     out: dict[str, tuple[int, int]] = {}
@@ -172,7 +190,7 @@ class RepoAnalyzer:
     def compose(self, cf: Path) -> None:
         text = read(cf)
         try:
-            data = yaml.safe_load(text) or {}
+            data = yaml.load(text, Loader=ComposeLoader) or {}  # noqa: S506 — SafeLoader subclass
         except yaml.YAMLError as e:
             self.r.warnings.append(f"{_rel(self.root, cf)}: invalid YAML ({str(e)[:80]})")
             self.r.complete = False

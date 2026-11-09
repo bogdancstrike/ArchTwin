@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import { X } from "lucide-react";
-import { useEffect, useRef, useState, type ButtonHTMLAttributes, type PointerEvent as ReactPointerEvent, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type PointerEvent as ReactPointerEvent, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 
 export const cn = clsx;
 
@@ -143,12 +143,21 @@ export function Table({ head, children }: { head: ReactNode[]; children: ReactNo
   const ref = useRef<HTMLTableElement>(null);
   const n = head.length;
   const w = widths && widths.length === n ? widths : Array.from({ length: n }, () => 100 / n);
+  useLayoutEffect(() => {          // Chrome does not always re-run fixed table layout on a cell width change: force it (pre-paint)
+    const t = ref.current;
+    if (!t || !widths) return;
+    t.style.display = "none";
+    void t.offsetWidth;
+    t.style.display = "";
+  }, [widths]);
   const resize = (i: number, deltaPct: number) => {
     if (i >= n - 1) return;
-    const next = [...w];
-    const d = Math.max(-(next[i] - 5), Math.min(next[i + 1] - 5, deltaPct));       // keep every column >= 5 %
-    next[i] += d; next[i + 1] -= d;
-    setWidths(next);
+    setWidths((prev) => {                         // functional: successive pointer moves accumulate
+      const next = prev && prev.length === n ? [...prev] : Array.from({ length: n }, () => 100 / n);
+      const d = Math.max(-(next[i] - 5), Math.min(next[i + 1] - 5, deltaPct));     // keep every column >= 5 %
+      next[i] += d; next[i + 1] -= d;
+      return next;
+    });
   };
   const start = (i: number) => (e: ReactPointerEvent) => {
     e.preventDefault();
@@ -159,8 +168,7 @@ export function Table({ head, children }: { head: ReactNode[]; children: ReactNo
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
   };
   return <div className="overflow-auto"><table ref={ref} className="w-full table-fixed text-sm">
-    <colgroup>{w.map((x, i) => <col key={i} style={{ width: `${x}%` }} />)}</colgroup>
-    <thead><tr className="border-b border-rule text-left">{head.map((h, i) => <th key={i} className="eyebrow relative truncate px-2 py-2 font-medium">{h}
+    <thead><tr className="border-b border-rule text-left">{head.map((h, i) => <th key={i} style={{ width: `${w[i]}%` }} className="eyebrow relative truncate px-2 py-2 font-medium">{h}
       {i < n - 1 && <span role="separator" aria-orientation="vertical" aria-label="Resize column" tabIndex={0} onPointerDown={start(i)}
         onKeyDown={(e) => { if (e.key === "ArrowLeft") resize(i, -2); if (e.key === "ArrowRight") resize(i, 2); }}
         onDoubleClick={() => setWidths(null)}

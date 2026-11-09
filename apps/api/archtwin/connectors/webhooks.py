@@ -184,7 +184,7 @@ async def _handle_gitlab_item(ctx: RequestContext, c: dict[str, Any], event: str
 
 async def _handle_taiga(ctx: RequestContext, c: dict[str, Any], event: str, payload: dict[str, Any]) -> tuple[str, uuid.UUID | None, dict]:
     from archtwin.connectors.adapters.taiga import KINDS, TaigaConnector, parse_target
-    web, _, slug = parse_target(c["config"] or {})
+    web, _, slug = parse_target(c["config"] or {}, check=False)
     typ = event.removeprefix("taiga.")
     data = payload.get("data") or {}
     permalink = str((data.get("project") or {}).get("permalink") or data.get("permalink") or "")

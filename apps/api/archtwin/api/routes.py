@@ -108,7 +108,9 @@ async def webhook_info(cid: uuid.UUID, request: Request, c: RequestContext = Dep
     base = str(request.base_url).rstrip("/")
     return {"url": f"{base}/api/v1/webhooks/{c.org_id}/{c.project_id}/{cid}", "kind": conn_row["kind"],
             "enabled": await flags.enabled("connectors.webhooks", c.org_id, c.project_id),
-            "signature": "X-Hub-Signature-256" if conn_row["kind"] == "github" else "X-ArchTwin-Signature + X-ArchTwin-Timestamp",
+            "signature": {"github": "X-Hub-Signature-256", "gitlab": "X-Gitlab-Token (the webhook secret token)",
+                          "taiga": "X-TAIGA-WEBHOOK-SIGNATURE (HMAC-SHA1 with the webhook key)"}.get(
+                conn_row["kind"], "X-ArchTwin-Signature + X-ArchTwin-Timestamp"),
             "events": registry.get(conn_row["kind"]).manifest.get("webhooks", ["push"]),
             "recent": await connectors.recent_deliveries(c, cid)}
 

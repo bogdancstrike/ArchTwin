@@ -4,10 +4,11 @@ P1 = primary pilot support, P2 = second wave, P3 = optional ecosystem roadmap. T
 
 | Provider | Discovery | Authentication | Sync approach | Priority | Security |
 |---|---|---|---|---|---|
+| Local directory | One repo, a folder of repos, docs / architecture folders | operator-mounted read-only root | manual / reconcile; refs via `git archive` | P1 (implemented) | names-only picker, no symlink escape |
 | GitHub | Repos, refs, PRs, issues, actions | App installation / fine-grained token | Webhooks + scheduled reconcile | P1 | read-only first |
-| GitLab | Repos, MRs, pipelines, issues | OAuth / scoped token | Webhooks + reconcile | P1 | read-only first |
+| GitLab | Repos, MRs, pipelines, issues (implemented: repos/groups, branches, issues, MRs, code at any ref) | OAuth / scoped token (`read_api` + `read_repository`) | Webhooks + reconcile | P1 | read-only first |
 | Jira Cloud/Data Center | Projects, issues, sprints, transitions | OAuth / token per deployment | Webhook + poll | P2 | write-back separate |
-| Taiga | Projects, stories, tasks, statuses, sprints | provider-supported token/API auth | Webhook if supported + poll | P2 | write-back separate |
+| Taiga | Projects, stories, tasks, statuses, sprints (implemented, + epics, issues) | anonymous / token / username + password | Webhook (HMAC-SHA1) + poll | P2 | write-back separate |
 | Bitbucket | Repos, PRs, issues | provider token | Webhook + poll | P3 | optional |
 | Azure DevOps | Repos, work items, pipelines | OAuth / PAT | Service hooks + poll | P3 | optional |
 | Confluence | Spaces, pages, diagrams | OAuth / token | Poll + webhook if supported | P3 | optional |

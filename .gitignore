@@ -20,3 +20,4 @@ playwright-report/
 .coverage-data/
 coverage.xml
 htmlcov/
+.e2e-sources/

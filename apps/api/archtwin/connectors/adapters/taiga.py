@@ -29,7 +29,7 @@ class AuthFailed(Exception):
     pass
 
 
-def parse_target(cfg: dict[str, Any]) -> tuple[str, str, str]:
+def parse_target(cfg: dict[str, Any], *, check: bool = True) -> tuple[str, str, str]:
     """-> (web base, api base, project slug). Accepts the project URL the user sees, e.g.
     https://taiga.example.com/project/my-proj/kanban, or url + project."""
     raw = str(cfg.get("url") or "").strip()
@@ -44,7 +44,8 @@ def parse_target(cfg: dict[str, Any]) -> tuple[str, str, str]:
     if not SLUG_RX.match(slug):
         raise ValueError("project slug missing or invalid: paste the project URL (…/project/<slug>/…) or set project")
     api = str(cfg.get("api_url") or f"{web}/api/v1").rstrip("/")
-    check_url(api)
+    if check:                      # webhook ingress only reads the slug: no outbound call, no DNS
+        check_url(api)
     return web, api, slug
 
 

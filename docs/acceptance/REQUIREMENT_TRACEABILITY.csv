@@ -46,6 +46,8 @@ AT-RUNTIME_DISCOVERY-003,phase-02-connectors,runtime-discovery,Source protection
 AT-SOURCE_CODE_DISCOVERY-001,phase-02-connectors,source-code-discovery,Repo scanning,not-started,test-pending,implementation-pending
 AT-SOURCE_CODE_DISCOVERY-002,phase-02-connectors,source-code-discovery,Static analysis evidence,not-started,test-pending,implementation-pending
 AT-SOURCE_CODE_DISCOVERY-003,phase-02-connectors,source-code-discovery,Change tracking,not-started,test-pending,implementation-pending
+AT-SOURCE_CODE_DISCOVERY-004,phase-02-connectors,source-code-discovery,Local directories,not-started,test-pending,implementation-pending
+AT-SOURCE_CODE_DISCOVERY-005,phase-02-connectors,source-code-discovery,Local directory confinement,not-started,test-pending,implementation-pending
 AT-WORK_CONNECTORS-001,phase-02-connectors,work-connectors,Work connector support,not-started,test-pending,implementation-pending
 AT-WORK_CONNECTORS-002,phase-02-connectors,work-connectors,Change ingestion,not-started,test-pending,implementation-pending
 AT-WORK_CONNECTORS-003,phase-02-connectors,work-connectors,Read-only first,not-started,test-pending,implementation-pending

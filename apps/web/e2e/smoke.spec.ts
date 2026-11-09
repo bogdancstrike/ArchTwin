@@ -62,3 +62,54 @@ test("viewer sees read-only state and outsiders see nothing", async ({ page, bro
   await expect(p2.getByText("No projects yet")).toBeVisible();
   await ctx.close();
 });
+
+test("datasources: tab order, folder picker, credential shortcuts, equal resizable columns", async ({ page }) => {
+  await login(page);
+  await page.getByRole("link", { name: "All projects" }).first().click();
+  await page.getByLabel("Search projects").fill("archtwin (self)");
+  await page.getByRole("link", { name: /ArchTwin \(self\)/ }).first().click();
+  const tabs = page.getByRole("navigation", { name: "Project" }).getByRole("link");
+  await expect(tabs.last()).toHaveText("Settings");
+  const names = await tabs.allInnerTexts();
+  expect(names.slice(-2).map((n) => n.trim())).toEqual(["Datasources", "Settings"]);           // second-to-last, before Settings
+  expect(names.map((n) => n.trim())).not.toContain("Inventory");
+  await tabs.filter({ hasText: "Datasources" }).click();
+  await expect(page).toHaveURL(/\/datasources$/);
+  await expect(page.getByRole("heading", { name: "Datasources", level: 2 })).toBeVisible();
+
+  // shared tables: columns start equal and can be resized
+  const firstTh = page.getByRole("columnheader").first();
+  const before = (await firstTh.boundingBox())!.width;
+  const handle = page.getByRole("separator", { name: "Resize column" }).first();
+  const hb = (await handle.boundingBox())!;
+  await page.mouse.move(hb.x + 2, hb.y + hb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(hb.x + 80, hb.y + hb.height / 2, { steps: 4 });
+  await page.mouse.up();
+  expect((await firstTh.boundingBox())!.width).toBeGreaterThan(before + 30);
+
+  await page.getByRole("button", { name: "Add datasource" }).click();
+  await page.getByRole("button", { name: /Local directory/ }).click();
+  await page.getByRole("button", { name: "Browse…" }).click();
+  const picker = page.getByRole("dialog", { name: "Choose a local directory" });
+  await expect(picker.getByRole("navigation", { name: "Places" })).toContainText("All sources");
+  await picker.getByRole("button", { name: /Current path/ }).focus();
+  await page.keyboard.press("Enter");                                                            // edit the path bar
+  await picker.getByLabel("Type a path", { exact: true }).fill("/sources/archtwin");
+  await picker.getByLabel("Type a path", { exact: true }).press("Enter");
+  await expect(picker.getByText("repository", { exact: true })).toBeVisible();                   // layout of the chosen folder
+  await picker.getByRole("option", { name: /fixtures/ }).dblclick();
+  await expect(picker).toHaveCount(0);
+  await expect(page.getByLabel("Local directory path")).toHaveValue("/sources/archtwin/fixtures");
+  await expect(page.getByRole("dialog", { name: "Add Local directory / Git repository" })).toBeVisible();   // only the picker closed
+
+  await page.getByRole("button", { name: "All datasource types" }).click();
+  await page.getByRole("button", { name: /^GitLab/ }).click();
+  await page.locator("textarea").first().fill(JSON.stringify({ projects: ["https://gitlab.acme.test/team/svc"] }));
+  const link = page.getByRole("link", { name: /Create personal access token on GitLab/ });
+  await expect(link).toHaveAttribute("href", /^https:\/\/gitlab\.acme\.test\/-\/user_settings\/personal_access_tokens\?name=.*&scopes=read_api,read_repository$/);
+  await expect(page.getByRole("link", { name: /Open project webhooks/ })).toHaveAttribute("href", "https://gitlab.acme.test/team/svc/-/hooks");
+  await page.getByRole("button", { name: "Generate webhook secret" }).click();
+  await expect(page.getByLabel("credential webhook_secret")).toHaveValue(/^[0-9a-f]{64}$/);
+  await expect(page.getByLabel("credential token")).toHaveAttribute("type", "password");
+});

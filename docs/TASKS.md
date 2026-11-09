@@ -59,22 +59,23 @@ against the approved baseline produced 12 findings (unplanned `backup`/`demo-see
 | Task | Status | Notes |
 |---|---|---|
 | 0.1–0.2 reference fixture | ✅ | `fixtures/shop` (separate Compose project `archtwin-fixtures`, containers `archtwin-fixture-*`): OTel-instrumented web/orders/inventory/billing + Kafka, Schema Registry, PostgreSQL, MySQL, collector servicegraph → Prometheus; `ground-truth.yaml`; `make fixtures-up/-demo/-down`. OTel Demo on kind ⏭ (Docker-only for now) |
-| 1.1 SDK, manifest, registry, conformance | 🟡 | 8 kinds: git, github, docker, otel_servicegraph, postgresql, mysql, kafka, http_openapi; manifests carry category/scopes/webhooks; conformance kit ⏳ |
+| 1.1 SDK, manifest, registry, conformance | 🟡 | 10 kinds: git (local directory / Git), github, gitlab, taiga, docker, otel_servicegraph, postgresql, mysql, kafka, http_openapi; manifests carry category/scopes/webhooks; conformance kit ⏳ |
 | 1.2 sealed credentials, test endpoint with scopes/warnings | ✅ | |
-| 1.3 egress guard + SSRF suite | ✅ | DNS pinning ⏳ (resolve-and-check only) |
+| 1.3 egress guard + SSRF suite | ✅ | DNS pinning ⏳ (resolve-and-check only). Operator-only `ARCHTWIN_EGRESS_INSECURE_TLS_HOSTS` for internal hosts with self-signed certificates; `guarded_login` (POST to auth endpoints only, redirects refused) |
 | 1.4 Temporal workflows, flags re-checked | ✅ | scheduled reconcile loop (flag `connectors.full_reconciliation`) |
 | 1.5 webhook ingress | ✅ | `POST /api/v1/webhooks/{org}/{project}/{connector}`: GitHub `X-Hub-Signature-256` / generic HMAC + 5-min replay window, `webhook_deliveries` dedupe (migration 0003, RLS), one scan per commit, issue/PR events update the single work item; rejections opaque, metered, nothing stored (unit + live e2e). Prometheus export of the counters ⏳ |
 | 1.6 partial scans never tombstone | ✅ | |
 | 2.1–2.3 observations, freshness, conflicts | ✅ | monthly partitions ⏳ |
-| 3.1 GitHub App / GitLab adapters | 🟡 | GitHub REST adapter: repo metadata, branches, code via the git analyzers at any ref, webhooks; verified live on `bogdancstrike/ArchTwin`. GitHub App auth + GitLab ⏳ |
+| 3.1 GitHub App / GitLab adapters | 🟡 | GitHub REST adapter: repo metadata, branches, code via the git analyzers at any ref, webhooks; verified live on `bogdancstrike/ArchTwin`. GitLab REST v4 adapter (self-hosted or gitlab.com): projects by URL/path or whole groups, branches, issues + MRs, code cloned at any ref, `X-Gitlab-Token` push/MR/issue webhooks (push scans only the pushed project, partial); live test opt-in (`ARCHTWIN_E2E_GITLAB_*`). **Local directories**: one repo, a folder of repos (each its own system) or `content=docs` folders; server-side folder picker (`GET /projects/{id}/source-folders`). GitHub App auth ⏳ |
 | 3.2–3.4 declared artifacts, tree-sitter detectors, precision/recall | ✅ | + Kafka producer/consumer detection (confluent-kafka, kafka-python, aiokafka; literal topics only) keyed to the configured broker; recall 100% / no invented app edges on the fixture ground truth (CI); grammar from the official `tree-sitter-python` wheel (the language pack downloaded grammars at runtime — intermittent 504s silently dropped modules; now parse failures mark the scan partial). Syft SBOM ⏳ |
 | 4.1–4.2 Kubernetes adapter, RBAC templates | ⏭ | deferred by the product owner (Docker-only for now); Docker Engine runtime adapter covers Compose hosts |
 | 4.3 OTel service-graph adapter | ✅ | Prometheus HTTP API → runtime `calls`/`writes`/`publishes` edges with window, requests, errors, p95; `service_map`/`peer_map`; unknown peers reported, never invented; absence in traces is not coverage (live e2e on the fixture) |
 | 5.1 PostgreSQL catalog | ✅ | + MySQL on the same SQLAlchemy reflection path (`sql_catalog`), READ ONLY transaction, privilege warnings (REFERENCES-only account passes) |
 | 5.2 Kafka | ✅ | confluent-kafka AdminClient: topics/partitions/RF, consumer groups + members, lag from committed offsets vs watermarks (never joins a group, no payloads), Schema Registry subjects → `implements`; group→service only via `group_services` (or exact name, 0.7); static + runtime topic identities merge |
 | 5.3 sensitive-column classifier | ✅ | |
+| 6.2 Jira / Taiga | 🟡 | Taiga ✅: epics, stories, tasks, issues, sprints as work items (task → story → epic `implements`, sprint `references`), anonymous / token / username+password, HMAC-SHA1 webhooks (deletes wait for reconcile), page-number paging; verified live on a self-hosted board (`ARCHTWIN_E2E_TAIGA_URL`). Jira ⏳ |
 | 6.1, 6.3 work connectors read-only | ✅ | GitHub issues + PRs as `work-item` (origin `issue`), closing keywords → `implements`; no write call exists (source test); write/admin scopes and push permissions warned at test time |
-| 7.1–7.2 uploads + parsing | ✅ | magic bytes (binary rejected), docling-serve profile for PDF/DOCX |
+| 7.1–7.2 uploads + parsing | ✅ | magic bytes (binary rejected), docling-serve profile for PDF/DOCX; PDF/DOCX inside local/Git sources go through the same parser (counted and skipped without the profile) |
 
 ## Phase 03 — architecture
 | Task | Status | Notes |

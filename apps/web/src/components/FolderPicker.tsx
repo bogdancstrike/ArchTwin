@@ -29,6 +29,8 @@ export function FolderPicker({ projectId, open, value, onClose, onChoose }: {
   const [cursor, setCursor] = useState(0);
   const [recent, setRecent] = useState<string[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
+  const clickTimer = useRef<number | undefined>(undefined);      // a click opens a folder, unless a double-click (choose) follows
+  useEffect(() => () => window.clearTimeout(clickTimer.current), []);
   const q = useApi<FolderListing>(["source-folders", projectId, path], open ? `/projects/${projectId}/source-folders${path ? `?path=${encodeURIComponent(path)}` : ""}` : null);
   const data = q.data;
 
@@ -100,7 +102,9 @@ export function FolderPicker({ projectId, open, value, onClose, onChoose }: {
             : !data ? <div className="space-y-2 p-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-8" />)}</div>
             : shown.length === 0 ? <p className="py-10 text-center text-sm text-soft">{filter ? "No folder matches" : "No subfolders here: you can use this folder"}</p>
             : shown.map((f, i) => <button type="button" role="option" aria-selected={i === cursor} key={f.path} data-i={i}
-                onClick={() => setPath(f.path)} onDoubleClick={() => choose(f.path)} onMouseEnter={() => setCursor(i)}
+                onClick={(e) => { setCursor(i); window.clearTimeout(clickTimer.current); if (e.detail > 1) return;
+                  clickTimer.current = window.setTimeout(() => setPath(f.path), 250); }}
+                onDoubleClick={() => { window.clearTimeout(clickTimer.current); choose(f.path); }} onMouseEnter={() => setCursor(i)}
                 className={cn("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px]", i === cursor ? "bg-paper-2" : "hover:bg-paper-2", q.isFetching && "opacity-60")}>
                 {f.is_repo ? <FolderGit2 size={16} className="shrink-0 text-accent" /> : <FolderClosed size={16} className="shrink-0 text-muted" />}
                 <span className="min-w-0 flex-1 truncate">{f.name}</span>
