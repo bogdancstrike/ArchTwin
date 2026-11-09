@@ -43,10 +43,27 @@ MIN_CONFIDENCE = 0.6          # inferred / low-confidence evidence alone never r
 class Coverage:
     """Which key prefixes each origin authoritatively covers, and whether that coverage is fresh and complete."""
     by_origin: dict[str, list[tuple[str, str]]] = field(default_factory=dict)   # origin -> [(prefix, freshness status)]
+    revisions: dict[str, str] = field(default_factory=dict)            # connector -> source revision of the current snapshot
+    baseline_revisions: dict[str, str] = field(default_factory=dict)   # connector -> source revision when the baseline was taken
+
+    @staticmethod
+    def _revs(inputs: list[dict[str, Any]]) -> dict[str, str]:
+        return {str(i.get("connector_id")): str(i.get("revision") or "") for i in inputs
+                if i.get("connector_id") and i.get("revision") and i.get("revision") != "working-tree"}
+
+    def same_code(self, evidence: list[dict[str, Any]], against: str = "current") -> bool:
+        """True when every static evidence item comes from a commit identical to the other side's commit for its connector:
+        the code did not change, so a difference is due to re-analysis (a better parser), never drift."""
+        revs = self.revisions if against == "current" else self.baseline_revisions
+        static = [e for e in evidence or [] if e.get("origin") == "static" and e.get("connector_id")]
+        return bool(static) and all(revs.get(str(e["connector_id"])) and revs[str(e["connector_id"])] == str(e.get("source_revision") or "")
+                                    for e in static)
 
     @classmethod
-    def from_inputs(cls, inputs: list[dict[str, Any]]) -> Coverage:
+    def from_inputs(cls, inputs: list[dict[str, Any]], baseline_inputs: list[dict[str, Any]] | None = None) -> Coverage:
         c = cls()
+        c.revisions = cls._revs(inputs)
+        c.baseline_revisions = cls._revs(baseline_inputs or [])
         for i in inputs:
             cov = i.get("coverage") or {}
             origin = cov.get("origin")
@@ -196,11 +213,14 @@ def evaluate(baseline: dict[str, Any] | None, current: dict[str, Any], cov: Cove
             st = max((cov.status(o, k) for o in ("static", "runtime")), key=lambda s: ["unknown", "stale", "incomplete", "current"].index(s))
             if _verdict(st) == "unknown":
                 continue                 # no current source covers it any more: "not observed" says nothing (no finding)
+            if cov.same_code(n.get("evidence", []), "current"):
+                continue                 # the commit is unchanged: only the analysis changed (no drift)
             add("DR-MISSING-001", k, f"{n['name']} is in the approved baseline but no longer observed", _verdict(st),
                 expected={"kind": n["kind"], "name": n["name"]}, actual=None, evidence=n.get("evidence", [])[:3])
         unplanned: set[str] = set()
         for k, n in cn.items():
-            if n["kind"] in ARCH_NODE_KINDS and k not in bn and _strong(n) and _significant_node(n):
+            if n["kind"] in ARCH_NODE_KINDS and k not in bn and _strong(n) and _significant_node(n) \
+                    and not cov.same_code(n.get("evidence", []), "baseline"):
                 unplanned.add(k)
                 new_deps = sorted({f"{e['source']} {e['kind']} {e['target']}" for e in ce.values()
                                    if k in (e["source"], e["target"]) and e["kind"] in ARCH_EDGE_KINDS})[:12]
@@ -219,22 +239,25 @@ def evaluate(baseline: dict[str, Any] | None, current: dict[str, Any], cov: Cove
                 continue
             if cn[e["source"]]["kind"] not in OWNED_NODE_KINDS or cn[e["target"]]["kind"] not in OWNED_NODE_KINDS:
                 continue                 # dependencies on externals are inferred from library use: their absence is not drift
+            if cov.same_code(e.get("evidence", []), "current"):
+                continue                 # same commit as before: the dependency was an artefact of the older analysis
             st = max((cov.for_edge(o, e) for o in ("static", "runtime")), key=lambda s: ["unknown", "stale", "incomplete", "current"].index(s))
-            add("DR-EDGE-REMOVED-001", k, f"Planned {e['kind']} {e['source']} → {e['target']} is no longer observed", _verdict(st),
+            add("DR-EDGE-REMOVED-001", k, f"Planned {e['kind']} {cn[e['source']]['name']} → {cn[e['target']]['name']} is no longer observed", _verdict(st),
                 expected={"kind": e["kind"], "protocol": e["attributes"].get("protocol")}, evidence=e.get("evidence", [])[:3])
         for k, e in ce.items():
             if e["source"] in unplanned or e["target"] in unplanned:
                 continue                 # reported once, on the new element (with its dependencies), not once per edge
             if cn.get(e["source"], {}).get("kind") not in ARCH_NODE_KINDS or cn.get(e["target"], {}).get("kind") not in ARCH_NODE_KINDS:
                 continue                 # code/component-level wiring is not an architecture decision
-            if e["kind"] in ARCH_EDGE_KINDS and k not in be and _strong(e) and _significant_edge(e):
-                add("DR-EDGE-ADDED-001", k, f"New {e['kind']} {e['source']} → {e['target']} is not in the approved baseline", "drift",
+            if e["kind"] in ARCH_EDGE_KINDS and k not in be and _strong(e) and _significant_edge(e) \
+                    and not cov.same_code(e.get("evidence", []), "baseline"):
+                add("DR-EDGE-ADDED-001", k, f"New {e['kind']} {cn[e['source']]['name']} → {cn[e['target']]['name']} is not in the approved baseline", "drift",
                     actual={"kind": e["kind"], "protocol": e["attributes"].get("protocol"), "origins": e["origins"]},
                     evidence=e.get("evidence", [])[:3])
             elif k in be:
                 pb, pc = be[k]["attributes"].get("protocol"), e["attributes"].get("protocol")
                 if pb and pc and pb != pc:
-                    add("DR-PROTOCOL-001", k, f"Protocol of {e['source']} → {e['target']} changed from {pb} to {pc}", "drift",
+                    add("DR-PROTOCOL-001", k, f"Protocol of {cn[e['source']]['name']} → {cn[e['target']]['name']} changed from {pb} to {pc}", "drift",
                         expected={"protocol": pb}, actual={"protocol": pc}, evidence=e.get("evidence", [])[:3])
     # cross-service contracts in code (independent of the baseline): a caller and the service it calls disagree
     for k, n in cn.items():
@@ -254,9 +277,12 @@ def evaluate(baseline: dict[str, Any] | None, current: dict[str, Any], cov: Cove
                 f"{src['name']} is routed to {a.get('method', '')} {a['path']}, which {tgt['name']} does not expose".replace("  ", " "),
                 "drift", expected={"endpoint": f"{a.get('method', '')} {a['path']}".strip(), "service": tgt["name"]},
                 actual={"exposed_by_service": "no matching endpoint"}, evidence=e.get("evidence", [])[:3])
-    # static vs runtime (independent of the baseline)
+    # static vs runtime (independent of the baseline); storage never "runs"; a stopped system is one finding, not one per container
+    not_running: dict[str, list[tuple[str, dict[str, Any], str, str]]] = {}
+    declared: dict[str, int] = {}
     for k, n in cn.items():
-        if n["kind"] != "container":
+        if n["kind"] != "container" or not _significant_node(n) or n.get("attributes", {}).get("subtype") in ("volume", "storage-volume") \
+                or "named volume" in n.get("name", "") or "host folder" in n.get("name", "") or k.split("/")[-1].startswith("volume-"):
             continue
         origins = set(n.get("origins", []))
         attrs_rt = n.get("by_origin", {}).get("runtime", {})
@@ -265,17 +291,28 @@ def evaluate(baseline: dict[str, Any] | None, current: dict[str, Any], cov: Cove
             rt_cov = cov.status("runtime", k)
             if rt_cov == "unknown":
                 continue                                    # no runtime connector covers this system: nothing to say
+            sysk = k.split(":", 1)[1].split("/")[0]
+            declared[sysk] = declared.get(sysk, 0) + 1
             if "runtime" not in origins or (attrs_rt and not attrs_rt.get("running", True)):
                 state = attrs_rt.get("status") or "no container"
-                add("DR-RUNTIME-NOT-RUNNING-001", k, f"{n['name']} is declared in code but not running ({state})", _verdict(rt_cov),
-                    expected={"declared_in": attrs_st.get("compose_file")}, actual={"runtime": state or "absent"},
-                    evidence=n.get("evidence", [])[:3])
-        if "runtime" in origins and "static" not in origins and attrs_rt.get("running", True):
+                not_running.setdefault(sysk, []).append((k, n, state, rt_cov))
+        if "runtime" in origins and "static" not in origins and attrs_rt.get("running", True) and not k.split("/")[-1].startswith("volume-"):
             st_cov = cov.status("static", k)
             if st_cov != "unknown":
                 add("DR-RUNTIME-UNDECLARED-001", k, f"{n['name']} is running but not declared in code", _verdict(st_cov),
                     actual={"image": attrs_rt.get("image"), "container": attrs_rt.get("container_name")},
                     evidence=n.get("evidence", [])[:3])
+    for sysk, items in not_running.items():
+        if len(items) >= 3 and len(items) >= 0.8 * declared.get(sysk, 0):
+            add("DR-RUNTIME-NOT-RUNNING-001", f"system:{sysk}#stopped", f"{sysk} is not running ({len(items)} of {declared[sysk]} declared containers are stopped)",
+                _verdict(max((x[3] for x in items), key=lambda s: ["unknown", "stale", "incomplete", "current"].index(s))),
+                expected={"declared": declared[sysk]}, actual={"stopped": sorted(f"{n['name']}: {st}" for _, n, st, _ in items)[:40]},
+                evidence=items[0][1].get("evidence", [])[:2])
+            continue
+        for k, n, state, rt_cov in items:
+            add("DR-RUNTIME-NOT-RUNNING-001", k, f"{n['name']} is declared in code but not running ({state})", _verdict(rt_cov),
+                expected={"declared_in": n.get("by_origin", {}).get("static", {}).get("compose_file")}, actual={"runtime": state or "absent"},
+                evidence=n.get("evidence", [])[:3])
     # module boundaries declared in code (Spring Modulith modules, allowedDependencies) and dependency cycles between modules
     for k, e in ce.items():
         if e["kind"] != "depends-on" or cn.get(e["source"], {}).get("kind") != "component":

@@ -36,7 +36,8 @@ async def evaluate(ctx: RequestContext) -> dict[str, Any]:
         current = await arch.load_graph(conn, snap["id"])
         base = await arch.current_baseline(conn, ctx)
         baseline_graph = await arch.load_graph(conn, base["snapshot_id"]) if base else None
-        cov = rules.Coverage.from_inputs(snap["inputs"].get("scans", []))
+        base_snap = await arch.resolve_snapshot(conn, ctx, base["snapshot_id"]) if base else None
+        cov = rules.Coverage.from_inputs(snap["inputs"].get("scans", []), (base_snap or {}).get("inputs", {}).get("scans", []))
         decisions_ = await adr_service.accepted_constraints(conn, ctx)        # accepted ADRs' conformance rules
         results = await asyncio.to_thread(rules.evaluate, baseline_graph, current, cov, decisions_)
         now = datetime.now(UTC)

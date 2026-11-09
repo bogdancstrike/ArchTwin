@@ -164,3 +164,24 @@ def test_rekeyed_element_with_the_same_name_is_not_missing_and_its_edges_are_not
                  edge("container:s/api", "writes", "container:s/x-db", attrs={"protocol": "postgresql"})])
     fs = evaluate(base, cur, cov())
     assert not [f for f in fs if f["rule_id"] in ("DR-MISSING-001", "DR-EDGE-REMOVED-001")]
+
+
+def test_reanalysis_of_the_same_commit_is_not_drift():
+    """A better parser over an unchanged commit removes/adds edges: that is analysis, not a change of the system."""
+    c = "11111111-1111-1111-1111-111111111111"
+    ev = {"connector": c}
+    base = base_graph([obs("container:s/old", "container", **ev), edge("container:s/api", "calls", "container:s/db", **ev)])
+    cur = base_graph([obs("container:s/new", "container", **ev)])
+    for g in (base, cur):
+        for x in list(g["nodes"].values()) + list(g["edges"].values()):
+            for e in x.get("evidence", []):
+                e["source_revision"] = "abc123"
+    same = Coverage.from_inputs([{"coverage": {"origin": "static", "prefixes": ["container:s/", "system:s"]}, "freshness": {"status": "current"},
+                                  "connector_id": c, "revision": "abc123"}],
+                                [{"connector_id": c, "revision": "abc123"}])
+    assert not rules_of(evaluate(base, cur, same), "drift")
+    moved = Coverage.from_inputs([{"coverage": {"origin": "static", "prefixes": ["container:s/", "system:s"]}, "freshness": {"status": "current"},
+                                   "connector_id": c, "revision": "def456"}],
+                                 [{"connector_id": c, "revision": "abc123"}])
+    r = rules_of(evaluate(base, cur, moved), "drift")
+    assert ("DR-MISSING-001", "container:s/old") in r
