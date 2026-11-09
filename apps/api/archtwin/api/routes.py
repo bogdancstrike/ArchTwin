@@ -391,8 +391,12 @@ async def decide_baseline(bid: uuid.UUID, decision: str, body: S.DecisionIn, c: 
         raise not_found("action")
     await flags.require(c, "module.architecture-graph")
     b = await arch.get_baseline(c, bid)
-    await require(c, "architecture", "approve_baseline", str(bid), author_id=str(b["author_id"]))
-    return await arch.decide_baseline(c, bid, decision == "approve", body.note)
+    own = str(b["author_id"]) == str(c.actor_id)
+    if own and decision == "approve":                 # the audited org-admin exception to four-eyes
+        await require(c, "architecture", "self_approve_baseline", str(bid), author_id=str(b["author_id"]))
+    else:
+        await require(c, "architecture", "approve_baseline", str(bid), author_id=str(b["author_id"]))
+    return await arch.decide_baseline(c, bid, decision == "approve", body.note, self_approval=own)
 
 
 @r.post("/projects/{project_id}/manual-elements", status_code=201, tags=["architecture"])

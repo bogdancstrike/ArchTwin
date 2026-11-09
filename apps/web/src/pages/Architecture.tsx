@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Badge, Button, Card, Empty, ErrorBox, Input, OriginBadges, Select, Spinner, Table, cn } from "@/components/ui";
 import { api, download } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
+import { CodeBlock } from "@/components/CodeBlock";
 import type { Evidence, Snapshot, View } from "@/lib/types";
 import { C4Edge, C4Node, ZoomContext, type EdgeData, type NodeData } from "@/diagram/elements";
 import { layoutView, NODE_H, NODE_W } from "@/diagram/layout";
@@ -39,6 +40,9 @@ function ElementDetail({ projectId, elementKey }: { projectId: string; elementKe
     {a.method_list?.length > 0 && <div><div className="eyebrow mb-1">Methods ({a.method_list.length})</div>
       <ul className="columns-2 text-xs">{a.method_list.map((m: any) => <li key={m.name + m.line} className="font-mono">{m.name}<span className="text-soft">:{m.line}</span></li>)}</ul></div>}
     {a.element && <div className="text-xs text-muted">{a.element} in <span className="font-mono">{a.path}:{a.line_start}-{a.line_end}</span>{a.bases?.length ? <> · extends <span className="font-mono">{a.bases.join(", ")}</span></> : null}</div>}
+    {d.data.source && <div><div className="eyebrow mb-1">Source</div>
+      <CodeBlock src={d.data.source} title={d.data.name} maxHeight={360}
+        highlight={a.line_start ? [a.line_start, a.line_start] : d.data.kind !== "code" ? [d.data.source.start + 2, d.data.source.start + 2] : undefined} /></div>}
     {(L.adrs.length > 0 || L.work_items.length > 0) && <div><div className="eyebrow mb-1">Decisions &amp; work items</div>
       <ul className="space-y-1 text-xs">{[...L.adrs, ...L.work_items].map((x: any) => <li key={x.key} className="flex items-start gap-1.5">
         <Badge tone={x.key.startsWith("adr:") ? "link" : "muted"}>{x.key.startsWith("adr:") ? "ADR" : x.provider || "task"}</Badge>
@@ -76,7 +80,7 @@ function EvidencePanel({ projectId, sel, onClose, onZoom }: { projectId: string;
     ["obs", projectId, key], key ? `/projects/${projectId}/observations?key=${encodeURIComponent(key)}` : null);
   if (!sel) return null;
   const d = sel.data;
-  return <aside aria-label="Evidence" className="absolute right-3 top-3 bottom-3 z-10 w-96 overflow-auto rounded-lg border border-rule bg-card shadow-lg">
+  return <aside aria-label="Evidence" className="absolute right-3 top-3 bottom-3 z-10 w-96 overflow-auto rounded-lg border border-rule bg-card shadow-lg xl:w-[34rem]">
     <header className="flex items-start justify-between border-b border-rule p-3">
       <div><div className="eyebrow">{sel.kind === "node" ? (d as NodeData).kind : `${(d as EdgeData).kind} relationship`}</div>
         <h3 className="font-semibold">{sel.kind === "node" ? (d as NodeData).name : (d as EdgeData).label}</h3>

@@ -30,6 +30,15 @@ resources:
   conn_p1: {kind: connector, id: c1, attr: {org_id: o1, project_id: p1, writeback_enabled: false}}
   org_o1:  {kind: org, id: o1, attr: {org_id: o1}}
 tests:
+  - name: org admins may self-approve a baseline (audited exception); architects may not
+    input:
+      principals: [alice, owner, mallory]
+      resources: [baseline_by_alice]
+      actions: [self_approve_baseline]
+    expected:
+      - {principal: alice, resource: baseline_by_alice, actions: {self_approve_baseline: EFFECT_DENY}}
+      - {principal: owner, resource: baseline_by_alice, actions: {self_approve_baseline: EFFECT_ALLOW}}
+      - {principal: mallory, resource: baseline_by_alice, actions: {self_approve_baseline: EFFECT_DENY}}
   - name: usage, spend limits, system and access inspection are org-admin only; own usage for members
     input:
       principals: [alice, vera, owner, mallory]

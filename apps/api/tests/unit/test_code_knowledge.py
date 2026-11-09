@@ -61,3 +61,14 @@ def test_split_code_breaks_at_definitions():
     parts = split_code(src)
     assert parts[0]["line_start"] == 1 and any(p["heading"].startswith("def f") for p in parts)
     assert all(p["line_end"] - p["line_start"] < 75 for p in parts) and parts[-1]["line_end"] == len(src.splitlines())
+
+
+def test_code_passages_preserve_exact_line_numbers():
+    src = "\n\n# header comment\nimport os\n\n\nclass A:\n    x = '" + "a" * 3000 + "'\n" + "\n".join(f"    v{i} = {i}" for i in range(150)) + "\n\n\ndef f():\n    return 1\n"
+    lines = src.splitlines()
+    rebuilt: dict[int, str] = {}
+    for p in split_code(src):
+        for i, ln in enumerate(p["text"].split("\n")):
+            rebuilt.setdefault(p["line_start"] + i, ln)
+    assert all(rebuilt.get(n) == lines[n - 1] for n in range(1, len(lines) + 1) if lines[n - 1].strip())   # every code line, same number
+    assert any(len(p["text"]) > 1800 for p in split_code(src))                                         # long chunks are not truncated

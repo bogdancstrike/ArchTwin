@@ -60,10 +60,33 @@ async def mentions(ctx: RequestContext, name: str, per_kind: int = 5) -> list[di
     return out
 
 
+SOURCE_CONTEXT = 30
+
+
+def source_span(n: dict[str, Any]) -> tuple[str, int, int] | None:
+    """Where an element's source lives: a code element's own lines, an endpoint's handler, a table's declaration."""
+    a = n["attributes"]
+    if n["kind"] == "code" and a.get("path"):
+        return a["path"], int(a.get("line_start") or 1), int(a.get("line_end") or a.get("line_start") or 1)
+    ev = (n.get("evidence") or [{}])[0].get("span") or {}
+    if n["kind"] in ("api-endpoint", "table") and ev.get("path") and ev.get("line_start"):
+        s0 = int(ev["line_start"])
+        return ev["path"], max(1, s0 - 2), s0 + SOURCE_CONTEXT
+    return None
+
+
+async def source(ctx: RequestContext, n: dict[str, Any]) -> dict[str, Any] | None:
+    span = source_span(n)
+    if not span:
+        return None
+    async with uow(ctx) as conn:
+        return await docs.source_lines(conn, ctx, *span)
+
+
 async def detail(ctx: RequestContext, g: dict[str, Any], key: str) -> dict[str, Any]:
     n = g["nodes"].get(key)
     if not n:
         raise not_found("element")
     name = n.get("name") or key.rsplit("/", 1)[-1]
     return {"key": key, "name": name, "kind": n["kind"], "attributes": dict(n["attributes"]), "origins": n["origins"],
-            "confidence": n["confidence"], "linked": linked(g, key), "mentions": await mentions(ctx, name)}
+            "confidence": n["confidence"], "linked": linked(g, key), "mentions": await mentions(ctx, name), "source": await source(ctx, n)}

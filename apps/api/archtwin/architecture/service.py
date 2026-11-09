@@ -130,13 +130,23 @@ async def get_baseline(ctx: RequestContext, bid: uuid.UUID) -> dict[str, Any]:
     return b
 
 
-async def decide_baseline(ctx: RequestContext, bid: uuid.UUID, approve: bool, note: str = "") -> dict[str, Any]:
+SELF_APPROVAL_MIN_REASON = 10
+
+
+async def decide_baseline(ctx: RequestContext, bid: uuid.UUID, approve: bool, note: str = "", *, self_approval: bool = False) -> dict[str, Any]:
+    """Four-eyes by default. `self_approval` (already authorized by Cerbos `self_approve_baseline`, org admins only) lets the
+    author approve with a written reason; the exception is audited and stamped on the baseline note."""
     async with uow(ctx) as conn:
         b = row((await conn.execute(select(baselines).where(baselines.c.id == bid).with_for_update())).first())
         if not b or b["status"] != "proposed":
             raise problem(409, "AT-BASELINE-001", "Not pending", "Only proposed baselines can be decided.")
-        if b["author_id"] == ctx.actor_id:      # defense in depth; Cerbos already enforces author != approver
+        own = b["author_id"] == ctx.actor_id
+        if own and not (self_approval and approve):  # defense in depth; Cerbos already enforces author != approver
             raise problem(403, "AT-BASELINE-002", "Separation of duties", "The author cannot approve their own baseline.")
+        if own and len(note.strip()) < SELF_APPROVAL_MIN_REASON:
+            raise problem(422, "AT-BASELINE-003", "Reason required", "Self-approval needs a written reason (at least 10 characters).")
+        if own:
+            note = f"[self-approved by organization admin] {note.strip()}"
         now = datetime.now(UTC)
         if approve:
             await conn.execute(baselines.update().where(and_(baselines.c.project_id == ctx.project_id, baselines.c.status == "approved"))
@@ -144,7 +154,9 @@ async def decide_baseline(ctx: RequestContext, bid: uuid.UUID, approve: bool, no
         await conn.execute(baselines.update().where(baselines.c.id == bid).values(
             status="approved" if approve else "rejected", approver_id=ctx.actor_id, decided_at=now,
             note=(b["note"] + ("\n" if b["note"] and note else "") + note)))
-        await audit.record(conn, ctx, f"architecture.baseline.{'approve' if approve else 'reject'}", "architecture", bid)
+        action = "self_approve" if own else ("approve" if approve else "reject")
+        await audit.record(conn, ctx, f"architecture.baseline.{action}", "architecture", bid,
+                           details={"self_approved": own, "reason": note if own else ""})
         if approve:
             await outbox.emit(conn, ctx.org_id, ctx.project_id, "baseline", bid, "architecture.baseline_approved", {"baseline_id": str(bid)})
         return row((await conn.execute(select(baselines).where(baselines.c.id == bid))).first())

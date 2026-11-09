@@ -16,6 +16,8 @@ from archtwin.common.schema import documents, passages
 from archtwin.config import settings
 
 PARSER_MD = "markdown-sections/1.0"
+PARSER_CODE = "code-chunks/1.1"        # 1.1: whole chunks (no character cap) so exact source lines can be shown
+MAX_CODE_PASSAGE = 16_000
 MAX_PASSAGE = 1800
 MAGIC = {b"%PDF": "application/pdf", b"PK\x03\x04": "application/zip"}
 
@@ -58,27 +60,29 @@ def split_code(text: str) -> list[dict[str, Any]]:
         ln = lines[i - 1]
         m = CODE_DEF.match(ln) if not ln.startswith((" " * 5, "\t\t")) else None
         if (m and i - start >= 8) or i - start >= CODE_CHUNK:
-            body = "\n".join(lines[start - 1:i - 1]).strip()
-            if body:
-                out.append({"heading": heading[:300], "text": body[:MAX_PASSAGE], "line_start": start, "line_end": i - 1})
+            body = "\n".join(lines[start - 1:i - 1]).rstrip()      # never strip leading lines: line numbers must stay exact
+            if body.strip():
+                out.append({"heading": heading[:300], "text": body[:MAX_CODE_PASSAGE], "line_start": start, "line_end": i - 1})
             start, heading = i, (m.group(0).strip() if m else heading)
         elif m and not heading:
             heading = m.group(0).strip()
-    body = "\n".join(lines[start - 1:]).strip()
-    if body:
-        out.append({"heading": heading[:300], "text": body[:MAX_PASSAGE], "line_start": start, "line_end": len(lines)})
+    body = "\n".join(lines[start - 1:]).rstrip()
+    if body.strip():
+        out.append({"heading": heading[:300], "text": body[:MAX_CODE_PASSAGE], "line_start": start, "line_end": len(lines)})
     return out
 
 
 async def upsert_document(conn, ctx: RequestContext, *, title: str, path: str, text_body: str, mime: str, source_kind: str,
                           connector_id: uuid.UUID | None, revision: str = "", tags: list[str] | None = None,
                           parser: str = PARSER_MD) -> tuple[uuid.UUID, bool]:
+    if mime == "text/x-code" and parser == PARSER_MD:
+        parser = PARSER_CODE
     sha = hashlib.sha256(text_body.encode()).hexdigest()
-    latest = (await conn.execute(select(documents.c.id, documents.c.sha256, documents.c.version)
+    latest = (await conn.execute(select(documents.c.id, documents.c.sha256, documents.c.version, documents.c.parser_version)
                                  .where(and_(documents.c.project_id == ctx.project_id, documents.c.path == path))
                                  .order_by(documents.c.version.desc()).limit(1))).first()
-    if latest and latest.sha256 == sha:
-        return latest.id, False
+    if latest and latest.sha256 == sha and latest.parser_version.split(";")[0] == parser:
+        return latest.id, False                      # same text, same parser: nothing to do (a parser upgrade re-chunks)
     did = new_id()
     await conn.execute(documents.insert().values(
         id=did, org_id=ctx.org_id, project_id=ctx.project_id, title=title[:300], source_kind=source_kind, connector_id=connector_id,
@@ -178,3 +182,36 @@ async def search_passages(conn, ctx: RequestContext, query: str, limit: int = 8,
         WHERE ps.project_id = :p AND ps.tsv @@ to_tsquery('english', :q){flt}
         ORDER BY rank DESC LIMIT :n"""), params)
     return [dict(r._mapping) for r in rs]
+
+
+LANG_BY_EXT = {".py": "python", ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".jsx": "javascript", ".java": "java",
+               ".kt": "kotlin", ".go": "go", ".cs": "csharp", ".rb": "ruby", ".php": "php", ".rs": "rust", ".sql": "sql", ".yaml": "yaml",
+               ".yml": "yaml", ".json": "json", ".md": "markdown"}
+MAX_SOURCE_LINES = 400
+
+
+async def source_lines(conn, ctx: RequestContext, path: str, start: int, end: int) -> dict[str, Any] | None:
+    """Exact source lines [start, end] of an indexed file (latest version), stitched from its line-ranged passages.
+    `path` may be repository-relative; in a folder of repositories documents carry a `<repo>/` prefix (suffix match)."""
+    if not path:
+        return None
+    doc = (await conn.execute(select(documents.c.id, documents.c.path, documents.c.revision)
+                              .where(and_(documents.c.project_id == ctx.project_id, (documents.c.path == path) | documents.c.path.like(f"%/{path}")))
+                              .order_by((documents.c.path == path).desc(), documents.c.version.desc()).limit(1))).first()
+    if not doc:
+        return None
+    requested_end, end = end, min(end, start + MAX_SOURCE_LINES - 1)
+    ps = (await conn.execute(select(passages.c.text, passages.c.line_start, passages.c.line_end).where(and_(
+        passages.c.document_id == doc.id, passages.c.line_end >= start, passages.c.line_start <= end)).order_by(passages.c.line_start))).all()
+    lines: dict[int, str] = {}
+    for p in ps:
+        for i, ln in enumerate(p.text.split("\n")):
+            n = p.line_start + i
+            if start <= n <= end:
+                lines.setdefault(n, ln)
+    if not lines:
+        return None
+    first, last = min(lines), max(lines)
+    ext = "." + doc.path.rsplit(".", 1)[-1] if "." in doc.path else ""
+    return {"path": doc.path, "revision": doc.revision, "start": first, "end": last, "language": LANG_BY_EXT.get(ext, "plaintext"),
+            "text": "\n".join(lines.get(n, "") for n in range(first, last + 1)), "truncated": requested_end > end}
