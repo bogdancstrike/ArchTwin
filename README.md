@@ -23,9 +23,9 @@ Know what was designed, what was planned, what the code says and what is actuall
 ---
 
 > [!NOTE]
-> **Status:** the walking skeleton and the M1/M2 vertical slice are implemented and tested end to end (phases 01–04 MVP scope plus the
-> grounded assistant from phase 06, M1 data-source connectors and a personal home dashboard) on branch `feat/walking-skeleton-m1`. Live progress per task: [`docs/TASKS.md`](docs/TASKS.md).
-> OpenSpec task checkboxes are ticked only after merge with green CI. Phases 05 and 07 are specified, not implemented.
+> **Status:** phases 01–04 (MVP scope) and the grounded assistant from phase 06 are implemented on `main` and tested end to end
+> (unit, RLS isolation, live-stack API journeys, Playwright + axe, Cerbos policy suite; whole-system coverage gate ≥ 90 %).
+> Phases 05 and 07, Kubernetes and Jira are specified, not implemented. Live progress per task: [`docs/TASKS.md`](docs/TASKS.md).
 
 ## 🚀 Quick start
 
@@ -86,60 +86,73 @@ Tests: `make test` (unit) · `make test-integration` (RLS) · `make test-e2e` (A
 
 ## ✨ What it is
 
-Architecture documentation rots the day it is written. Diagrams, ADRs, Jira tickets, code and Kubernetes all evolve separately, and architects find out about drift in production.
+Architecture documentation rots the day it is written. Diagrams, ADRs, tickets, code and the running system all evolve separately, and architects find out about drift in production.
 
 ArchTwin closes the **architectural continuity loop**:
 
 ```
-Design → ADR → plan → issues / commits → runtime observation → drift → review → updated architecture
+Design → ADR → plan → code → runtime observation → drift → review → updated architecture
 ```
 
-- 🔎 It **discovers** systems, services, APIs, topics, databases and workloads from GitHub/GitLab, Kubernetes, PostgreSQL, Kafka, OpenTelemetry and your documents — read-only.
+- 🔎 It **discovers** systems, services, modules, APIs, durable workflows, message channels, topics, databases, tables and workloads from your repositories, Docker hosts, PostgreSQL/MySQL, Kafka, OpenTelemetry, GitLab/GitHub/Taiga and your documents — read-only.
 - 🧾 Every fact carries **evidence**: where it came from, which revision, when it was observed, how confident we are. Missing data is shown as **unknown**, never as "deleted".
-- 🗺 It renders **C4 diagrams** you can edit, review, diff and export — and lets you **zoom** from system context into containers and components.
-- 🚨 It **detects drift** deterministically between what was decided, what the code says and what is running.
+- 🗺 It renders **C4 diagrams** (context → containers → components → code) and **sequence diagrams of every recognized flow**, generates complete **documentation**, and explains distributed services and modular monoliths alike.
+- 🚨 It **detects drift** deterministically — against the approved baseline, against the **conformance rules of accepted ADRs**, against declared module boundaries, and between code and the running system.
 - 🤖 It answers questions like **"How do I connect platform A and B?"** with cited options, trade-offs, diagrams and an ADR draft — without ever changing anything on its own.
+
+Nothing is tuned to one application: every detector works on framework-level patterns (FastAPI, Spring, Temporal, Postgres LISTEN/NOTIFY, Redis, Kafka, MCP, Compose…). Two real platforms are used as benchmarks — a Python, workflow-driven agent platform (13 Temporal workflows, LISTEN/NOTIFY streaming, an MCP gateway) and a Java Spring Modulith messaging backend (11 modules, application events, Valkey pub/sub) — and ArchTwin reproduces their own architecture documents from code alone.
 
 ## 🧩 Features
 
-### Projects and security
-- **Independent projects** with their own people, environments, connectors, baselines and AI budget; cross-project access only through explicit, expiring **federation grants**.
-- **Keycloak** single sign-on, **Cerbos** policy-as-code on every read and write (list filtering included), PostgreSQL row-level security as defence in depth.
-- **Hash-chained audit log** with an export verifier; envelope-encrypted connector secrets that never reach browsers, logs or prompts.
-- **Feature flags** for every optional module, connector and AI operation, with an emergency kill switch — security invariants are never flaggable.
-- **Command palette (⌘K / Ctrl+K)**: jump to any page, switch project, run actions (scan all, evaluate drift, new ADR, add datasource, theme) and search the current project's elements, flows, decisions and documents. **Night mode** uses neutral graphite surfaces (no blue cast), WCAG AA text, theme-aware diagrams and code.
+### Projects, security and governance
+- **Independent projects** with their own people, environments, connectors, baselines and AI budget.
+- **Keycloak** single sign-on, **Cerbos** policy-as-code on every read and write (list filtering included), PostgreSQL **row-level security** as defence in depth.
+- **Hash-chained audit log** with a verifier; envelope-encrypted connector secrets that never reach browsers, logs or prompts.
+- **Feature flags** for every optional module, connector and AI operation — security invariants are never flaggable.
+- **Roles & permissions**, **audit search**, **System** page (source roots, health), **Usage & costs** with spend limits.
+- **Command palette (⌘K / Ctrl+K)**: jump anywhere, switch project, run actions, search elements, flows, decisions and documents. **Night mode** with neutral graphite surfaces and WCAG AA text.
 
-### Discovery and evidence
-- Connectors for **local directories (single repos, folders of repos, docs/architecture folders), GitHub, GitLab, Taiga, Docker, PostgreSQL/MySQL, Kafka + Schema Registry, OpenAPI, OpenTelemetry service graph** and uploaded documents (Docling); Kubernetes and Jira are planned in the [connector matrix](docs/connectors/CONNECTOR_MATRIX.md).
-- Code extraction from declared artifacts first (OpenAPI, AsyncAPI, Helm, Backstage `catalog-info.yaml`, CODEOWNERS), plus tree-sitter detectors and Syft SBOMs — every finding with file, line and commit.
-- **Distributed systems end to end**: service-to-service HTTP calls (literal hosts or config variables), API gateway routing tables, BFF → gateway forwarding, and **RPC-style web UIs** (one presenter URL from `VITE_*` env, the action named in the body: action literals, constant maps and their use sites) — e.g. *UI → presenter → gate → backend → stores* in the real order. A Compose service built from a sibling repository (`build: ../svc`) is the same element as that repository's container. **Scan all** datasources of a project with one click.
-- Webhooks + watches + scheduled reconciliation; partial scans never cause false deletions.
+### Discovery: deep code understanding
+- **Connectors**: local directories (single repos, repository sub-folders at any commit, folders of repositories, documentation folders), Git over HTTPS, **GitHub**, **GitLab**, **Taiga**, **Docker** runtime, **OpenTelemetry** service graph, **PostgreSQL/MySQL** catalogs, **Kafka + Schema Registry**, live **OpenAPI**, uploaded documents (Docling). Signed webhooks; partial scans never cause false deletions.
+- **Python** (tree-sitter): FastAPI/Flask/Starlette routes with router prefixes, component and module graphs per running service (entrypoints and CLI sub-commands resolved — including argparse dispatch branches), C4 L4 classes and functions, outgoing HTTP calls, Kafka producers/consumers, SDK resources, **Temporal workflows and activities** (who starts them, which worker executes them, what their activities do), **PostgreSQL LISTEN/NOTIFY channels** (including helper wrappers and channel-name factories), **MCP servers and tools**, DB schemas from SQL, Alembic (including raw DDL in `op.execute`), SQLAlchemy and Django.
+- **Java / Spring** (tree-sitter): **Spring Modulith** modules (display names, named interfaces, allowed dependencies), module dependency graph with **boundary violations** and **cycles**, Spring MVC / WebFlux / JAX-RS endpoints, websocket handlers, `@Scheduled` jobs, **application events** with their listeners, Kafka / Rabbit / JMS listeners and producers, **Redis pub/sub and streams** with channel patterns (`"mail:" + id` → `mail:*`), per-method effects followed through injected collaborators (SQL tables read and written, events, channels, object storage), JPA entities, Flyway migrations.
+- **TypeScript / web**: module folders and their dependencies, SPA → API calls matched to endpoints, RPC-style UIs (action literals, constant maps) end to end *UI → presenter → gate → backend*.
+- **Deployment evidence** for precision: Compose networks (containers that share no network cannot talk), shared environment blocks (a service handed an address it never reads does not use it), LLM SDKs pointed at a gateway (calls go to the gateway, not the SaaS), credentials, bare-host variables, health-check probes, migration jobs owning the schema.
+- Declared artifacts: OpenAPI, AsyncAPI, Dockerfiles, Compose (extends, profiles, sibling build contexts), Backstage `catalog-info.yaml`, CODEOWNERS, ADRs, Mermaid/PlantUML/Structurizr sources.
 
 ### Living architecture
-- One canonical, **temporal** architecture graph: time-travel to any date, diff any two snapshots, approve immutable **baselines**.
-- **Diagram studio**: C4 context / container / component, deployment, data-flow and sequence views from the same model; manual layout survives regeneration; Structurizr DSL and Mermaid import/export.
-- **Animated C4 zoom**: dive from the system context (L1) into a system's containers (L2) and a container's components (L3), with breadcrumbs and reduced-motion support.
-- **Editorial diagram quality**: every generated diagram follows the open-source [diagram-design](https://github.com/cathrynlavery/diagram-design) system — org-branded tokens, at most two focal accents, ≤ 9 primary nodes per view, orthogonal connectors — checked by a linter before export.
-- **ADRs** (MADR) with independent approval and immutable history; **living documentation** where every generated sentence cites its evidence.
-- **Complete generated documents, not summaries.** Deterministic, exhaustive documents cover every system, container, endpoint, table and flow: system overview (with C4 diagrams and functional areas), container catalog, interface catalog, data model (ER diagram), flows (order, feature, description, components, steps, sequence diagrams), a **testing guide** (every endpoint as a test case with an example request and expectations, every flow as a test scenario), developer reference and decision log. AI documents — **user manual, PRD, ARF (arc42) and developer guide** — are drafted **section by section** from a full outline; sections such as *Using {feature}*, *Functional requirements — {feature}* and *Module reference — {feature}* expand into one section per functional area. Each section gets its own cited evidence and model call (≤ 4 in parallel); the Docs page shows the planned outline and the pre-flight cost before you generate.
-- **Exports** from Architecture, Flows, Drift, Decisions and Docs: Markdown (canonical, diagrams as Mermaid), Word (.docx), PDF or a ZIP bundle (every item, all formats and a `manifest.json` with project, snapshot and source revisions) — same permissions as the page, audited (`GET /api/v1/projects/{id}/export/{resource}?format=md|docx|pdf|zip`).
+- One canonical, **temporal** architecture graph: time-travel to any date, diff any two snapshots.
+- **Guided baselines**: the Drift and Architecture pages explain the baseline and set it in one step — *use the current architecture as baseline*, *approve*, or *update the baseline to v8* — four-eyes for everyone, an audited self-approval exception for organization admins.
+- **Diagram studio**: C4 context / container / component / code views with an animated zoom, durable workflows and channels rolled up onto their hosts (`api —starts MissionWorkflow→ temporal`), manual layout that survives regeneration, Mermaid and Structurizr export, the [diagram-design](https://github.com/cathrynlavery/diagram-design) system and a linter.
+- **Flows**, recognized automatically and drawn as sequence diagrams with evidence per step:
+  - **entry-point flows** for every endpoint, websocket, scheduled job and event listener — what the handler itself does (not every import of its module): stores written, workflows started, channels notified, gateways and MCP servers called;
+  - **workflow flows**: starter → workflow → worker → activities' effects → listeners → child workflows;
+  - **event flows**: in-process application events cascading into their listeners and their effects; NOTIFY / Redis channels delivered to the replicas and the streaming endpoints that forward them to clients;
+  - request walks between containers and data-store flows.
+- **ADRs** (MADR) with independent approval, immutable history and optional **conformance rules**.
 
-### Drift and delivery
-- **Three-way drift**: desired (baseline/ADR) vs code vs runtime, with `unknown` / `incomplete` states, grace windows and an observe-only rollout to keep false positives down.
-- Triage workflow, scoped and expiring suppressions (reasons optional), **delete** a finding you consider untrue (dismissed as a false positive, never resurrected by re-evaluation, restorable) — one at a time or every open finding of a rule. Re-keyed elements and inferred external dependencies never raise "X is no longer observed".
-- **Contract drift across services** (no baseline needed): a UI action its gateway does not route, a gateway route to an endpoint the backend does not expose (framework probe paths excluded).
-- Notifications to email, Slack, Teams or webhooks (Apprise).
-- **Traceability** from initiative → issue → PR → commit → build → image digest → running workload: *Done in Jira* is never confused with *deployed*.
-- Architecture checks for CI as signed **SARIF** reports — report-only first, blocking only with deterministic rules and owner approval.
+### Documentation
+- **Deterministic, exhaustive documents**: system overview (C4 diagrams, functional areas, **asynchronous and durable interactions**, **module structure** with dependency diagrams, violations and cycles, technology inventory), container catalog, interface catalog, data model (ER diagram), flows, testing guide, developer reference and decision log. Every sentence cites evidence; hand-written sections survive regeneration.
+- **AI-drafted documents** — user manual, PRD, ARF (arc42) and developer guide — written section by section from a full outline with focused, cited evidence and a pre-flight cost estimate.
+- **Exports** from Architecture, Flows, Drift, Decisions and Docs: Markdown, Word, PDF or a ZIP bundle with a provenance manifest.
+
+### Drift and conformance
+- **Three-way drift**: approved baseline vs code vs runtime, with `unknown` / `incomplete` when evidence is missing or stale.
+- **Decisions as checkable architecture**: accepted ADRs can carry rules — `forbid` (X must not depend on Y), `require`, `only-via` (*the LLM provider only through the gateway*), `technology` — evaluated deterministically; a violation is a high-severity finding that cites the decision. Rules can be amended after acceptance by approvers (new audited version).
+- **Module boundaries**: a module using another module's internals, a dependency outside `allowedDependencies`, or a cycle between modules.
+- **Contract drift across services**: a UI action its gateway does not route, a gateway route to an endpoint the backend does not expose.
+- **Signal, not noise**: re-analysing an unchanged commit is never drift; a new element is one finding (with its connections), not one per edge; health checks, volumes and one-shot jobs are ignored; a stopped system is one finding.
+- Triage (assign, comment, suppress with expiry, accept as intended), delete false positives (never resurrected), in-app notifications over SSE.
 
 ### Grounded AI
 - Architecture assistant over **scoped evidence only**, with citations validated against an evidence pack; unsupported claims are marked.
-- **Per-task model routing** through LiteLLM ([`MODEL_PROFILES.yaml`](docs/ai/MODEL_PROFILES.yaml)): architecture drafts, flow search, drift review and integration design run on `gpt-6-terra` with **high** reasoning; grounded answers and ADRs on `gpt-6-luna`/medium; rewriting and page search on `gpt-6-luna`/low. `gpt-6-sol` is blocked. A model the provider rejects is hidden and its tasks fall back to Luna with the same reasoning effort. Evidence is trimmed to each task's token budget.
-- **Cost estimates before every AI call** (tokens and USD expected / high / worst case, learned from the last 30 days of the usage ledger) and a *Model routing per task* table on the Usage page; every answer shows the model and its cost.
-- **Ask a page**: chat-like search on Flows ("what is the flow of dissemination documents?"), Decisions ("is caching part of any decision?") and Docs. Search runs first and costs nothing; a short cited AI answer is added on top and cached for identical questions.
-- **Integration designer** for "connect A and B": at least two options, a trade-off matrix, C4 and sequence diagrams, ADR and task drafts.
-- **Blast-radius analysis** and what-if scenarios on isolated branches of the model.
+- **Per-task model routing** through LiteLLM ([`MODEL_PROFILES.yaml`](docs/ai/MODEL_PROFILES.yaml)), cost estimates before every call, a usage ledger and spend limits.
+- **Ask a page** (Flows, Decisions, Docs): search first at no cost, then a short cited answer cached for identical questions.
+- **Integration designer** for "connect A and B": options, trade-offs, diagrams and an ADR draft.
 - Proposals only: nothing is applied, written to a tracker or deployed without explicit, authorized approval.
+
+### Planned (specified, not yet implemented)
+Kubernetes and Jira connectors, Syft SBOMs, Apprise notifications (email/Slack/Teams), Prometheus metrics and Grafana dashboards, the delivery phase (initiative → issue → PR → deployment traceability, CI checks as SARIF), cross-project federation and blast-radius analysis, and enterprise operations (Helm, CloudNativePG, SLOs). Progress per task: [`docs/TASKS.md`](docs/TASKS.md).
 
 ## 🔄 How it works
 
@@ -163,11 +176,11 @@ Key decisions are recorded as ADRs in [`docs/architecture/adr`](docs/architectur
 | Data | PostgreSQL (graph tables, JSONB, FTS, pgvector), Valkey, S3-compatible storage (SeaweedFS) |
 | Workflows | Temporal, transactional outbox |
 | Identity & policy | Keycloak (OIDC + PKCE), Cerbos, OpenFeature, OpenBao (optional KMS) |
-| Discovery | githubkit, python-gitlab, kubernetes_asyncio, confluent-kafka, tree-sitter, Syft, Docling, OpenTelemetry |
+| Discovery | tree-sitter (Python, Java), GitHub/GitLab/Taiga REST, Docker Engine API, confluent-kafka, SQLAlchemy reflection, Docling, OpenTelemetry service graph (Prometheus) |
 | Frontend | React 19, Vite, TypeScript, TanStack, shadcn/ui, Tailwind, React Flow, elkjs, Motion |
 | Diagrams | diagram-design system, Mermaid & Structurizr (interchange) |
 | AI | LiteLLM, Langfuse, OpenAI (`gpt-6-luna` default, `gpt-6-terra`, `gpt-6-sol`) |
-| Ops | Docker Compose, Helm, CloudNativePG, Prometheus, Grafana, OpenTelemetry |
+| Ops | Docker Compose (Helm, CloudNativePG, Prometheus/Grafana planned) |
 
 Full adopt-vs-build reasoning: [`docs/TECHNOLOGIES.md`](docs/TECHNOLOGIES.md).
 
@@ -176,14 +189,14 @@ Full adopt-vs-build reasoning: [`docs/TECHNOLOGIES.md`](docs/TECHNOLOGIES.md).
 | Phase | Increment | Milestone | Status |
 |---|---|---|---|
 | [01](openspec/changes/phase-01-foundation/) | Secure multi-project foundations (walking skeleton) | M1 | ✅ MVP implemented (OTel tracing, OpenBao, org deletion, break-glass: later) |
-| [02](openspec/changes/phase-02-connectors/) | Discovery and connected evidence | M1 | 🚧 mostly: local directories (repos, folders of repos, docs) + Git HTTPS, GitHub, GitLab, Taiga, Docker runtime, OTel service graph, PostgreSQL/MySQL catalogs, Kafka + Schema Registry, live OpenAPI, uploads, signed webhooks; Kubernetes (deferred: Docker-only for now), Jira, Syft SBOM open |
-| [03](openspec/changes/phase-03-architecture/) | Living diagrams, C4 zoom, docs and ADRs | M1 | ✅ MVP implemented: graph, snapshots, baselines, C4 L1–L3 zoom, linter, exports, ADRs, docs (PDF/DOCX, reviews: later) |
-| [04](openspec/changes/phase-04-drift/) | Continuous drift and alerts | M2 | ✅ MVP implemented: three-way drift, triage, suppressions, in-app/SSE notifications (Apprise, metrics: later) |
+| [02](openspec/changes/phase-02-connectors/) | Discovery and connected evidence | M1 | 🚧 mostly: local directories + Git, GitHub, GitLab, Taiga, Docker runtime, OTel service graph, PostgreSQL/MySQL, Kafka + Schema Registry, live OpenAPI, uploads, signed webhooks; deep Python and Java/Spring analysis (workflows, channels, events, modules); Kubernetes (deferred: Docker-only for now), Jira, Syft SBOM open |
+| [03](openspec/changes/phase-03-architecture/) | Living diagrams, C4 zoom, docs and ADRs | M1 | ✅ MVP implemented: graph, snapshots, guided baselines, C4 L1–L4 zoom, recognized flows as sequence diagrams, linter, exports (Markdown, DOCX, PDF, ZIP), ADRs with conformance rules, complete generated docs (architecture reviews: later) |
+| [04](openspec/changes/phase-04-drift/) | Continuous drift and alerts | M2 | ✅ MVP implemented: three-way drift, ADR conformance, module boundaries and cycles, contract drift, noise controls, triage, suppressions, in-app/SSE notifications (Apprise, metrics: later) |
 | [05](openspec/changes/phase-05-delivery/) | Plans, traceability and CI checks | M2 | 📝 specified |
 | [06](openspec/changes/phase-06-intelligence/) | Grounded AI and cross-platform design | M3 | 🚧 assistant, integration designer, ADR drafting, model picker implemented (federation, impact analysis, evals: later) |
 | [07](openspec/changes/phase-07-enterprise/) | Enterprise operations and extensibility | M4 | 📝 specified |
 
-Delivery is risk-first: walking skeleton, time-boxed spikes with go/no-go criteria, then thin vertical slices against a reference fixture (the OpenTelemetry Demo on kind). See the [implementation plan](docs/IMPLEMENTATION_PLAN.md).
+Delivery is risk-first: walking skeleton, time-boxed spikes with go/no-go criteria, then thin vertical slices against reference fixtures (the `fixtures/shop` Compose project with ground truth) and two real benchmark platforms (Python and Java). See the [implementation plan](docs/IMPLEMENTATION_PLAN.md).
 
 ## 📚 Documentation
 

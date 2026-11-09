@@ -169,7 +169,7 @@ def _context(g: dict[str, Any], title: str, snap: dict[str, Any]) -> tuple[dict[
         flows.append({**f, "steps": steps, "feature": feature,
                       "description": describe_flow(f, {**names, **pnames}),
                       "components": [p["name"] for p in f["participants"] if p["kind"] in ("component", "container")],
-                      "data": [p["name"] for p in f["participants"] if p["kind"] in ("database", "table", "kafka-topic", "external-system")
+                      "data": [p["name"] for p in f["participants"] if p["kind"] in ("database", "table", "kafka-topic", "message-channel", "external-system")
                                or p.get("subtype") in ("storage", "database")],
                       "entry_name": f["participants"][0]["name"] if f["participants"] else "",
                       "first_ref": next((s["ref"] for s in steps if s["ref"] != "no evidence"), "no evidence")})
@@ -209,6 +209,56 @@ def _context(g: dict[str, Any], title: str, snap: dict[str, Any]) -> tuple[dict[
                                     "endpoints": sorted(eps, key=lambda x: (x.get("path", ""), x.get("method", ""))),
                                     "entrypoints": sorted({ep for c in comps for ep in (nodes.get(f"component:{k.split(':', 1)[1]}/{c['module']}", {})
                                                                                          .get("attributes", {}).get("entrypoints") or [])})})
+    # asynchronous / durable interactions: workflows, channels (NOTIFY, Redis, events) — who starts/publishes, who executes/listens
+    def names_of(keys: list[str]) -> list[str]:
+        return sorted({nodes[k]["name"] for k in keys if k in nodes})
+    workflows = []
+    for k, n in sorted(nodes.items()):
+        if n["kind"] != "workflow":
+            continue
+        a = n["attributes"]
+        workflows.append({"name": n["name"], "ref": ref(n), "task_queues": a.get("task_queues") or [], "activities": a.get("activities") or [],
+                          "starters": names_of([e["source"] for e in edges.values() if e["target"] == k and e["kind"] == "publishes"
+                                                and nodes.get(e["source"], {}).get("kind") == "container"]),
+                          "executors": names_of([e["source"] for e in edges.values() if e["target"] == k and e["kind"] == "consumes"]),
+                          "children": names_of([e["target"] for e in edges.values() if e["source"] == k and e["kind"] == "calls"]),
+                          "effects": [f"{fx.get('label', '')} → {nodes.get(fx.get('target'), {}).get('name', fx.get('target'))}"
+                                      for fx in a.get("effects") or [] if fx.get("target") in nodes]})
+    channels = []
+    for k, n in sorted(nodes.items()):
+        if n["kind"] != "message-channel":
+            continue
+        a = n["attributes"]
+        def ends(kind: str, k: str = k, in_process: bool = bool(a.get("in_process"))) -> list[str]:
+            src = [e["source"] for e in edges.values() if e["target"] == k and e["kind"] == kind]
+            cont = [x for x in src if nodes.get(x, {}).get("kind") == "container"]
+            return src if (in_process or not cont) else cont      # deployable units first; modules for in-process events
+        pub, sub = ends("publishes"), ends("consumes")
+        channels.append({"name": n["name"], "technology": a.get("technology", ""), "in_process": bool(a.get("in_process")), "ref": ref(n),
+                         "publishers": names_of(pub), "subscribers": names_of(sub),
+                         "handlers": sorted({e["attributes"].get("label", "") for e in edges.values()
+                                             if e["target"] == k and e["kind"] == "consumes" and e["attributes"].get("class")})[:12]})
+    modules = []
+    for c in containers:
+        comps = [x for x in contains.get(c["key"], []) if nodes.get(x, {}).get("kind") == "component"]
+        if not comps:
+            continue
+        cset = set(comps)
+        deps = [{"from": nodes[e["source"]]["name"], "to": nodes[e["target"]]["name"], "imports": e["attributes"].get("imports", 0),
+                 "violation": e["attributes"].get("boundary_violation", ""), "cycle": bool(e["attributes"].get("cycle"))}
+                for e in edges.values() if e["kind"] == "depends-on" and e["source"] in cset and e["target"] in cset]
+        mods = [{"name": nodes[x]["name"], "path": nodes[x]["attributes"].get("path", ""), "language": nodes[x]["attributes"].get("language", ""),
+                 "declared": bool(nodes[x]["attributes"].get("modulith")), "classes": nodes[x]["attributes"].get("classes") or nodes[x]["attributes"].get("modules") or nodes[x]["attributes"].get("files") or 0,
+                 "named_interfaces": nodes[x]["attributes"].get("named_interfaces") or []} for x in sorted(comps, key=lambda x: nodes[x]["name"])]
+        mid = {m["name"]: f"M{i}" for i, m in enumerate(mods)}
+        lines = ["graph LR"] + [f'  {mid[m["name"]]}["{m["name"]}"]' for m in mods]
+        for d in deps:
+            if d["from"] in mid and d["to"] in mid:
+                arrow = "-. violates .->" if d["violation"] else ("<-->" if d["cycle"] else "-->")
+                lines.append(f'  {mid[d["from"]]} {arrow} {mid[d["to"]]}')
+        modules.append({"container": c["name"], "modules": mods, "dependencies": sorted(deps, key=lambda d: (-d["imports"], d["from"])),
+                        "violations": [d for d in deps if d["violation"]], "cycles": [d for d in deps if d["cycle"]],
+                        "declared": any(m["declared"] for m in mods), "diagram": "\n".join(lines) if len(mods) <= 40 else ""})
     repo_adrs = [{"number": "—", "title": n["name"], "status": "imported", "source": n["attributes"].get("path", ""), "ref": ref(n)}
                  for k, n in sorted(nodes.items()) if n["kind"] == "adr"]
     tech: dict[str, set[str]] = {}
@@ -228,7 +278,7 @@ def _context(g: dict[str, Any], title: str, snap: dict[str, Any]) -> tuple[dict[
                 "endpoints": len(endpoints), "flows": len(flows), "tables": len(tables)}
     return ({"title": title, "snap": snap, "systems": systems, "containers": containers, "externals": externals, "databases": databases,
              "endpoints": endpoints, "tables": tables, "flows": flows, "features": feature_list, "code_containers": code_containers,
-             "adrs": repo_adrs, "app_adrs": [], "stats": stats, "technologies": [{"name": k, "used_by": sorted(v)} for k, v in sorted(tech.items())],
+             "adrs": repo_adrs, "app_adrs": [], "stats": stats, "workflows": workflows, "channels": channels, "modules": modules, "technologies": [{"name": k, "used_by": sorted(v)} for k, v in sorted(tech.items())],
              "key_flows": sorted(flows, key=lambda f: (not f["distributed"], -f["length"]))[:15],
              "diagrams": _diagrams(systems, containers, externals, tables, edges)},
             evidence, coverage)

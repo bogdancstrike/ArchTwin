@@ -3,18 +3,18 @@
 Living status of the implementation against `openspec/changes/phase-*/tasks.md`. Updated after every task.
 Legend: ✅ done and verified (automated tests + live run) · 🟡 done, partially verified · 🚧 partial · ⏳ open · ⏭ deferred ([Later] in the spec)
 
-Rule (AGENTS.md): checkboxes in the OpenSpec `tasks.md` files are ticked only once code is **merged with green CI**. Work lives on
-branch `feat/walking-skeleton-m1` (CI: python, integration, policies, web, spec, secrets).
+Rule (AGENTS.md): checkboxes in the OpenSpec `tasks.md` files are ticked only once code is **merged with green CI**. Work is merged
+into `main` through pull requests (CI: python, integration, policies, web, spec, secrets; nightly full-stack e2e + coverage gate).
 
-## Verification evidence (2026-11-09, local Compose stack + shop fixture)
+## Verification evidence (2026-11-10, local Compose stack + shop fixture)
 | Suite | Command | Result |
 |---|---|---|
-| Unit (incl. fixture ground truth, webhook HMAC, Kafka detection, OTel/GitHub/OpenAPI with mocked HTTP, Cerbos fail-closed, egress redirects, git path policy) | `make test` | 120 passed |
+| Unit (incl. fixture ground truth, webhook HMAC, Kafka detection, OTel/GitHub/OpenAPI with mocked HTTP, Cerbos fail-closed, egress redirects, git path policy) | `make test` | 225 passed (+ async flows, Java/Spring, ADR conformance, re-analysis) |
 | RLS isolation (as `archtwin_app`) | `make test-integration` | 8 passed |
-| API journeys on the live stack (+ `/home`, live fixture connectors, signed webhooks, live GitHub, full API surface incl. negative paths) | `make test-e2e` | 45 passed (GitHub live test skips when unauthenticated rate limit is exhausted) |
-| **Whole-system Python coverage** (unit + integration + e2e + UI, API/worker/CLI run under coverage.py via `compose.coverage.yaml`) | `make coverage` | **93.4 %** (gate: 90 %; nightly `e2e` workflow) |
-| Browser (PKCE login, home, C4 zoom, evidence, axe WCAG AA on home + projects) | `make test-ui` | 2 passed |
-| Cerbos policy tests | `make policy-test` | 44 passed |
+| API journeys on the live stack (+ `/home`, live fixture connectors, signed webhooks, live GitHub, full API surface incl. negative paths) | `make test-e2e` | 58 passed (+ guided baselines, ADR conformance → drift) (GitHub live test skips when unauthenticated rate limit is exhausted) |
+| **Whole-system Python coverage** (unit + integration + e2e + UI, API/worker/CLI run under coverage.py via `compose.coverage.yaml`) | `make coverage` | **90.3 %** of 11,665 statements (gate: 90 %; nightly `e2e` workflow) |
+| Browser (PKCE login, home, C4 zoom, evidence, axe WCAG AA on home + projects) | `make test-ui` | 4 passed (stable over 8 consecutive runs) |
+| Cerbos policy tests | `make policy-test` | 76 passed |
 | OpenSpec | `make spec-validate` | 7/7 valid (strict) |
 | Migrations | up → down → up | ok (CI job `integration`) |
 
@@ -67,7 +67,7 @@ against the approved baseline produced 12 findings (unplanned `backup`/`demo-see
 | 1.6 partial scans never tombstone | ✅ | |
 | 2.1–2.3 observations, freshness, conflicts | ✅ | monthly partitions ⏳ |
 | 3.1 GitHub App / GitLab adapters | 🟡 | GitHub REST adapter: repo metadata, branches, code via the git analyzers at any ref, webhooks; verified live on `bogdancstrike/ArchTwin`. GitLab REST v4 adapter (self-hosted or gitlab.com): projects by URL/path or whole groups, branches, issues + MRs, code cloned at any ref, `X-Gitlab-Token` push/MR/issue webhooks (push scans only the pushed project, partial); live test opt-in (`ARCHTWIN_E2E_GITLAB_*`). **Local directories**: one repo, a folder of repos (each its own system) or `content=docs` folders; server-side folder picker (`GET /projects/{id}/source-folders`). GitHub App auth ⏳ |
-| 3.2–3.4 declared artifacts, tree-sitter detectors, precision/recall | ✅ | + Kafka producer/consumer detection (confluent-kafka, kafka-python, aiokafka; literal topics only) keyed to the configured broker; recall 100% / no invented app edges on the fixture ground truth (CI); grammar from the official `tree-sitter-python` wheel (the language pack downloaded grammars at runtime — intermittent 504s silently dropped modules; now parse failures mark the scan partial). Syft SBOM ⏳ |
+| 3.2–3.4 declared artifacts, tree-sitter detectors, precision/recall | ✅ | Python and Java (Spring Modulith, MVC/JAX-RS, events, Redis/Kafka/JMS, JDBC tables, JPA) via tree-sitter; Temporal workflows, LISTEN/NOTIFY, MCP tools; precision from deployment evidence (networks, shared env blocks, gateways, credentials); + Kafka producer/consumer detection (confluent-kafka, kafka-python, aiokafka; literal topics only) keyed to the configured broker; recall 100% / no invented app edges on the fixture ground truth (CI); grammar from the official `tree-sitter-python` wheel (the language pack downloaded grammars at runtime — intermittent 504s silently dropped modules; now parse failures mark the scan partial). Syft SBOM ⏳ |
 | 4.1–4.2 Kubernetes adapter, RBAC templates | ⏭ | deferred by the product owner (Docker-only for now); Docker Engine runtime adapter covers Compose hosts |
 | 4.3 OTel service-graph adapter | ✅ | Prometheus HTTP API → runtime `calls`/`writes`/`publishes` edges with window, requests, errors, p95; `service_map`/`peer_map`; unknown peers reported, never invented; absence in traces is not coverage (live e2e on the fixture) |
 | 5.1 PostgreSQL catalog | ✅ | + MySQL on the same SQLAlchemy reflection path (`sql_catalog`), READ ONLY transaction, privilege warnings (REFERENCES-only account passes) |
@@ -80,7 +80,7 @@ against the approved baseline produced 12 findings (unplanned `backup`/`demo-see
 ## Phase 03 — architecture
 | Task | Status | Notes |
 |---|---|---|
-| 1.1–1.5 graph, deterministic builder, identity merge/split, snapshots + diff + time travel, baselines (author ≠ approver) | ✅ | snapshot dedupe includes the coverage signature |
+| 1.1–1.5 graph, deterministic builder, identity merge/split, snapshots + diff + time travel, baselines (author ≠ approver) | ✅ | snapshot dedupe includes the coverage signature; builds serialized per project (advisory lock) and off the event loop; guided baselines (status, one-step from latest, banner) |
 | 2.1 C4 context/container views, React Flow, elkjs in a Web Worker | ✅ | |
 | 2.2 layout overrides survive regeneration, reset | ✅ | |
 | 2.3 evidence panel | ✅ | |
@@ -89,14 +89,16 @@ against the approved baseline produced 12 findings (unplanned `backup`/`demo-see
 | 2.8 accessible table view, keyboard | ✅ | 2k-element performance check ⏳ |
 | 2.9–2.11 design-system tokens, ≤ 9 primary nodes, ≤ 2 focal, orthogonal router, 6-rule linter, SVG/HTML export | ✅ | PNG export ⏳ |
 | 2.13 C4 zoom L1→L2 (+ L3 from import graphs) | ✅ | Playwright covers dblclick / Enter / Backspace; L2 rolls container→topic edges up to the broker labelled with the topic; one-shot jobs grouped and shown as completed |
-| 3.1–3.2 MADR ADRs | ✅ | |
-| 4.1–4.3 documentation engine | ✅ | PDF/DOCX ⏭ |
+| 3.1–3.2 MADR ADRs | ✅ | + machine-checkable conformance rules (forbid / require / only-via / technology), amendable after acceptance by approvers (audited version) |
+| 4.1–4.3 documentation engine | ✅ | complete deterministic docs incl. asynchronous interactions and module structure; AI-drafted docs section by section |
+| 4.4 PDF / DOCX export | ✅ | Markdown, DOCX, PDF, ZIP with provenance manifest (`/export/{resource}`); Git PR publish ⏳ |
 | 5.x architecture reviews | ⏭ | |
 
 ## Phase 04 — drift
 | Task | Status | Notes |
 |---|---|---|
-| 1.1–1.4 rule catalog, three-way evaluator, stable IDs, accept/suppress | ✅ | truth table unit-tested |
+| 1.1–1.4 rule catalog, three-way evaluator, stable IDs, accept/suppress | ✅ | truth table unit-tested; noise controls (re-analysis of an unchanged commit is never drift, one finding per new element, health checks / volumes / one-shot jobs ignored, stopped system = one finding) |
+| 1.5 contract, ownership and trust-boundary rules | 🟡 | contract drift across services (unrouted actions, routes to missing endpoints), ADR conformance rules, module boundaries / cycles (Spring Modulith); OpenAPI breaking-change and trust-boundary rules ⏳ |
 | 2.1 debounced evaluation | ✅ | `GraphBuildWorkflow` (signal-with-start) → `DriftWorkflow` |
 | 2.2 10k-webhook burst test | ⏳ | |
 | 2.3 outage ⇒ UNKNOWN, no deletion drift | ✅ | |
@@ -122,6 +124,19 @@ against the approved baseline produced 12 findings (unplanned `backup`/`demo-see
 Specified, not started.
 
 ## Changelog
+- 2026-11-10 — **Deep understanding, real drift, guided baselines** (benchmarks: a Python workflow platform and a Java Spring Modulith backend; nothing app-specific in code).
+  Analysis: Temporal workflows/activities (starters, executors, effects), PostgreSQL LISTEN/NOTIFY channels (wrappers, channel factories),
+  MCP tools; function-level effects for handlers, activities and Java methods (through injected collaborators); deep Java/Spring via
+  tree-sitter (Modulith modules, boundaries, cycles, MVC/JAX-RS, websockets, scheduled jobs, application events, Kafka/Rabbit/JMS,
+  Redis pub/sub + streams, JDBC tables, JPA); precision from deployment evidence (Compose networks, shared env blocks, configured LLM
+  gateways, credentials, bare-host variables, health checks); CLI sub-commands and argparse dispatch; DDL inside code and ALTER TABLE;
+  migration-owned tables hosted by their DB server. Flows follow workflows, channels and in-process events end to end.
+  Drift: ADR conformance rules (forbid / require / only-via / technology), module-boundary and cycle findings, re-analysis of an unchanged
+  commit is never drift, one finding per new element, stopped system = one finding. Guided baselines (status + one-step from latest + banner).
+  Docs: asynchronous interactions and module structure sections. Reliability: per-project advisory locks for snapshot builds and drift
+  evaluations, CPU-bound graph work off the event loop, batched finding queries, repository sub-folders scanned at a commit (regression
+  from PR #7), CI fix (duplicate test module name). UI: readable flow/finding tables, sequence diagram labels, generic placeholders.
+  OpenSpec: 73 fully implemented tasks ticked (partial ones stay open).
 - 2026-11-09 — First full-stack CI run on `main`: fixed `--wait` on one-shot jobs, fixture `schema-init` build, and made the UI smoke test self-contained (global setup creates "ArchTwin (self)"). It exposed two UI bugs, now fixed: project cards were links without an accessible name, and the Projects page crashed (search state read before declaration). Local gate: 93.5 %.
 - 2026-11-09 — Test coverage: `make coverage` measures the API/worker inside the containers (coverage.py, `concurrency = thread, greenlet` for SQLAlchemy async) and combines it with unit/integration/e2e → 93.4 %, gated at 90 % in the nightly workflow. New `test_api_surface.py` (21 e2e: every route's negative branches, every webhook outcome) and `test_guards_and_adapters.py` (21 unit). Bugs found: Kafka bootstrap server without a port crashed; `/home` dropped the newest projects once more than 60 were visible (now keeps the most recent 60, reports `visible_projects`/`truncated`, Projects page lists the rest).
 - 2026-11-09 — M1 data-source connectors (GitHub, MySQL, Kafka + Schema Registry, OTel service graph), webhook ingress, shop fixture with ground truth; analyzer fixes (services keyed by system/name, deterministic grammar loading).

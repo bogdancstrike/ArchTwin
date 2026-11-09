@@ -33,6 +33,7 @@ dependencies = [
     "structlog>=26.1.0",
     "temporalio>=1.35.0",
     "tree-sitter>=0.25",
+    "tree-sitter-java>=0.23",
     "tree-sitter-python>=0.25",
     "uuid-utils>=1.2.0",
     "uvicorn[standard]>=0.54.0",

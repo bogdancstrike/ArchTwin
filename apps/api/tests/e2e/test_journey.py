@@ -3,6 +3,8 @@
 Covers: OIDC + Cerbos + RLS isolation, flags (incl. queued-job re-check), connectors via outbox → Temporal, snapshots, C4 views + linter +
 exports, baselines with separation of duties, drift (three-way, coverage-aware), ADRs, documentation, assistant, audit chain.
 """
+from datetime import UTC, datetime, timedelta
+
 import httpx
 import pytest
 
@@ -141,9 +143,11 @@ def test_baseline_separation_of_duties_and_drift(users, project):
     assert f and f[0]["rule_id"] == "DR-UNPLANNED-001" and f[0]["verdict"] == "drift"
     fid = f[0]["id"]
     assert vera.post(f"/projects/{pid}/drift/{fid}/transition", json={"status": "acknowledged"}).status_code == 403
-    assert alice.post(f"/projects/{pid}/drift/{fid}/transition", json={"status": "suppressed", "note": ""}).status_code == 422
-    done = bob.ok("POST", f"/projects/{pid}/drift/{fid}/transition", json={"status": "suppressed", "note": "planned for Q3", "suppress_days": 30})
-    assert done["status"] == "suppressed" and done["suppressed_until"]
+    # suppressions are always time-bound: at most a year; the reason is optional and the expiry defaults to 30 days
+    assert alice.post(f"/projects/{pid}/drift/{fid}/transition", json={"status": "suppressed", "suppress_days": 400}).status_code == 422
+    done = bob.ok("POST", f"/projects/{pid}/drift/{fid}/transition", json={"status": "suppressed", "note": ""})
+    until = datetime.fromisoformat(done["suppressed_until"])
+    assert done["status"] == "suppressed" and timedelta(days=29) < until - datetime.now(UTC) <= timedelta(days=30)
     again = alice.ok("POST", f"/projects/{pid}/drift/evaluate")
     assert again["new"] == 0, "re-evaluation must not duplicate findings"
 

@@ -184,7 +184,7 @@ async def search_passages(conn, ctx: RequestContext, query: str, limit: int = 8,
         return []
     tsq = " | ".join(words)
     flt = ""
-    params: dict[str, Any] = {"p": ctx.project_id, "q": tsq, "n": limit}
+    params: dict[str, Any] = {"p": ctx.project_id, "q": tsq, "qa": " & ".join(words), "n": limit}
     if connector_ids is not None:
         flt = " AND (d.connector_id = ANY(CAST(:cids AS uuid[]))" + (" OR d.connector_id IS NULL)" if uploads else ")")
         params["cids"] = connector_ids
@@ -195,10 +195,11 @@ async def search_passages(conn, ctx: RequestContext, query: str, limit: int = 8,
     rs = await conn.execute(text(f"""
         WITH latest AS (SELECT DISTINCT ON (path) id FROM documents WHERE project_id = :p ORDER BY path, version DESC)
         SELECT ps.id, ps.text, ps.heading, ps.line_start, ps.line_end, d.title, d.path, d.revision, d.id AS document_id,
-               d.connector_id, d.mime, ts_rank(ps.tsv, to_tsquery('english', :q)) AS rank
+               d.connector_id, d.mime, ts_rank(ps.tsv, to_tsquery('english', :q)) AS rank,
+               (ps.tsv @@ to_tsquery('english', :qa)) AS all_words
         FROM passages ps JOIN documents d ON d.id = ps.document_id JOIN latest l ON l.id = d.id
         WHERE ps.project_id = :p AND ps.tsv @@ to_tsquery('english', :q){flt}
-        ORDER BY rank DESC LIMIT :n"""), params)
+        ORDER BY all_words DESC, (d.mime <> 'text/x-code') DESC, rank DESC LIMIT :n"""), params)   # every word first, then prose before code
     return [dict(r._mapping) for r in rs]
 
 

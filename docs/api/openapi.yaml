@@ -119,6 +119,56 @@ paths:
             application/zip: {schema: {type: string, format: binary}}
         '403': {$ref: '#/components/responses/Forbidden'}
         '413': {description: Export too large (narrow it with filters or one item)}
+  /projects/{projectId}/baselines/status:
+    get:
+      summary: Guided baseline state (approved / awaiting review / none) and whether the architecture moved on since approval
+      operationId: baselineStatus
+      parameters: [{in: path, name: projectId, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200':
+          description: "`state`, `approved`, `pending[]` (with `mine`, `can_approve`), `latest_snapshot`, `outdated`, `can_propose`, `can_self_approve`"
+        '403': {description: Not a project member}
+  /projects/{projectId}/baselines/from-latest:
+    post:
+      summary: Propose the latest snapshot as the baseline in one step (re-uses a pending proposal of the same snapshot)
+      description: "`approve_now` is honoured only where the caller may self-approve (org admins; audited exception to four-eyes); otherwise the proposal waits for another approver."
+      operationId: baselineFromLatest
+      parameters: [{in: path, name: projectId, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        content:
+          application/json:
+            schema: {type: object, properties: {note: {type: string, maxLength: 2000}, approve_now: {type: boolean, default: false}}}
+      responses:
+        '201': {description: The baseline (proposed or approved)}
+        '403': {description: Role cannot propose baselines}
+        '409': {description: "No architecture yet (AT-ARCH-004)"}
+  /projects/{projectId}/adrs/{adrId}/constraints:
+    put:
+      summary: Amend only the machine-checkable conformance rules of a decision (new audited version)
+      description: >
+        Editors while the ADR is proposed, approvers once it is accepted; rejected or superseded ADRs keep their rules (409).
+        Rule types: `forbid` (from, to, relation), `require` (from, to, relation), `only-via` (to, via, allow), `technology`
+        (element, technology). Ends match an element key, a key prefix ending in `*`, or a name. Accepted ADRs' rules are evaluated
+        deterministically by the drift engine (DR-ADR-FORBID-001, DR-ADR-VIA-001, DR-ADR-REQUIRE-001, DR-ADR-TECH-001).
+      operationId: amendAdrConstraints
+      parameters:
+        - {in: path, name: projectId, required: true, schema: {type: string, format: uuid}}
+        - {in: path, name: adrId, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                constraints:
+                  type: array
+                  maxItems: 30
+                  items: {type: object, required: [type], properties: {type: {enum: [forbid, require, only-via, technology]}}}
+      responses:
+        '200': {description: The ADR with its new current version}
+        '403': {description: Not allowed}
+        '409': {description: "Rejected or superseded (AT-ADR-002)"}
   /home:
     get:
       summary: Personal cross-project overview (only projects the caller may view; each read under its own RLS context)

@@ -1,6 +1,7 @@
 """Drift evaluation, triage, suppressions and accept-as-intended (AT-DRIFT_ENGINE-003/004, AT-DRIFT_TRIAGE)."""
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -10,11 +11,12 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from archtwin.architecture import service as arch
 from archtwin.audit import service as audit
-from archtwin.common.db import RequestContext, row, rows, uow
+from archtwin.common.db import RequestContext, project_lock, row, rows, uow
 from archtwin.common.errors import not_found, problem
 from archtwin.common.ids import new_id
 from archtwin.common.paging import PageQuery, paginate_select
 from archtwin.common.schema import drift_comments, drift_evaluations, drift_findings, users
+from archtwin.decisions import service as adr_service
 from archtwin.drift import rules
 from archtwin.kernel import outbox
 from archtwin.notifications import service as notify
@@ -27,23 +29,33 @@ STATES = {"new", "acknowledged", "investigating", "accepted", "resolved", "suppr
 
 async def evaluate(ctx: RequestContext) -> dict[str, Any]:
     async with uow(ctx) as conn:
+        await project_lock(conn, ctx.project_id, "drift")
         snap = await arch.resolve_snapshot(conn, ctx)
         if not snap:
             return {"status": "no_snapshot"}
         current = await arch.load_graph(conn, snap["id"])
         base = await arch.current_baseline(conn, ctx)
         baseline_graph = await arch.load_graph(conn, base["snapshot_id"]) if base else None
-        cov = rules.Coverage.from_inputs(snap["inputs"].get("scans", []))
-        results = rules.evaluate(baseline_graph, current, cov)
+        base_snap = await arch.resolve_snapshot(conn, ctx, base["snapshot_id"]) if base else None
+        cov = rules.Coverage.from_inputs(snap["inputs"].get("scans", []), (base_snap or {}).get("inputs", {}).get("scans", []))
+        decisions_ = await adr_service.accepted_constraints(conn, ctx)        # accepted ADRs' conformance rules
+        results = await asyncio.to_thread(rules.evaluate, baseline_graph, current, cov, decisions_)
         now = datetime.now(UTC)
         seen: set[uuid.UUID] = set()
         counts = {"drift": 0, "unknown": 0, "incomplete": 0, "new": 0, "reopened": 0}
         new_findings = []
+        # one finding per deterministic id (a rule raising the same subject twice must not insert the id twice)
+        results = list({rules.finding_id(ctx.project_id, f["rule_id"], f["subject_key"]): f for f in results}.values())
+        ids = [rules.finding_id(ctx.project_id, f["rule_id"], f["subject_key"]) for f in results]
+        existing: dict[uuid.UUID, dict] = {}
+        for i in range(0, len(ids), 1000):                 # one query per 1000 findings instead of one per finding
+            for r in rows(await conn.execute(select(drift_findings).where(drift_findings.c.id.in_(ids[i:i + 1000])))):
+                existing[r["id"]] = r
         for f in results:
             fid = rules.finding_id(ctx.project_id, f["rule_id"], f["subject_key"])
             seen.add(fid)
             counts[f["verdict"]] += 1
-            prev = row((await conn.execute(select(drift_findings).where(drift_findings.c.id == fid))).first())
+            prev = existing.get(fid)
             values = {**f, "snapshot_id": snap["id"], "baseline_id": base["id"] if base else None, "last_seen": now}
             if prev is None:
                 await conn.execute(drift_findings.insert().values(id=fid, org_id=ctx.org_id, project_id=ctx.project_id,
@@ -67,17 +79,17 @@ async def evaluate(ctx: RequestContext) -> dict[str, Any]:
         # findings no longer produced: auto-resolve open ones (only drift ones — UNKNOWN never resolves into "fixed")
         stale = rows(await conn.execute(select(drift_findings.c.id, drift_findings.c.status, drift_findings.c.rule_id).where(and_(
             drift_findings.c.project_id == ctx.project_id, drift_findings.c.status.in_(OPEN)))))
-        resolved = deleted = 0
-        for s in stale:
-            if s["id"] not in seen and s["rule_id"] in rules.NOISY_WHEN_STALE:
-                # "X is no longer observed" that the refined rule no longer raises (re-keyed element, external dependency):
-                # it was never a real change, so it is deleted instead of being shown as resolved.
-                await conn.execute(drift_findings.delete().where(drift_findings.c.id == s["id"]))
-                deleted += 1
-            elif s["id"] not in seen:
-                await conn.execute(drift_findings.update().where(drift_findings.c.id == s["id"]).values(
-                    status="resolved", resolution_note="no longer observed in the latest evaluation", updated_at=now))
-                resolved += 1
+        gone = [s for s in stale if s["id"] not in seen]
+        noise = [s["id"] for s in gone if s["rule_id"] in rules.NOISY_WHEN_STALE]
+        fixed = [s["id"] for s in gone if s["rule_id"] not in rules.NOISY_WHEN_STALE]
+        # "X is no longer observed" that the refined rule no longer raises (re-keyed element, external dependency) was never
+        # a real change, so it is deleted instead of being shown as resolved. Bulk statements: one per kind, not per row.
+        for i in range(0, len(noise), 1000):
+            await conn.execute(drift_findings.delete().where(drift_findings.c.id.in_(noise[i:i + 1000])))
+        for i in range(0, len(fixed), 1000):
+            await conn.execute(drift_findings.update().where(drift_findings.c.id.in_(fixed[i:i + 1000])).values(
+                status="resolved", resolution_note="no longer observed in the latest evaluation", updated_at=now))
+        resolved, deleted = len(fixed), len(noise)
         counts["auto_resolved"] = resolved
         counts["deleted_noise"] = deleted
         await conn.execute(drift_evaluations.insert().values(id=new_id(), org_id=ctx.org_id, project_id=ctx.project_id,
@@ -141,8 +153,8 @@ async def transition(ctx: RequestContext, fid: uuid.UUID, status: str, note: str
     if status not in STATES:
         raise problem(422, "AT-DRIFT-001", "Unknown status", status)
     if status == "suppressed":
-        suppress_days = suppress_days or 30               # the reason is optional; an expiry always exists (default 30 days)
-        if suppress_days > 365:
+        suppress_days = 30 if suppress_days is None else suppress_days   # reason optional; an expiry always exists (default 30 days)
+        if not 1 <= suppress_days <= 365:                  # 0 or negative would create an already-expired (or endless) exception
             raise problem(422, "AT-DRIFT-002", "Suppression expiry must be 1–365 days")
     async with uow(ctx) as conn:
         f = row((await conn.execute(select(drift_findings).where(drift_findings.c.id == fid))).first())

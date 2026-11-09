@@ -137,12 +137,15 @@ export function ErrorBox({ error }: { error: unknown }) {
   return <div role="alert" className="rounded-md border border-bad/30 bg-bad/10 p-3 text-sm text-bad">{e.message ?? String(error)}{e.problem?.code && <span className="ml-2 font-mono text-xs opacity-70">{e.problem.code}</span>}</div>;
 }
 
-/** Columns start equally split and can be resized by dragging the right edge of a header cell (keyboard: ←/→ on the handle). */
-export function Table({ head, children }: { head: ReactNode[]; children: ReactNode }) {
-  const [widths, setWidths] = useState<number[] | null>(null);       // percentages; null = equal split
+/** Columns start split by `weights` (equal by default) and can be resized by dragging the right edge of a header cell
+ *  (keyboard: ←/→ on the handle). */
+export function Table({ head, children, weights }: { head: ReactNode[]; children: ReactNode; weights?: number[] }) {
+  const [widths, setWidths] = useState<number[] | null>(null);       // percentages; null = initial split
   const ref = useRef<HTMLTableElement>(null);
   const n = head.length;
-  const w = widths && widths.length === n ? widths : Array.from({ length: n }, () => 100 / n);
+  const wsum = weights && weights.length === n ? weights.reduce((a, b) => a + b, 0) : 0;
+  const w = widths && widths.length === n ? widths
+    : wsum > 0 ? weights!.map((x) => (x / wsum) * 100) : Array.from({ length: n }, () => 100 / n);
   useLayoutEffect(() => {          // Chrome does not always re-run fixed table layout on a cell width change: force it (pre-paint)
     const t = ref.current;
     if (!t || !widths) return;

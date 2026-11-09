@@ -252,6 +252,33 @@ async def test_git_scan_specific_commit_of_local_repo(roots):
     assert (await c.test({"path": str(repo)}, {})).details["head"] == head.revision
 
 
+async def test_git_scan_sub_folder_of_a_repository_at_a_commit(roots):
+    """A service folder inside a monorepo keeps commit/ref semantics (webhooks, time travel) instead of a plain-directory scan."""
+    repo = roots / "mono"
+    (repo / "svc").mkdir(parents=True)
+    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+           "HOME": str(roots), "PATH": "/usr/bin:/bin"}
+
+    def git(*a):
+        return subprocess.run(["git", *a], cwd=repo, env=env, check=True, capture_output=True, text=True).stdout.strip()
+    git("init", "-q", "-b", "main")
+    (repo / "svc" / "compose.yaml").write_text("services:\n  one:\n    image: redis:7\n")
+    (repo / "other.txt").write_text("outside the sub-folder")
+    git("add", ".")
+    git("commit", "-qm", "one")
+    first = git("rev-parse", "HEAD")
+    (repo / "svc" / "compose.yaml").write_text("services:\n  one:\n    image: redis:7\n  two:\n    image: redis:7\n")
+    git("commit", "-qam", "two")
+    c = GitRepoConnector()
+    t = await c.test({"path": str(repo / "svc")}, {})
+    assert t.ok and t.details["layout"] == "repository sub-folder" and t.details["head"] == git("rev-parse", "HEAD")
+    head = await c.scan({"path": str(repo / "svc"), "name": "svc"}, {}, None)
+    old = await c.scan({"path": str(repo / "svc"), "name": "svc"}, {}, first)
+    keys = lambda r: {o.subject_key for o in r.observations if o.kind == "container"}  # noqa: E731
+    assert head.revision == t.details["head"] and "container:svc/two" in keys(head)
+    assert old.revision == first and "container:svc/two" not in keys(old)
+
+
 async def test_git_remote_url_is_egress_checked(monkeypatch):
     monkeypatch.setattr(egress, "settings", lambda: type("S", (), {"private_host_allowlist": set()})())
     t = await GitRepoConnector().test({"url": "https://127.0.0.1/x.git"}, {})

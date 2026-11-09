@@ -115,6 +115,58 @@ _Add a hand-written introduction here; regeneration keeps this section._
 
 {% endfor %}
 
+{% if workflows or channels %}
+## Asynchronous and durable interactions
+
+{% if workflows %}
+### Durable workflows
+
+| Workflow | Started by | Executed by | Activities | What it does |
+|---|---|---|---|---|
+{% for w in workflows %}
+| **{{ w.name|md }}** [{{ w.ref }}] | {{ w.starters|join(', ')|md or '—' }} | {{ w.executors|join(', ')|md or '—' }}{% if w.task_queues %} (queue {{ w.task_queues|join(', ')|md }}){% endif %} | {{ w.activities|join(', ')|md or '—' }} | {{ w.effects|join('; ')|md or '—' }}{% if w.children %}; child workflows: {{ w.children|join(', ')|md }}{% endif %} |
+{% endfor %}
+{% endif %}
+{% if channels %}
+### Messages, events and notifications
+
+| Channel / event | Technology | Published by | Delivered to |
+|---|---|---|---|
+{% for c in channels %}
+| **{{ c.name|md }}** [{{ c.ref }}] | {{ c.technology|md }} | {{ c.publishers|join(', ')|md or '—' }} | {{ (c.handlers or c.subscribers)|join(', ')|md or '—' }} |
+{% endfor %}
+{% endif %}
+{% endif %}
+{% if modules %}
+## Module structure
+{% for m in modules %}
+
+### {{ m.container|md }}{% if m.declared %} — declared modules (modular monolith){% endif %}
+
+{% if m.diagram %}
+```mermaid
+{{ m.diagram|safe }}
+```
+{% endif %}
+| Module | Path | Size | Public interfaces |
+|---|---|---|---|
+{% for x in m.modules %}
+| {{ x.name|md }} | `{{ x.path|code }}` | {{ x.classes }} | {{ x.named_interfaces|join(', ')|md or ('module root package' if x.declared else '—') }} |
+{% endfor %}
+{% if m.violations %}
+
+**Boundary violations** (a module uses another module's internals):
+{% for d in m.violations %}
+- {{ d.from|md }} → {{ d.to|md }}: {{ d.violation|md }}
+{% endfor %}
+{% endif %}
+{% if m.cycles %}
+
+**Dependency cycles:** {% for d in m.cycles %}{{ d.from|md }} → {{ d.to|md }}{% if not loop.last %}, {% endif %}{% endfor %}.
+{% endif %}
+{% endfor %}
+{% endif %}
+
 ## Data stores
 {% for d in databases %}
 - **{{ d.name|md }}** ({{ d.technology|md }}){% if d.used_by %}, used by `{{ d.used_by|code }}`{% endif %}. [{{ d.ref }}]

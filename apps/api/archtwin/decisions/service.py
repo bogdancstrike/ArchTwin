@@ -31,7 +31,36 @@ def _content(c: dict[str, Any]) -> dict[str, Any]:
         out[k] = str(out[k] or "")[:20000]
     if c.get("citations"):
         out["citations"] = c["citations"]
+    out["constraints"] = clean_constraints(c.get("constraints") or [])
     return out
+
+
+CONSTRAINT_FIELDS = {"forbid": ("from", "to", "relation"), "require": ("from", "to", "relation"), "only-via": ("to", "via", "allow", "relation"),
+                     "technology": ("element", "technology")}
+
+
+def clean_constraints(items: list[Any]) -> list[dict[str, str]]:
+    """Machine-checkable conformance rules of a decision (evaluated deterministically by the drift engine)."""
+    out = []
+    for c in items[:30]:
+        if not isinstance(c, dict) or c.get("type") not in CONSTRAINT_FIELDS:
+            continue
+        row = {"type": c["type"], **{k: str(c.get(k, ""))[:300] for k in CONSTRAINT_FIELDS[c["type"]] if c.get(k)}}
+        if c.get("description"):
+            row["description"] = str(c["description"])[:300]
+        if all(row.get(k) for k in CONSTRAINT_FIELDS[c["type"]] if k not in ("relation", "allow", "from")):
+            out.append(row)
+    return out
+
+
+async def accepted_constraints(conn, ctx: RequestContext) -> list[dict[str, Any]]:
+    """Accepted decisions that carry conformance rules (current version), for the drift engine."""
+    rows_ = (await conn.execute(select(adrs.c.id, adrs.c.number, adrs.c.title, adr_versions.c.content)
+                                .select_from(adrs.join(adr_versions, and_(adr_versions.c.adr_id == adrs.c.id,
+                                                                          adr_versions.c.version == adrs.c.current_version)))
+                                .where(and_(adrs.c.project_id == ctx.project_id, adrs.c.status == "accepted")))).all()
+    return [{"id": str(r.id), "number": r.number, "title": r.title, "constraints": (r.content or {}).get("constraints") or []}
+            for r in rows_ if (r.content or {}).get("constraints")]
 
 
 async def create(ctx: RequestContext, title: str, content: dict[str, Any], links: list[str], ai_drafted: bool = False) -> dict[str, Any]:
@@ -87,6 +116,27 @@ async def edit(ctx: RequestContext, aid: uuid.UUID, title: str | None, content: 
                                                         content=_content(content), links=links[:100], created_by=ctx.actor_id))
         await conn.execute(adrs.update().where(adrs.c.id == aid).values(current_version=v, **({"title": title[:300]} if title else {})))
         await audit.record(conn, ctx, "adr.edit", "adr", aid, details={"version": v})
+    return await get(ctx, aid)
+
+
+async def amend_constraints(ctx: RequestContext, aid: uuid.UUID, constraints: list[dict[str, Any]]) -> dict[str, Any]:
+    """A new version that changes only the conformance rules (allowed on proposed and accepted ADRs; earlier versions stay
+    immutable; audited). The decision text itself can only change by superseding the ADR."""
+    async with uow(ctx) as conn:
+        a = row((await conn.execute(select(adrs).where(adrs.c.id == aid).with_for_update())).first())
+        if not a:
+            raise not_found("ADR")
+        if a["status"] not in ("proposed", "accepted"):
+            raise problem(409, "AT-ADR-002", "Not amendable", "Rejected or superseded ADRs keep their rules.")
+        cur = row((await conn.execute(select(adr_versions).where(and_(adr_versions.c.adr_id == aid,
+                                                                     adr_versions.c.version == a["current_version"])))).first())
+        content = {**(cur["content"] or {}), "constraints": clean_constraints(constraints)}
+        v = a["current_version"] + 1
+        await conn.execute(adr_versions.insert().values(adr_id=aid, version=v, org_id=ctx.org_id, project_id=ctx.project_id,
+                                                        content=content, links=cur["links"] or [], created_by=ctx.actor_id))
+        await conn.execute(adrs.update().where(adrs.c.id == aid).values(current_version=v))
+        await audit.record(conn, ctx, "adr.constraints.amend", "adr", aid,
+                           details={"version": v, "rules": len(content["constraints"]), "status": a["status"]})
     return await get(ctx, aid)
 
 

@@ -114,7 +114,7 @@ def context_view(g: dict[str, Any], drift_keys: set[str]) -> dict[str, Any]:
             "budget": {"primary": len(systems), "max": MAX_PRIMARY, "split": False}}
 
 
-HOSTED_KINDS = ("kafka-topic", "consumer-group", "event-schema", "database", "table")
+HOSTED_KINDS = ("kafka-topic", "consumer-group", "event-schema", "database", "table", "workflow", "message-channel")
 
 
 def _hosts(g: dict[str, Any]) -> dict[str, str]:
@@ -137,7 +137,7 @@ def _rollup(e: dict[str, Any], hosts: dict[str, str]) -> dict[str, Any]:
     if (s, t) == (e["source"], e["target"]):
         return e
     via = e["target"] if t != e["target"] else e["source"]
-    topic = via.rsplit("/", 1)[-1] if via.startswith("kafka-topic:") else ""
+    topic = via.rsplit("/", 1)[-1] if via.startswith(("kafka-topic:", "workflow:", "channel:")) else ""
     return {**e, "source": s, "target": t, "attributes": {**e.get("attributes", {}), **({"via_topic": topic} if topic else {})}}
 
 
@@ -361,7 +361,7 @@ def code_view(g: dict[str, Any], comp_key: str, drift_keys: set[str], group: str
 
 
 VKIND = {"software-system": "system", "external-system": "external", "person": "person", "container": "container", "component": "component",
-         "code": "component", "database": "container", "table": "component", "kafka-topic": "container", "api-endpoint": "component",
+         "code": "component", "database": "container", "table": "component", "kafka-topic": "container", "workflow": "container", "message-channel": "container", "api-endpoint": "component",
          "adr": "component", "work-item": "component"}
 
 

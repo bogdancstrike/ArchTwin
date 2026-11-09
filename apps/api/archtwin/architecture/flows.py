@@ -17,11 +17,12 @@ from collections import defaultdict
 from typing import Any
 
 RUNTIME = ("calls", "writes", "reads", "publishes", "consumes")
-ACTORS = ("container", "software-system", "external-system", "person", "database", "kafka-topic", "service")
+ACTORS = ("container", "software-system", "external-system", "person", "database", "kafka-topic", "service", "workflow", "message-channel")
+CHANNEL_KINDS = ("kafka-topic", "workflow", "message-channel")
 MAX_STEPS = 14
 MAX_FLOWS = 800
 MAX_ENDPOINT_FLOWS = 600
-RESOURCE_KINDS = ("external-system", "database", "kafka-topic")
+RESOURCE_KINDS = ("external-system", "database", "kafka-topic", "workflow", "message-channel")
 
 
 def _systems(g: dict[str, Any]) -> dict[str, str]:
@@ -63,6 +64,14 @@ def _participant(g: dict[str, Any], k: str, system_of: dict[str, str]) -> dict[s
 
 def _finish(g: dict[str, Any], fid: str, kind: str, name: str, steps: list[dict[str, Any]], system_of: dict[str, str],
             entry: str | None = None) -> dict[str, Any]:
+    seen_steps: set[tuple[str, str, str, str]] = set()
+    uniq = []
+    for st in steps:                       # the same hop twice (container + component evidence) is one step
+        sig = (st["from"], st["to"], st["kind"], st.get("label", ""))
+        if sig not in seen_steps:
+            seen_steps.add(sig)
+            uniq.append(st)
+    steps = uniq
     order: list[str] = []
     for s in steps:
         for k in (s["from"], s["to"]):
@@ -118,21 +127,38 @@ def recognize(g: dict[str, Any]) -> dict[str, Any]:
 
     flows += _endpoint_flows(g, system_of)
 
-    # ---- event flows per topic
+    # ---- event flows per channel: Kafka topic, durable workflow (started -> executed -> effects), NOTIFY channel
     for k, n in sorted(nodes.items()):
-        if n["kind"] != "kafka-topic":
+        if n["kind"] not in CHANNEL_KINDS:
             continue
-        prod = [e for e in edges.values() if e["kind"] == "publishes" and e["target"] == k]
-        cons = [e for e in edges.values() if e["kind"] == "consumes" and e["target"] == k]
+        if n["kind"] == "workflow":
+            wf = _workflow_flow(g, k, out_e, system_of)
+            if wf:
+                flows.append(wf)
+            continue
+        if n["attributes"].get("in_process"):          # an application event inside one runtime (module -> module)
+            prod = [e for e in edges.values() if e["kind"] == "publishes" and e["target"] == k]
+            steps = [{**_step(g, e), "label": e["attributes"].get("label", "publishes")} for e in prod[:4]] + listener_steps(g, k, depth=2)
+            if steps:
+                flows.append(_finish(g, _fid("event", k), "event", f"Event: {n.get('name', k)}", steps[:MAX_STEPS], system_of, entry=k))
+            continue
+        prod = [e for e in edges.values() if e["kind"] == "publishes" and e["target"] == k and nodes.get(e["source"], {}).get("kind") != "component"]
+        cons = [e for e in edges.values() if e["kind"] == "consumes" and e["target"] == k and nodes.get(e["source"], {}).get("kind") != "component"]
         if not prod and not cons:
             continue
         steps = [_step(g, e) for e in prod]
         for e in cons:
             steps.append(_step(g, e, src=k, dst=e["source"]))             # topic delivers to the consumer
+            if n["kind"] == "message-channel":   # a NOTIFY channel ends in the endpoints that stream it to clients
+                streams = [x for x, xn in nodes.items() if xn["kind"] == "api-endpoint" and k in xn["attributes"].get("listens", [])
+                           and xn["attributes"].get("component", "").startswith(e["source"].replace("container:", "component:") + "/")]
+                steps += [{**_synthetic(e["source"], x, "streams", nodes[x]["name"], 0.9), "protocol": "sse"} for x in streams[:3]]
+                continue
             for nxt in out_e.get(e["source"], [])[:3]:
                 if nxt["kind"] != "consumes":
                     steps.append(_step(g, nxt))
-        flows.append(_finish(g, _fid("event", k), "event", f"Event: {n.get('name', k)}", steps[:MAX_STEPS], system_of, entry=k))
+        title = f"Notification: {n.get('name', k)}" if n["kind"] == "message-channel" else f"Event: {n.get('name', k)}"
+        flows.append(_finish(g, _fid("event", k), "event", title, steps[:MAX_STEPS], system_of, entry=k))
 
     # ---- data flows per database
     for k, n in sorted(nodes.items()):
@@ -143,7 +169,8 @@ def recognize(g: dict[str, Any]) -> dict[str, Any]:
             continue
         flows.append(_finish(g, _fid("data", k), "data", f"Data: {n.get('name', k)}", [_step(g, e) for e in io[:MAX_STEPS]], system_of, entry=k))
 
-    flows.sort(key=lambda f: ({"request": 0, "endpoint": 1, "event": 2, "data": 3}[f["kind"]], -f["length"], f["name"]))
+    # most explanatory first: entry points with their effects, then workflows/events, then generic request walks, then stores
+    flows.sort(key=lambda f: ({"endpoint": 0, "event": 1, "request": 2, "data": 3}[f["kind"]], -f["length"], f["name"]))
     return {"flows": flows[:MAX_FLOWS], "total": len(flows),
             "counts": {k: sum(1 for f in flows if f["kind"] == k) for k in ("request", "endpoint", "event", "data")}}
 
@@ -184,10 +211,19 @@ def _endpoint_flows(g: dict[str, Any], system_of: dict[str, str]) -> list[dict[s
             calls[e["source"]].append(e)
         elif e["kind"] == "calls" and sk == "person":
             entry_of[e["target"]].append(e)
-        if e["kind"] in RUNTIME and sk == "component" and _is_resource(g, e["target"]):
-            comp_out[e["source"]].append(e)
+        if e["kind"] in RUNTIME and e["kind"] != "consumes" and sk == "component" and _is_resource(g, e["target"]):
+            comp_out[e["source"]].append(e)          # background LISTENs / consumers are not part of a request
     for es in comp_out.values():
         es.sort(key=lambda e: (-e.get("confidence", 1), e["target"]))
+    # shared kernel: components imported by most endpoints' handlers (config, ids, logging, db helpers) explain nothing
+    use_count: dict[str, int] = defaultdict(int)
+    n_eps = 0
+    for n in nodes.values():
+        if n["kind"] == "api-endpoint" and n["attributes"].get("uses"):
+            n_eps += 1
+            for c in set(n["attributes"]["uses"]):
+                use_count[c] += 1
+    shared_kernel = {c for c, k in use_count.items() if n_eps >= 8 and k >= 0.5 * n_eps}
 
     def handler_of(ek: str) -> str | None:
         h = nodes[ek]["attributes"].get("component")
@@ -198,11 +234,29 @@ def _endpoint_flows(g: dict[str, Any], system_of: dict[str, str]) -> list[dict[s
         if not handler:
             return []
         steps: list[dict[str, Any]] = []
-        for comp in a.get("uses", [])[:6]:
-            if comp in nodes:
-                steps.append(_synthetic(handler, comp, "uses", "imports"))
-                steps += [_step(g, e) for e in comp_out.get(comp, [])[:4]]
-        steps += [_synthetic(handler, r, "calls", r.split(":")[-1], 0.85) for r in a.get("resources", [])[:4] if r in nodes]
+        owner_c = owner.get(ek, handler)
+        if "effects" in a:          # handler-level evidence: what this route's code does (not every import of its module)
+            steps += effect_steps(g, handler, a["effects"], owner_c, depth=2)
+        else:
+            for comp in a.get("uses", [])[:6]:
+                if comp in nodes and comp not in shared_kernel:
+                    steps.append(_synthetic(handler, comp, "uses", "imports"))
+                    steps += [_step(g, e) for e in comp_out.get(comp, [])[:4]]
+            steps += [_synthetic(handler, r, "calls", r.split(":")[-1], 0.85) for r in a.get("resources", [])[:4] if r in nodes]
+        for wk in a.get("starts", [])[:3]:
+            if wk in nodes:
+                steps.append({**_synthetic(handler, wk, "starts", f"starts {nodes[wk]['name']}", 0.95), "protocol": "temporal"})
+                steps += workflow_steps(g, wk, depth=0)
+        for ck in a.get("notifies", [])[:2]:
+            if ck in nodes:
+                steps.append({**_synthetic(handler, ck, "publishes", f"NOTIFY {nodes[ck]['name']}", 0.9), "protocol": "postgres-notify"})
+                steps += channel_delivery(g, ck)
+        for ck in a.get("listens", [])[:2]:
+            if ck in nodes:
+                producers = [e for e in g["edges"].values() if e["kind"] == "publishes" and e["target"] == ck
+                             and nodes.get(e["source"], {}).get("kind") == "container"][:3]
+                steps += [_step(g, e) for e in producers]
+                steps.append({**_synthetic(ck, handler, "delivers", f"LISTEN {nodes[ck]['name']} (stream)", 0.9), "protocol": "postgres-notify"})
         if hop < MAX_HOPS:
             for e in calls.get(ek, [])[:3]:
                 tgt = e["target"]
@@ -247,3 +301,97 @@ def _endpoint_flows(g: dict[str, Any], system_of: dict[str, str]) -> list[dict[s
             f["endpoint"] = ek
             flows.append(f)
     return flows
+
+
+def channel_delivery(g: dict[str, Any], ck: str) -> list[dict[str, Any]]:
+    """A NOTIFY channel delivers to every container that LISTENs on it."""
+    nodes = g["nodes"]
+    return [{**_step(g, e, src=ck, dst=e["source"]), "label": f"LISTEN {nodes[ck]['name']}", "kind": "delivers"}
+            for e in g["edges"].values() if e["kind"] == "consumes" and e["target"] == ck
+            and nodes.get(e["source"], {}).get("kind") == "container"][:3]
+
+
+def workflow_steps(g: dict[str, Any], wk: str, depth: int = 0) -> list[dict[str, Any]]:
+    """A durable workflow: the worker that executes it, then what its activities do (gateways, MCP servers, stores,
+    notifications -> who listens), then its child workflows (one level)."""
+    nodes, edges = g["nodes"], g["edges"]
+    wf = nodes[wk]
+    executors = [e for e in edges.values() if e["kind"] == "consumes" and e["target"] == wk
+                 and nodes.get(e["source"], {}).get("kind") == "container"]
+    steps: list[dict[str, Any]] = []
+    for e in executors[:1]:
+        worker = e["source"]
+        steps.append({**_step(g, e, src=wk, dst=worker), "label": "executes", "kind": "executes"})
+        for fx in wf["attributes"].get("effects", [])[:8]:
+            t = fx.get("target")
+            if t not in nodes or t == worker:
+                continue
+            steps.append({**_synthetic(worker, t, fx.get("kind", "calls"), fx.get("label", ""), 0.9),
+                          "protocol": "postgres-notify" if nodes[t]["kind"] == "message-channel" else ""})
+            if nodes[t]["kind"] == "message-channel":
+                steps += channel_delivery(g, t)
+            elif nodes[t]["kind"] == "container" and "mcp" in fx.get("label", "").lower():
+                # a gateway forwarding MCP calls: to the container that serves MCP tools
+                servers = {o for x, xn in nodes.items() if xn["kind"] == "api-endpoint" and xn["attributes"].get("protocol") == "mcp"
+                           for o in [owner_of(g, x)] if o}
+                steps += [_step(g, x) for x in edges.values() if x["source"] == t and x["kind"] == "calls" and x["target"] in servers][:1]
+    if depth == 0:
+        for e in edges.values():
+            if e["kind"] == "calls" and e["source"] == wk and nodes.get(e["target"], {}).get("kind") == "workflow":
+                steps.append({**_step(g, e), "label": f"child {nodes[e['target']]['name']}", "kind": "starts"})
+                steps += workflow_steps(g, e["target"], depth + 1)[:4]
+    return steps
+
+
+def _workflow_flow(g: dict[str, Any], wk: str, out_e: dict[str, list[dict[str, Any]]], system_of: dict[str, str]) -> dict[str, Any] | None:
+    nodes, edges = g["nodes"], g["edges"]
+    starters = [e for e in edges.values() if e["kind"] == "publishes" and e["target"] == wk
+                and nodes.get(e["source"], {}).get("kind") == "container"]
+    steps = [{**_step(g, e), "label": e["attributes"].get("label", "starts")} for e in starters[:3]]
+    steps += workflow_steps(g, wk)
+    if not steps:
+        return None
+    return _finish(g, _fid("event", wk), "event", f"Workflow: {nodes[wk].get('name', wk)}", steps[:MAX_STEPS], system_of, entry=wk)
+
+
+def owner_of(g: dict[str, Any], endpoint: str) -> str | None:
+    for e in g["edges"].values():
+        if e["kind"] == "exposes" and e["target"] == endpoint:
+            return e["source"]
+    return None
+
+
+def listener_steps(g: dict[str, Any], ck: str, depth: int = 2) -> list[dict[str, Any]]:
+    """An in-process event delivered to each listener (as its own entry point), then what that listener does."""
+    nodes = g["nodes"]
+    out: list[dict[str, Any]] = []
+    for x, xn in sorted(nodes.items()):
+        a = xn["attributes"]
+        if xn["kind"] != "api-endpoint" or ck not in a.get("listens", []) or a.get("method") != "EVENT":
+            continue
+        comp = a.get("component")
+        if comp not in nodes:
+            continue
+        out.append({**_synthetic(ck, comp, "delivers", a.get("handler", ""), 0.95), "protocol": "in-process event"})
+        out += effect_steps(g, comp, a.get("effects", []), comp, depth - 1)
+        if len(out) >= MAX_STEPS:
+            break
+    return out
+
+
+def effect_steps(g: dict[str, Any], src: str, effects: list[dict[str, str]], skip: str | None, depth: int = 2) -> list[dict[str, Any]]:
+    """Steps for a handler's effects; events continue into their listeners and channels into their subscribers."""
+    nodes = g["nodes"]
+    out: list[dict[str, Any]] = []
+    for fx in effects[:8]:
+        t = fx.get("target")
+        if t not in nodes or t == skip:
+            continue
+        out.append(_synthetic(src, t, fx.get("kind", "calls"), fx.get("label", ""), 0.9))
+        tn = nodes[t]
+        if tn["kind"] == "message-channel" and depth > 0:
+            if tn["attributes"].get("in_process"):
+                out += listener_steps(g, t, depth)
+            else:
+                out += channel_delivery(g, t)
+    return out

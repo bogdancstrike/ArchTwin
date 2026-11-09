@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile
 from fastapi.responses import PlainTextResponse
@@ -397,6 +397,36 @@ async def propose(body: S.BaselineIn, c: RequestContext = Depends(project_ctx)):
     return await arch.propose_baseline(c, body.snapshot_id, body.note)
 
 
+@r.get("/projects/{project_id}/baselines/status", tags=["architecture"])
+async def baselines_status(c: RequestContext = Depends(project_ctx)):
+    """Guided baseline state: approved / awaiting review / none, and whether the architecture moved on since approval."""
+    await _arch(c)
+    st = await arch.baseline_status(c)
+    p = c.principal
+    scope = {"org_id": str(c.org_id), "project_id": str(c.project_id)}
+    st["can_propose"] = bool(p) and await authz.allowed(p, "architecture", "propose_baseline", str(c.project_id), scope)
+    st["can_self_approve"] = bool(p) and await authz.allowed(p, "architecture", "self_approve_baseline", str(c.project_id),
+                                                             {**scope, "author_id": str(c.actor_id)})
+    for b in st["pending"]:
+        b["mine"] = str(b["author_id"]) == str(c.actor_id)
+        b["can_approve"] = bool(p) and not b["mine"] and await authz.allowed(p, "architecture", "approve_baseline", str(b["id"]),
+                                                                             {**scope, "author_id": str(b["author_id"])})
+    return st
+
+
+@r.post("/projects/{project_id}/baselines/from-latest", status_code=201, tags=["architecture"])
+async def baseline_from_latest(body: S.QuickBaselineIn, c: RequestContext = Depends(project_ctx)):
+    """One step: propose the latest architecture as the baseline; approve it at once only where self-approval is allowed
+    (org admins, audited). Everyone else gets a pending proposal that another approver accepts."""
+    await _arch(c, "propose_baseline")
+    b = await arch.baseline_from_latest(c, body.note)
+    if body.approve_now and b["status"] == "proposed" and str(b["author_id"]) == str(c.actor_id) and await authz.allowed(
+            c.principal, "architecture", "self_approve_baseline", str(b["id"]),
+            {"org_id": str(c.org_id), "project_id": str(c.project_id), "author_id": str(b["author_id"])}):
+        b = await arch.decide_baseline(c, b["id"], True, body.note, self_approval=True)
+    return b                                   # otherwise: a pending proposal another approver accepts (four-eyes)
+
+
 @r.post("/projects/{project_id}/baselines/{bid}/{decision}", tags=["architecture"])
 async def decide_baseline(bid: uuid.UUID, decision: str, body: S.DecisionIn, c: RequestContext = Depends(project_ctx)):
     if decision not in ("approve", "reject"):
@@ -475,7 +505,7 @@ async def put_layout(view_key: str, body: S.LayoutIn, c: RequestContext = Depend
         ov = {k: {"x": float(v["x"]), "y": float(v["y"])} for k, v in body.overrides.items() if "x" in v and "y" in v}
         if cur:
             await conn.execute(diagram_layouts.update().where(diagram_layouts.c.id == cur.id).values(
-                overrides={**cur.overrides, **ov}, revision=cur.revision + 1, updated_by=c.actor_id, updated_at=datetime.now()))
+                overrides={**cur.overrides, **ov}, revision=cur.revision + 1, updated_by=c.actor_id, updated_at=datetime.now(UTC)))
             rev = cur.revision + 1
         else:
             await conn.execute(diagram_layouts.insert().values(id=new_id(), org_id=c.org_id, project_id=c.project_id, view_key=view_key,
@@ -560,6 +590,14 @@ async def adr_edit(aid: uuid.UUID, body: S.AdrIn, c: RequestContext = Depends(pr
     a = await decisions.get(c, aid)
     await _adr(c, "edit", str(aid), author_id=str(a["author_id"]))
     return await decisions.edit(c, aid, body.title, body.model_dump(), body.links)
+
+
+@r.put("/projects/{project_id}/adrs/{aid}/constraints", tags=["decisions"])
+async def adr_constraints(aid: uuid.UUID, body: S.AdrConstraintsIn, c: RequestContext = Depends(project_ctx)):
+    """Amend only the machine-checkable conformance rules (new version, audited): editors while proposed, approvers once accepted."""
+    a = await decisions.get(c, aid)
+    await _adr(c, "edit" if a["status"] == "proposed" else "amend_constraints", str(aid), author_id=str(a["author_id"]))
+    return await decisions.amend_constraints(c, aid, body.constraints)
 
 
 @r.post("/projects/{project_id}/adrs/{aid}/{decision}", tags=["decisions"])
