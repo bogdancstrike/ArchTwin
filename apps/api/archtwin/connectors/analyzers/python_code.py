@@ -56,6 +56,7 @@ class CodeDef:
     refs: set[str] = field(default_factory=set)
     methods: int = 0
     is_async: bool = False
+    method_list: list[tuple[str, int]] = field(default_factory=list)     # (name, line) of methods, for L4 detail
 
 
 @dataclass
@@ -191,8 +192,11 @@ def _code_defs(root) -> list[CodeDef]:
                 if c.type in ("identifier", "attribute"):
                     cd.bases.append(_text(c))
             body = d.child_by_field_name("body")
-            cd.methods = sum(1 for c in (body.children if body is not None else [])
-                             if c.type == "function_definition" or (c.type == "decorated_definition" and c.child_by_field_name("definition") is not None))
+            for c in (body.children if body is not None else []):
+                fd = c.child_by_field_name("definition") if c.type == "decorated_definition" else c
+                if fd is not None and fd.type == "function_definition" and fd.child_by_field_name("name") is not None:
+                    cd.method_list.append((_text(fd.child_by_field_name("name")), c.start_point[0] + 1))
+            cd.methods = len(cd.method_list)
         body = d.child_by_field_name("body")
         if body is not None:
             _idents(body, cd.refs)

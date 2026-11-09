@@ -9,10 +9,12 @@ import { Badge, Button, ErrorBox, Select, ago, cn } from "@/components/ui";
 import { usd } from "@/components/charts";
 import { api } from "@/lib/api";
 import { useApi, useMe } from "@/lib/hooks";
+import type { View } from "@/lib/types";
+import { MiniDiagram } from "@/diagram/MiniDiagram";
 
 type Scope = "general" | "data";
 interface Ev { id: string; type: string; key: string; text: string; source: string; revision: string; span: { line_start?: number } }
-interface Meta { model: string; grounded: boolean; citations: string[]; invalid_citations?: string[]; evidence: Ev[]; latency_ms: number; cost_usd?: number; scope: Scope }
+interface Meta { diagram?: View | null; model: string; grounded: boolean; citations: string[]; invalid_citations?: string[]; evidence: Ev[]; latency_ms: number; cost_usd?: number; scope: Scope }
 interface Turn { role: "user" | "assistant"; content: string; scope: Scope; meta?: Meta }
 interface Conv { id: string; title: string; scope: Scope; sources: string[]; turns: number; updated_at: string }
 interface Source { id: string; name: string; kind: string }
@@ -90,7 +92,8 @@ export function AssistantPage({ projectId }: { projectId: string }) {
     const d = await api<any>(`/projects/${projectId}/assistant/conversations/${c.id}`);
     setConvId(c.id); setScope(d.scope); setSources(d.sources ?? []);
     setTurns(d.turns.flatMap((t: any) => [{ role: "user", content: t.question, scope: t.scope ?? d.scope },
-      { role: "assistant", content: t.answer, scope: t.scope ?? d.scope, meta: { model: t.model, grounded: t.grounded, citations: t.citations, evidence: t.evidence ?? [],
+      { role: "assistant", content: t.answer, scope: t.scope ?? d.scope, meta: { model: t.model, grounded: t.grounded, citations: t.citations,
+        evidence: (t.evidence ?? []).filter((e: any) => e.type !== "diagram"), diagram: (t.evidence ?? []).find((e: any) => e.type === "diagram")?.view ?? null,
         latency_ms: t.latency_ms, scope: t.scope ?? d.scope } }]));
   };
   const fresh = () => { setConvId(null); setTurns([]); setErr(null); setQ(""); };
@@ -166,6 +169,7 @@ export function AssistantPage({ projectId }: { projectId: string }) {
                 {t.scope === "general" ? <Badge tone="muted">general · not grounded in project data</Badge> : <Badge tone={t.meta?.grounded ? "ok" : "warn"}>{t.meta?.grounded ? "grounded" : "not grounded"}</Badge>}
                 {t.meta?.invalid_citations?.length ? <Badge tone="bad">{t.meta.invalid_citations.length} invalid citations removed</Badge> : null}</div>
               <article className="prose-at text-sm"><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>{t.content}</Markdown></article>
+              {t.meta?.diagram && <MiniDiagram view={t.meta.diagram} projectId={projectId} />}
               {t.meta?.evidence?.length ? <details className="mt-2"><summary className="cursor-pointer text-xs text-link">Evidence ({t.meta.evidence.length})</summary>
                 <ul className="mt-1 space-y-1 text-xs">{t.meta.evidence.map((e) => <li key={e.id} className="rounded border border-rule p-1.5"><b className="font-mono">[{e.id}]</b> <Badge>{e.type}</Badge> {e.text.slice(0, 220)}
                   <div className="font-mono text-[10px] text-soft">{e.source}{e.span?.line_start ? `:${e.span.line_start}` : ""} {e.revision ? `@ ${e.revision.slice(0, 10)}` : ""}</div></li>)}</ul></details> : null}

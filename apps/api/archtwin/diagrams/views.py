@@ -360,6 +360,71 @@ def code_view(g: dict[str, Any], comp_key: str, drift_keys: set[str], group: str
             "budget": {"primary": len([n for n in nodes if n.get("primary")]), "max": MAX_PRIMARY, "split": bool(rest), "code_elements": len(code)}}
 
 
+VKIND = {"software-system": "system", "external-system": "external", "person": "person", "container": "container", "component": "component",
+         "code": "component", "database": "container", "table": "component", "kafka-topic": "container", "api-endpoint": "component",
+         "adr": "component", "work-item": "component"}
+
+
+def zoom_target(g: dict[str, Any], k: str) -> str | None:
+    """The view that shows what is inside element `k` (C4 zoom), or None."""
+    n = g["nodes"].get(k, {})
+    if n.get("kind") == "software-system":
+        return f"system:{k.split(':', 1)[1]}"
+    if n.get("kind") == "container" and _children(g, k, "component"):
+        return k
+    if n.get("kind") == "component" and _children(g, k, "code"):
+        return k
+    return None
+
+
+def parent_view(g: dict[str, Any], k: str) -> str:
+    """The view in which element `k` itself is drawn (for "open in Architecture" / search)."""
+    kind = g["nodes"].get(k, {}).get("kind")
+    for e in g["edges"].values():
+        if e["kind"] == "contains" and e["target"] == k:
+            pk = g["nodes"].get(e["source"], {}).get("kind")
+            if pk == "software-system":
+                return f"system:{e['source'].split(':', 1)[1]}"
+            if pk in ("container", "component"):
+                return e["source"]
+    if kind == "table" or kind == "code":
+        for e in g["edges"].values():
+            if e["target"] == k and g["nodes"].get(e["source"], {}).get("kind") in ("container", "component"):
+                return e["source"]
+    return "context"
+
+
+def evidence_view(g: dict[str, Any], keys: list[str], max_nodes: int = 14) -> dict[str, Any] | None:
+    """A diagram for an assistant answer: the cited elements, the endpoints of cited relationships and the direct relations
+    among them; every node zooms into its C4 level (L1-L4) in the Architecture tab."""
+    want: list[str] = []
+    for k in keys:
+        if k in g["edges"]:
+            e = g["edges"][k]
+            for x in (e["source"], e["target"]):
+                if x not in want:
+                    want.append(x)
+        elif k in g["nodes"] and k not in want:
+            want.append(k)
+    want = [k for k in want if g["nodes"].get(k, {}).get("kind") not in ("library", "document")][:max_nodes]
+    if len(want) < 2:
+        return None
+    ws = set(want)
+    nodes = []
+    for k in want:
+        n = g["nodes"][k]
+        out = _node_out(n, vkind=VKIND.get(n["kind"], "container"), zoom=zoom_target(g, k))
+        out["parent_view"] = parent_view(g, k)
+        if n["kind"] == "table":
+            out["technology"] = f"table · {n['attributes'].get('column_count', '?')} columns"
+        nodes.append(out)
+    raw = [(e["source"], e["target"], e) for e in g["edges"].values()
+           if e["source"] in ws and e["target"] in ws and e["kind"] not in ("contains",)]
+    edges = _aggregate(raw)
+    return {"view_key": "answer", "level": 0, "title": "Diagram for this answer", "breadcrumbs": [], "nodes": nodes, "edges": edges,
+            "detail_views": [], "budget": {"primary": len(nodes), "max": max_nodes, "split": False}, "layout": {"overrides": {}, "revision": 0}}
+
+
 def annotate_links(g: dict[str, Any], view: dict[str, Any]) -> dict[str, Any]:
     """Per node: how many ADRs, work items (Taiga/GitLab/GitHub) and documented diagram relations point at it or at an
     element it contains — so docs and plans show up on the diagram, not only code."""

@@ -445,6 +445,61 @@ async def project_flows(snapshot_id: uuid.UUID | None = None, c: RequestContext 
     return {"snapshot_id": str(g["snapshot"]["id"]) if g.get("snapshot") else None, **flows_mod.recognize(g)}
 
 
+@r.get("/projects/{project_id}/elements/search", tags=["architecture"])
+async def element_search(q: str = Query(..., min_length=1, max_length=120), limit: int = Query(30, le=100), c: RequestContext = Depends(project_ctx)):
+    """Search every element of the platform (systems, containers, components, code, tables, endpoints, topics, ADRs, work
+    items) by name/key; each hit says which view shows it (`parent_view`) and what it zooms into (`zoom`)."""
+    await _arch(c)
+    from archtwin.diagrams import views
+    g = await arch.graph(c)
+    ql = q.lower()
+    hits = []
+    for k, n in g["nodes"].items():
+        if n["kind"] == "library":
+            continue
+        name = (n.get("name") or "").lower()
+        score = 3 if name == ql else 2 if name.startswith(ql) else 1 if ql in name or ql in k.lower() else 0
+        if score:
+            hits.append((-score, len(name), k, n))
+    hits.sort(key=lambda h: h[:3])
+    return [{"key": k, "name": n.get("name", k), "kind": n["kind"], "technology": n["attributes"].get("technology") or n["attributes"].get("element") or "",
+             "path": n["attributes"].get("path", ""), "parent_view": views.parent_view(g, k), "zoom": views.zoom_target(g, k)}
+            for _, _, k, n in hits[:limit]]
+
+
+@r.get("/projects/{project_id}/elements/detail", tags=["architecture"])
+async def element_detail(key: str = Query(..., min_length=3, max_length=600), c: RequestContext = Depends(project_ctx)):
+    """Everything linked to one element: attributes (columns, methods, …), ADRs and work items that reference it, relations
+    drawn in documentation diagrams, and documents/code passages that mention it by name."""
+    await _arch(c)
+    g = await arch.graph(c)
+    n = g["nodes"].get(key)
+    if not n:
+        raise not_found("element")
+    linked = {"adrs": [], "work_items": [], "documented": []}
+    for e in g["edges"].values():
+        src = g["nodes"].get(e["source"], {})
+        if e["target"] == key and e["kind"] == "references" and src.get("kind") in ("adr", "work-item"):
+            linked["adrs" if src["kind"] == "adr" else "work_items"].append(
+                {"key": e["source"], "name": src.get("name"), "state": src["attributes"].get("state"), "status": src["attributes"].get("status"),
+                 "url": src["attributes"].get("url") or "", "provider": src["attributes"].get("provider", "")})
+        if e["attributes"].get("documented") and key in (e["source"], e["target"]):
+            other = e["target"] if e["source"] == key else e["source"]
+            linked["documented"].append({"edge": e["key"], "kind": e["kind"], "other": g["nodes"].get(other, {}).get("name", other),
+                                         "diagram": e["attributes"].get("diagram"), "direction": "out" if e["source"] == key else "in"})
+    name = n.get("name") or key.rsplit("/", 1)[-1]
+    mentions: list[dict] = []
+    if len(name) >= 3:
+        async with uow(c) as conn:
+            for kind in ("docs", "code"):
+                for p_ in await docs.search_passages(conn, c, name, limit=5, kind=kind):
+                    mentions.append({"kind": kind, "path": p_["path"], "title": p_["title"], "heading": p_["heading"], "line_start": p_["line_start"],
+                                     "snippet": p_["text"][:240]})
+    a = n["attributes"]
+    return {"key": key, "name": name, "kind": n["kind"], "attributes": {k: v for k, v in a.items() if k not in ("evidence",)},
+            "origins": n["origins"], "confidence": n["confidence"], "linked": linked, "mentions": mentions}
+
+
 @r.get("/projects/{project_id}/snapshots", tags=["architecture"])
 async def snapshots(c: RequestContext = Depends(project_ctx)):
     await _arch(c)

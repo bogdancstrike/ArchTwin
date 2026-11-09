@@ -37,7 +37,10 @@ SYSTEM = """You are ArchTwin's architecture assistant for ONE project. Rules:
 3. If the evidence does not answer the question, say clearly that it is UNKNOWN from the available evidence and which
    connector or document would be needed. Missing evidence is never proof that something does not exist.
 4. Prefer concise, structured answers (short paragraphs or bullets). Distinguish observed facts from inferences.
-5. Detection of drift and authorization are deterministic platform functions; you only explain and draft."""
+5. Detection of drift and authorization are deterministic platform functions; you only explain and draft.
+6. The platform draws an interactive architecture diagram from the elements and relationships you cite. When the user asks
+   for a diagram, a flow or "how X connects to Y", cite every element and relationship on the path (in order) so the diagram
+   is complete; you may add a Mermaid block for a sequence, but never invent elements that are not in the evidence."""
 
 GENERAL = """You are ArchTwin's general assistant for software architecture questions (patterns, technologies, trade-offs,
 writing). In this GENERAL mode you have NO access to the user's project, its code, documents or datasources: never claim
@@ -229,6 +232,18 @@ async def ask(ctx: RequestContext, question: str, model: str, mode: str = "ask",
         answer, good, bad = validate_citations(c.text, ev)
     grounded = scope == "data" and bool(good) and not bad
     shown = ([e for e in ev if e["id"] in good] or ev[:6]) if scope == "data" else []
+    diagram = None
+    if scope == "data":
+        try:                                # an interactive diagram of the cited architecture (zoomable into C4 L1-L4)
+            from archtwin.diagrams import views
+            async with uow(ctx) as conn:
+                snap = await arch.resolve_snapshot(conn, ctx)
+                g = await arch.load_graph(conn, snap["id"]) if snap else None
+            keys = [e["key"] for e in (shown or ev) if e["type"] in ("element", "relationship")]
+            if g and keys:
+                diagram = views.evidence_view(g, keys)
+        except Exception:  # noqa: BLE001 — a diagram is a convenience, never a reason to fail the answer
+            diagram = None
     rid = new_id()
     async with uow(ctx) as conn:
         await conn.execute(prompt_runs.insert().values(id=rid, org_id=ctx.org_id, project_id=ctx.project_id, user_id=ctx.actor_id,
@@ -236,14 +251,14 @@ async def ask(ctx: RequestContext, question: str, model: str, mode: str = "ask",
                                                        answer=answer, citations=good, context_refs=[{"id": e["id"], "key": e["key"]} for e in ev],
                                                        grounded=grounded, tokens_in=c.tokens_in, tokens_out=c.tokens_out,
                                                        latency_ms=c.latency_ms, trace_id=c.trace_id, conversation_id=conversation_id,
-                                                       scope=scope, evidence=shown,
+                                                       scope=scope, evidence=shown + ([{"type": "diagram", "view": diagram}] if diagram else []),
                                                        status="ok" if not bad else "invalid_citations_removed"))
         await conn.execute(conversations.update().where(conversations.c.id == conversation_id).values(updated_at=datetime.now(UTC)))
         await audit.record(conn, ctx, f"ai.{mode if scope == 'data' else 'general'}", "assistant", rid,
                            details={"model": model, "grounded": grounded, "scope": scope, "sources": sources or "all",
                                     "evidence": len(ev), "invalid_citations": bad, "conversation": str(conversation_id)})
     return {"id": rid, "conversation_id": conversation_id, "scope": scope, "sources": sources, "answer": answer, "model": c.model or model,
-            "cost_usd": round(c.cost_usd, 6), "grounded": grounded, "citations": good, "invalid_citations": bad, "evidence": shown, "all_evidence": ev,
+            "cost_usd": round(c.cost_usd, 6), "diagram": diagram, "grounded": grounded, "citations": good, "invalid_citations": bad, "evidence": shown, "all_evidence": ev,
             "tokens": {"in": c.tokens_in, "out": c.tokens_out}, "latency_ms": c.latency_ms}
 
 

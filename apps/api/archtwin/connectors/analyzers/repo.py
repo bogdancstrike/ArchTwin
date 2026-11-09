@@ -497,6 +497,7 @@ class RepoAnalyzer:
                             span={"path": rel, "line_start": d.line_start, "line_end": d.line_end},
                             attrs={"element": d.kind, "module": m, "path": rel, "line_start": d.line_start, "line_end": d.line_end,
                                    "bases": d.bases[:10], "methods": d.methods, "async": d.is_async, "language": "python",
+                                   "method_list": [{"name": mn, "line": ml} for mn, ml in d.method_list[:80]],
                                    "technology": f"python {d.kind}"})
                 self.r.edge("static", f"component:{s.system}/{s.name}/{comp}", "contains", k, python_code.PARSER_VERSION, ref=rel)
                 chosen.add(name)

@@ -4,7 +4,7 @@ import { Background, Controls, MarkerType, MiniMap, ReactFlow, ReactFlowProvider
 import { ChevronRight, GitCompare, RotateCcw, Table2, Workflow } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Badge, Button, Card, cn, Empty, ErrorBox, OriginBadges, Select, Spinner, Table } from "@/components/ui";
+import { Badge, Button, Card, Empty, ErrorBox, Input, OriginBadges, Select, Spinner, Table, cn } from "@/components/ui";
 import { api, download } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import type { Evidence, Snapshot, View } from "@/lib/types";
@@ -23,6 +23,51 @@ function viewPath(projectId: string, key: string, s: Search) {
   if (s.full) q.set("full", "true");
   if (s.deps) q.set("deps", "true");
   return `/projects/${projectId}/views/${key}${q.toString() ? "?" + q : ""}`;
+}
+
+function ElementDetail({ projectId, elementKey }: { projectId: string; elementKey: string }) {
+  const d = useApi<any>(["element-detail", projectId, elementKey], `/projects/${projectId}/elements/detail?key=${encodeURIComponent(elementKey)}`);
+  if (!d.data) return null;
+  const a = d.data.attributes ?? {};
+  const L = d.data.linked;
+  return <div className="space-y-3">
+    {a.columns?.length > 0 && <div><div className="eyebrow mb-1">Columns ({a.columns.length})</div>
+      <table className="w-full table-fixed text-xs"><tbody>{a.columns.map((c: any) => <tr key={c.name} className="border-b border-rule">
+        <td className="py-0.5 pr-2 font-mono">{c.primary_key ? "🔑 " : ""}{c.name}</td><td className="py-0.5 pr-2 font-mono text-soft">{c.type}{c.nullable === false ? " · not null" : ""}</td>
+        <td className="truncate py-0.5 font-mono text-link" title={c.references}>{c.references ? `→ ${c.references}` : ""}</td></tr>)}</tbody></table>
+      {a.declared_in?.length > 0 && <div className="mt-1 text-[10px] text-soft">declared in {a.declared_in.slice(0, 3).map((x: any) => `${x.path}:${x.line} (${x.kind})`).join(", ")}</div>}</div>}
+    {a.method_list?.length > 0 && <div><div className="eyebrow mb-1">Methods ({a.method_list.length})</div>
+      <ul className="columns-2 text-xs">{a.method_list.map((m: any) => <li key={m.name + m.line} className="font-mono">{m.name}<span className="text-soft">:{m.line}</span></li>)}</ul></div>}
+    {a.element && <div className="text-xs text-muted">{a.element} in <span className="font-mono">{a.path}:{a.line_start}-{a.line_end}</span>{a.bases?.length ? <> · extends <span className="font-mono">{a.bases.join(", ")}</span></> : null}</div>}
+    {(L.adrs.length > 0 || L.work_items.length > 0) && <div><div className="eyebrow mb-1">Decisions &amp; work items</div>
+      <ul className="space-y-1 text-xs">{[...L.adrs, ...L.work_items].map((x: any) => <li key={x.key} className="flex items-start gap-1.5">
+        <Badge tone={x.key.startsWith("adr:") ? "link" : "muted"}>{x.key.startsWith("adr:") ? "ADR" : x.provider || "task"}</Badge>
+        {x.url ? <a href={x.url} target="_blank" rel="noopener noreferrer" className="text-link hover:underline">{x.name}</a> : <span>{x.name}</span>}
+        {(x.status || x.state) && <span className="text-soft">· {x.status || x.state}</span>}</li>)}</ul></div>}
+    {L.documented.length > 0 && <div><div className="eyebrow mb-1">Drawn in documentation</div>
+      <ul className="space-y-0.5 text-xs">{L.documented.map((x: any) => <li key={x.edge}>{x.direction === "out" ? "→" : "←"} {x.kind} {x.other} <span className="text-soft">({x.diagram})</span></li>)}</ul></div>}
+    {d.data.mentions.length > 0 && <div><div className="eyebrow mb-1">Mentioned in docs &amp; code</div>
+      <ul className="space-y-1 text-xs">{d.data.mentions.map((m: any, i: number) => <li key={i} className="rounded border border-rule p-1.5">
+        <div className="flex items-center gap-1"><Badge tone={m.kind === "code" ? "muted" : "link"}>{m.kind}</Badge><span className="truncate font-mono">{m.path}:{m.line_start}</span></div>
+        <div className="mt-0.5 line-clamp-2 text-soft">{m.snippet}</div></li>)}</ul></div>}
+  </div>;
+}
+
+function ElementSearch({ projectId, onPick }: { projectId: string; onPick: (h: { key: string; parent_view: string }) => void }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const r = useApi<any[]>(["el-search", projectId, q], q.trim().length >= 2 ? `/projects/${projectId}/elements/search?q=${encodeURIComponent(q.trim())}` : null);
+  return <div className="relative">
+    <Input aria-label="Search the architecture" placeholder="Search services, code, tables…" className="!w-64 text-xs" value={q}
+      onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
+      onKeyDown={(e) => { if (e.key === "Enter" && r.data?.[0]) { onPick(r.data[0]); setOpen(false); } if (e.key === "Escape") setOpen(false); }} />
+    {open && q.trim().length >= 2 && <ul role="listbox" aria-label="Search results" className="absolute left-0 z-30 mt-1 max-h-80 w-96 overflow-auto rounded-lg border border-rule bg-card p-1 shadow-lift">
+      {r.data?.length === 0 && <li className="p-2 text-xs text-soft">Nothing matches.</li>}
+      {r.data?.map((h) => <li key={h.key}><button role="option" aria-selected={false} onMouseDown={() => { onPick(h); setOpen(false); }}
+        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-paper-2">
+        <Badge tone="muted">{h.kind}</Badge><span className="truncate">{h.name}</span><span className="ml-auto truncate font-mono text-[10px] text-soft">{h.path || h.technology}</span></button></li>)}
+    </ul>}
+  </div>;
 }
 
 function EvidencePanel({ projectId, sel, onClose, onZoom }: { projectId: string; sel: { kind: "node" | "edge"; data: NodeData | EdgeData } | null; onClose: () => void; onZoom: (k: string) => void }) {
@@ -44,6 +89,7 @@ function EvidencePanel({ projectId, sel, onClose, onZoom }: { projectId: string;
       {sel.kind === "node" && (d as NodeData).zoom && <Button size="sm" onClick={() => onZoom((d as NodeData).zoom!)}>Zoom in ›</Button>}
       {sel.kind === "node" && (d as NodeData).kind === "group" && <div><div className="eyebrow mb-1">Members</div>
         <ul className="list-disc pl-5 text-xs">{(d as NodeData).member_keys?.map((m) => <li key={m} className="font-mono">{m}</li>)}</ul></div>}
+      {sel.kind === "node" && key && <ElementDetail projectId={projectId} elementKey={key} />}
       {key && <div><div className="eyebrow mb-1">Evidence ({obs.data?.length ?? "…"} observations)</div>
         {obs.isLoading && <Spinner />}
         <ul className="space-y-2">{obs.data?.slice(0, 12).map((o) => <li key={o.id} className="rounded border border-rule p-2 text-xs">
@@ -70,6 +116,7 @@ function Canvas({ projectId }: { projectId: string }) {
   const [sel, setSel] = useState<{ kind: "node" | "edge"; data: NodeData | EdgeData } | null>(null);
   const [lint, setLint] = useState<{ ok: boolean; violations: { rule: string; detail: string }[] } | null>(null);
   const zooming = useRef(false);
+  const focus = useRef<string | null>(null);
   const moved = useRef<Record<string, { x: number; y: number }>>({});
 
   useEffect(() => {
@@ -98,6 +145,13 @@ function Canvas({ projectId }: { projectId: string }) {
           markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: e.focal ? "#eb6c36" : e.kind === "calls" ? "#2e5aa8" : "#4f5d75" } };
       });
       setNodes(ns); setEdges(es);
+      const f = focus.current ? ns.find((n) => n.id === focus.current) : undefined;
+      focus.current = null;
+      if (f) {
+        setSel({ kind: "node", data: f.data as unknown as NodeData });
+        requestAnimationFrame(() => rf.setCenter(f.position.x + NODE_W / 2, f.position.y + NODE_H / 2, { zoom: 1.4, duration: 300 }));
+        return;
+      }
       requestAnimationFrame(() => {
         if (zooming.current && !reduced()) {      // shared-element zoom: arrive slightly zoomed-in, then settle
           rf.setViewport({ x: 0, y: 0, zoom: 1.8 });
@@ -166,6 +220,9 @@ function Canvas({ projectId }: { projectId: string }) {
           {i < v.breadcrumbs.length - 1 ? <button className="text-link hover:underline" onClick={() => setSearch({ view: b.key })}>{b.title}</button> : <span className="font-semibold">{b.title}</span>}</span>)}
       </nav>
       <Badge tone="muted">L{v.level}</Badge>
+      <ElementSearch projectId={projectId} onPick={(h) => { focus.current = h.key; if (h.parent_view === viewKey) { const n = nodes.find((x) => x.id === h.key);
+        if (n) { setSel({ kind: "node", data: n.data as unknown as NodeData }); rf.setCenter(n.position.x + NODE_W / 2, n.position.y + NODE_H / 2, { zoom: 1.4, duration: 300 }); focus.current = null; return; } }
+        setSearch({ view: h.parent_view }); }} />
       <Badge tone={v.budget.primary <= v.budget.max ? "ok" : "warn"} title="primary nodes / budget">{v.budget.primary}/{v.budget.max} primary</Badge>
       {(v as any).hidden_edges > 0 && <Badge tone="muted" title={(v as any).hidden_reason}>{(v as any).hidden_edges} weak deps hidden</Badge>}
       {lint && <Badge tone={lint.ok ? "ok" : "bad"} title={lint.violations.map((x) => `${x.rule}: ${x.detail}`).join("\n")}>lint {lint.ok ? "pass" : `${lint.violations.length} issues`}</Badge>}
