@@ -1238,6 +1238,8 @@ class RepoAnalyzer:
             if f.suffix not in (".ts", ".tsx", ".js", ".jsx") or not str(f).startswith(str(src) + "/"):
                 continue
             parts = f.relative_to(src).parts
+            if {"test", "tests", "__tests__", "__mocks__", "mocks", "e2e", "stories"} & set(parts[:-1]) or ".test." in f.name or ".spec." in f.name:
+                continue                                   # tests are not architecture modules
             comp = parts[0] if len(parts) > 1 else "app"
             comps[comp] += 1
             for spec in imp_rx.findall(read(f)):
@@ -1295,7 +1297,11 @@ class RepoAnalyzer:
             s3 = self._store_host(s, r"s3|seaweed|minio|ceph|garage")
             for name, mod in sorted(cb.modules.items()):
                 members = [c for f, c in cb.classes.items() if cb.module_of.get(f) == name]
-                rel = _rel(self.root, members[0].path.parent) if members else ""
+                roots = [c.path.parent for c in members if c.package == mod.package]
+                if not roots and members:              # no class in the module root: the source dir of its package
+                    sub = members[0].package[len(mod.package):].count(".")
+                    roots = [members[0].path.parents[sub]]
+                rel = _rel(self.root, roots[0]) if roots else ""
                 ck = f"component:{base}/{name}"
                 self.r.node("static", ck, "component", mod.display, V, ref=rel, span={"path": rel},
                             attrs={"module": mod.package, "language": "java", "classes": len(members), "path": rel,
