@@ -6,8 +6,24 @@ import { api, download } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { DataTable } from "@/components/DataTable";
 import { SplitLayout } from "@/components/SplitLayout";
-import { CostEstimate } from "@/components/CostEstimate";
+import { modelLabel } from "@/components/CostEstimate";
 import { PageAsk } from "@/components/PageAsk";
+
+interface DocEstimateData { sections: number; outline: string[]; model?: string; reasoning_effort?: string; input_tokens?: number;
+  output_tokens?: { expected: number; high: number; max: number }; cost_usd: { expected: number | null; high: number | null; max: number | null } }
+const money = (v: number | null | undefined) => v == null ? "unpriced" : v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
+
+/** AI drafts are written section by section: show the planned outline for this project and its pre-flight cost. */
+function DocEstimate({ projectId, template }: { projectId: string; template: string }) {
+  const e = useApi<DocEstimateData>(["doc-estimate", projectId, template], `/projects/${projectId}/generated-docs/estimate?template=${encodeURIComponent(template)}`);
+  if (!e.data || !e.data.sections) return null;
+  const d = e.data;
+  return <details className="mt-1 text-[11px] text-soft">
+    <summary className="cursor-pointer" title={`Input ≈ ${(d.input_tokens ?? 0).toLocaleString()} tokens; output ≈ ${(d.output_tokens?.expected ?? 0).toLocaleString()} expected, ${(d.output_tokens?.max ?? 0).toLocaleString()} max`}>
+      {d.sections} sections · ≈ {money(d.cost_usd.expected)} · up to {money(d.cost_usd.high)} · {modelLabel(d.model ?? "")} · {d.reasoning_effort} reasoning</summary>
+    <ol className="mt-1 list-decimal pl-5">{d.outline.map((t) => <li key={t}>{t}</li>)}</ol>
+  </details>;
+}
 
 export function DocsPage({ projectId }: { projectId: string }) {
   const gen = useApi<any[]>(["gen", projectId], `/projects/${projectId}/generated-docs`);
@@ -31,7 +47,7 @@ export function DocsPage({ projectId }: { projectId: string }) {
             {types.data?.filter((t) => t.mode === m).map((t) => <option key={t.key} value={t.key}>{t.title}</option>)}</optgroup>)}</Select>
           <Button variant="primary" size="sm" disabled={generate.isPending} onClick={async () => { const r = await generate.mutateAsync(undefined as never); setSel(r.id); setDiff(r.diff ?? ""); }}>
             {generate.isPending ? (curType?.mode === "ai" ? "Drafting…" : "Generating…") : "Generate"}</Button></div>
-        {curType?.mode === "ai" && <CostEstimate className="mt-1" operation="doc_drafting" />}
+        {curType?.mode === "ai" && <DocEstimate projectId={projectId} template={curType.key} />}
         {curType && <p className="mt-1.5 text-xs text-muted">{curType.mode === "ai" && <Badge tone="link">AI draft</Badge>} {curType.description} <span className="text-soft">· for {curType.audience}</span></p>}
         <ErrorBox error={generate.error} />
         <ul className="mt-3 space-y-1 text-sm">{gen.data?.map((g) => <li key={g.id}><button className={"w-full rounded px-2 py-1 text-left hover:bg-paper-2 " + (sel === g.id ? "bg-paper-2" : "")} onClick={() => { setSel(g.id); setDiff(""); setDocSel(null); }}>

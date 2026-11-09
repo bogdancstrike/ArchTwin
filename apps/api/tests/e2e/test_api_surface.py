@@ -256,9 +256,17 @@ def test_documents_get_list_and_generated_docs(users, proj):
     assert any(x["id"] == up["id"] for x in vera.ok("GET", f"/projects/{pid}/documents"))
     assert vera.ok("GET", f"/projects/{pid}/documents/search", params={"q": "orders worker"})
     assert vera.post(f"/projects/{pid}/documents", files={"file": ("x.md", b"# x", "text/markdown")}).status_code == 403
-    for t in ("container-catalog", "interface-catalog"):
+    for t in ("container-catalog", "interface-catalog", "testing", "flows"):
         g = alice.ok("POST", f"/projects/{pid}/generated-docs", 201, json={"template": t})
         assert g["template"] == t and g["content"].startswith("#")
+        if t == "testing":
+            assert "## Endpoint test catalog" in g["content"] and "## Flow test scenarios" in g["content"]
+        if t == "flows":
+            assert "## Flow index" in g["content"]
+    est = alice.ok("GET", f"/projects/{pid}/generated-docs/estimate", params={"template": "prd"})      # pre-flight only: no model call
+    assert est["sections"] >= 10 and len(est["outline"]) == est["sections"] and "Problem and context" in est["outline"]
+    assert alice.ok("GET", f"/projects/{pid}/generated-docs/estimate", params={"template": "system-overview"})["sections"] == 0
+    assert any(t["key"] == "user-guide" and t["outline"] for t in alice.ok("GET", "/doc-types"))
     gen = vera.ok("GET", f"/projects/{pid}/generated-docs")
     gid = gen[0]["id"]
     full = vera.ok("GET", f"/projects/{pid}/generated-docs/{gid}")

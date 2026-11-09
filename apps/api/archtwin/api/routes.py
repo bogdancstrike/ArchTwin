@@ -614,7 +614,16 @@ async def document_upload(file: UploadFile = File(...), c: RequestContext = Depe
 @r.get("/doc-types", tags=["documents"])
 async def doc_types(c: RequestContext = Depends(get_ctx)):
     """Document types the Docs tab can generate (evidence = deterministic and cited; ai = drafted from cited evidence)."""
-    return [{"key": d.key, "title": d.title, "audience": d.audience, "description": d.description, "mode": d.mode} for d in DOC_TYPES.values()]
+    return [{"key": d.key, "title": d.title, "audience": d.audience, "description": d.description, "mode": d.mode,
+             "outline": [s.title.format(feature="<each functional area>") for s in d.sections]} for d in DOC_TYPES.values()]
+
+
+@r.get("/projects/{project_id}/generated-docs/estimate", tags=["documents"])
+async def gen_estimate(template: str, c: RequestContext = Depends(project_ctx)):
+    """Pre-flight cost of generating one document (AI drafts: sections planned for this project x per-section estimate)."""
+    await flags.require(c, "module.documentation-engine")
+    await require(c, "document", "generate")
+    return await docengine.estimate(c, template)
 
 
 @r.get("/projects/{project_id}/generated-docs", tags=["documents"])
