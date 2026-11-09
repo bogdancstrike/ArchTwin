@@ -12,10 +12,11 @@ export interface FilterDef { key: string; label: string; options: [string, strin
 
 /** Server-side table: every list in the UI uses this contract (page, page_size, q, sort, dir + endpoint filters). */
 export function DataTable<T>({ queryKey, endpoint, columns, rowKey, filters = [], defaultSort = "", defaultDir = "desc", searchPlaceholder = "Search",
-  onRowClick, selected, empty = "Nothing here yet.", extraParams = {}, toolbar }: {
+  onRowClick, selected, empty = "Nothing here yet.", extraParams = {}, toolbar, onFiltersChange }: {
   queryKey: unknown[]; endpoint: string; columns: Column<T>[]; rowKey: (r: T) => string; filters?: FilterDef[]; defaultSort?: string;
   defaultDir?: "asc" | "desc"; searchPlaceholder?: string; onRowClick?: (r: T) => void; selected?: string | null; empty?: ReactNode;
   extraParams?: Record<string, string | undefined>; toolbar?: ReactNode;
+  onFiltersChange?: (filters: Record<string, string>) => void;          // e.g. exports that follow the visible filters
 }) {
   const [page, setPage] = useState(1);
   const [size, setSize] = useState<number>(DEFAULT_PAGE_SIZE);
@@ -25,6 +26,7 @@ export function DataTable<T>({ queryKey, endpoint, columns, rowKey, filters = []
   const [dir, setDir] = useState<"asc" | "desc">(defaultDir);
   const [vals, setVals] = useState<Record<string, string>>({});
   useEffect(() => { const t = setTimeout(() => { setQ(typed.trim()); setPage(1); }, 250); return () => clearTimeout(t); }, [typed]);
+  useEffect(() => { onFiltersChange?.(vals); }, [vals, onFiltersChange]);
   const params = new URLSearchParams(Object.entries({ page: String(page), page_size: String(size), q, sort, dir, ...vals, ...extraParams })
     .filter((e): e is [string, string] => !!e[1]));
   const res = useApi<Page<T>>([...queryKey, params.toString()], `${endpoint}${endpoint.includes("?") ? "&" : "?"}${params}`, { keepPrevious: true });

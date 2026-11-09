@@ -93,6 +93,32 @@ paths:
                   job_id: {type: string}
                   state: {type: string, enum: [queued]}
         '403': {$ref: '#/components/responses/Forbidden'}
+  /projects/{projectId}/export/{resource}:
+    get:
+      summary: Export a page (or one item of it) as Markdown, Word, PDF or a ZIP bundle; audited as export.{resource}
+      operationId: exportResource
+      description: |
+        Same feature flag and view permission as the page (docs need document:export). Markdown is the canonical format
+        (diagrams as Mermaid); DOCX/PDF render it; ZIP holds every item as Markdown, the combined document in all three
+        formats and a manifest.json with provenance (project, snapshot, generated_at, source revisions).
+      parameters:
+        - {$ref: '#/components/parameters/ProjectId'}
+        - {in: path, name: resource, required: true, schema: {type: string, enum: [architecture, flows, drift, decisions, docs]}}
+        - {in: query, name: format, schema: {type: string, enum: [md, docx, pdf, zip], default: md}}
+        - {in: query, name: id, description: 'one flow id, ADR id, drift finding id or generated document id', schema: {type: string}}
+        - {in: query, name: status, description: drift only, schema: {type: string}}
+        - {in: query, name: verdict, description: drift only, schema: {type: string}}
+        - {in: query, name: severity, description: drift only, schema: {type: string}}
+      responses:
+        '200':
+          description: The file (Content-Disposition attachment; {project-slug}-{resource}-{date}.{ext})
+          content:
+            text/markdown: {schema: {type: string}}
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document: {schema: {type: string, format: binary}}
+            application/pdf: {schema: {type: string, format: binary}}
+            application/zip: {schema: {type: string, format: binary}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {description: Export too large (narrow it with filters or one item)}
   /home:
     get:
       summary: Personal cross-project overview (only projects the caller may view; each read under its own RLS context)
